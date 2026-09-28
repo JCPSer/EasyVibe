@@ -1,5 +1,7 @@
-# EasyVibe 架构分析提示词 v2.1
+# EasyVibe 架构分析提示词 v2.2
 
+> v2.2 变更：**恢复 concerns 问题提名**——v2 重写时从格式规范 5.1 丢失的回归（架构级与模块级 health 各提名 ≤3 条 {severity: critical/high, finding 现状, suggestion 建议}）；fixtures 增加 concerns 存在性检查（警告级，防再次回归）。
+>
 > v2.1 变更（依据 hover-client 试点实证，见 pilot-report-v2.md）：
 > ① 已存在文件判定改三分类并记录 decision_reason；② 明确 arch_health 事件产出来源；
 > ③ 区分"生长序"与"存储序"；④ 追加顺序落成显式 emit_order.json manifest；
@@ -115,7 +117,8 @@ percent 按阶段权重：init 0% → scanning 10% → clustering 35% → module
 
 - `files` glob 精确化（保证整体覆盖率 >90%）
 - `key_entries`：关键入口（file/symbol/kind），能让人按图索骥进入代码
-- 模块级 `health`：score(0-100)、coupling、complexity、churn、decay_flags、review_note，依据是代码结构、依赖密度、git 历史
+- 模块级 `health`：score(0-100)、coupling、complexity、churn、decay_flags、review_note、concerns，依据是代码结构、依赖密度、git 历史
+- `concerns`（问题提名）：至多 3 条最值得关注的问题，按 severity 排序：`{severity: critical/high, finding: 一句话现状, suggestion: 一句话建议}`；宁缺毋滥，没有问题就给空数组，不硬凑。finding/suggestion 禁止"建议优化"式空话，必须具体到模块/机制
 
 **health 评分 rubric（随 worker prompt 下发，防口径漂移）**：
 
@@ -143,7 +146,7 @@ percent 按阶段权重：init 0% → scanning 10% → clustering 35% → module
 ### 6. health（串行收尾）
 
 - 汇总各模块 health，做全局校准：只允许收紧不允许放松（例如两个模块互相引用形成环，两端 coupling 不得低于 medium）
-- 架构级 health 由 orchestrator 评估后写入 `parts/_arch_health.json`（唯一产出来源，append-log 时作为 `arch_health` 事件携带），评估跨模块耦合形态、分层合理性、逆向依赖密度、职责重叠与缺失
+- 架构级 health 由 orchestrator 评估后写入 `parts/_arch_health.json`（唯一产出来源，append-log 时作为 `arch_health` 事件携带），评估跨模块耦合形态、分层合理性、逆向依赖密度、职责重叠与缺失；**同时给出架构级 concerns**（≤3 条，字段与模块级相同），架构级问题天然优先于任何模块级问题
 - **禁止取模块分的平均**，模块全绿 ≠ 架构健康，必须独立判断
 - 阶段结束置 `phase=health, percent=90`
 
@@ -177,6 +180,7 @@ easyvibe-map finalize       # 汇总(层序归一) → 全量 Schema 校验 → 
 - responsibility 一句话说清"做什么"，不超过 40 字
 - key_entries 要能让人按图索骥进入代码
 - 没有依赖关系的模块 dependencies 给空数组，不要编造
+- concerns 至多 3 条、severity 只能取 critical/high；finding/suggestion 各一句话；宁缺毋滥，没有问题就空数组
 
 ## 自检清单（finalize 前逐项确认）
 
@@ -185,6 +189,7 @@ easyvibe-map finalize       # 汇总(层序归一) → 全量 Schema 校验 → 
 - [ ] modules[].dependencies 与 edges[] 完全一致
 - [ ] layers[].order 从 0 连续递增，且 layers[] 存储顺序为 order 升序（与生长序无关）
 - [ ] 已给出顶层架构级 health，且不是模块分的简单平均
+- [ ] 架构级与每模块 concerns 不超过 3 条且 severity 合法（宁缺毋滥，允许空数组，但 decay_flags 非空时架构级不应为空）
 - [ ] 所有枚举值合法
 - [ ] 模块 files glob 对代码文件覆盖率 >90%
 - [ ] growth.log 重放与 map.json 一致，parts/ 与日志一致

@@ -1,8 +1,12 @@
 # hover-client v2.1 试点验收 fixtures
 
-提示词 `easyvibe-map-prompt-v2.1.md` 的实证基线。2026-09-29 在 hover-client
+提示词 `easyvibe-map-prompt-v2.1.md` 的实证基线（现已被 `easyvibe-map-prompt-v2.2.md` 取代：
+v2.2 恢复 concerns 问题提名并新增本 fixtures 的第 9 项 WARN 检查）。2026-09-29 在 hover-client
 （Flutter/Dart，308 Dart 文件，144,389 LOC）上按 v2 全流程真实执行产出，
 执行中发现的问题与修订依据见 `pilot-report-v2.md`。
+
+注意：本 fixtures 的 expected/map.json 是 v2.1 试点产物，**不含 concerns 字段**——
+第 9 项检查对它输出 WARN 是预期行为；用 v2.2 重跑后 WARN 应消失。
 
 ## 内容
 

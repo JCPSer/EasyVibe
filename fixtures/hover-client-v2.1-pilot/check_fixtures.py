@@ -13,8 +13,10 @@
   5. 覆盖率：map.json 的 files glob 对 REPO_ROOT/lib 代码文件覆盖率 >90%
   6. 确定性回归：按 map.json 的模块 files globs 重算 lib/ 内 import 聚合，
      与 expected/edges_computed.json 完全一致（lib/ 代码未变时不得漂移）
+  9. concerns 存在性（警告级，不阻断）：架构级 decay_flags 非空时 concerns 不应为空；
+     全模块无 concerns 时告警（防"问题提名"步骤再被改丢）
 
-退出码: 0 = 全部通过；1 = 存在失败项（逐项打印 FAIL 原因）。
+退出码: 0 = 全部通过；1 = 存在失败项（逐项打印 FAIL 原因）。WARN 不影响退出码。
 """
 import json, os, re, sys, fnmatch, collections
 
@@ -106,6 +108,17 @@ def main():
                 for k, v in json.load(open(os.path.join(EXP, 'edges_computed.json'))).items()}
     check('edges deterministic regression', dict(edges_live) == expected,
           f'live={len(edges_live)} expected={len(expected)}' if dict(edges_live) != expected else '')
+
+    # 9. concerns 存在性（v2.2 起；警告级不阻断——存量 fixtures 为试点产物，重跑后应非空）
+    arch_concerns = m.get('health', {}).get('concerns') or []
+    mod_concerns = sum(1 for mod in m.get('modules', []) if mod.get('health', {}).get('concerns'))
+    warns = []
+    if m.get('health', {}).get('decay_flags') and not arch_concerns:
+        warns.append('架构级 decay_flags 非空但 concerns 为空（问题清单将降级为兜底模式）')
+    if mod_concerns == 0:
+        warns.append('所有模块均无 concerns')
+    if warns:
+        print(f'[WARN] concerns presence — {"; ".join(warns)}')
 
     print()
     if fails:

@@ -2,9 +2,9 @@
   "version": "1.0",
   "meta": {
     "repo": "hover-client",
-    "generated_at": "2026-09-28T21:43:00+08:00",
-    "generator": "easyvibe-architect/kimi",
-    "description": "Hover 口语练习 Flutter 客户端：录音、评测提交、报告渲染与更新检查，经 core-auth-service 网关与后端交互。",
+    "generated_at": "2026-09-29T00:00:00+08:00",
+    "generator": "easyvibe-architect/deepseek-v4.1-flash",
+    "description": "Hover 英语口语练习 Flutter 客户端：考试会话与录音评测、报告生成与导出、账户订阅、练习训练，经 core-auth-service 网关与后端交互。",
     "languages": ["Dart"],
     "loc": 144389,
     "map_freshness": "fresh"
@@ -14,37 +14,37 @@
       "id": "app-entry",
       "name": "应用装配层",
       "order": 0,
-      "description": "进程入口、运行环境校验与服务组装（组合根），main_<env>.dart 按环境锁定启动"
+      "description": "进程入口与组合根：main_<env>.dart 按编译期环境启动，hover_app.dart 手工装配全部服务并注入界面树"
     },
     {
       "id": "presentation",
       "name": "界面呈现层",
       "order": 1,
-      "description": "桌面/移动页面、通用组件、主题、路由常量、文案与 HTML/报告文档渲染，直接调用应用服务"
+      "description": "桌面/移动页面与通用组件、主题、用户文案与路由常量、HTML 文档渲染，直接调用应用服务与网关"
     },
     {
       "id": "application",
       "name": "应用服务层",
       "order": 2,
-      "description": "考试会话、评测提交、报告、账户、练习训练等领域流程编排与领域模型"
+      "description": "考试会话编排、评测提交、报告生成、账户认证、练习训练等领域流程编排与领域模型"
     },
     {
       "id": "shared-state",
       "name": "共享状态层",
       "order": 3,
-      "description": "应用偏好设置、外壳导航状态与桌面设置操作，被各功能模块共享"
+      "description": "跨功能共享的应用偏好、桌面设置操作与外壳导航状态"
     },
     {
       "id": "infrastructure",
       "name": "基础设施层",
       "order": 4,
-      "description": "网关 HTTP 客户端、音频采集播放、本地文件存储与平台系统能力（更新/日志/诊断/遥测）"
+      "description": "网关 HTTP 客户端与 wire 契约、音频采集播放、本地文件存储与平台系统能力（更新/日志/诊断/遥测）"
     },
     {
       "id": "foundation",
       "name": "基础支撑层",
       "order": 5,
-      "description": "编译期环境配置与多语言生成资源，无任何库内依赖"
+      "description": "编译期环境配置与多语言生成资源，零库内依赖的叶子层"
     }
   ],
   "modules": [
@@ -52,9 +52,12 @@
       "id": "app-composition",
       "name": "应用装配",
       "layer": "app-entry",
-      "responsibility": "应用启动引导、运行环境校验与服务组装根",
+      "responsibility": "应用启动引导、运行环境校验与全部服务的组合根装配",
       "files": [
-        "lib/main*.dart",
+        "lib/main.dart",
+        "lib/main_local.dart",
+        "lib/main_staging.dart",
+        "lib/main_production.dart",
         "lib/app/hover_app.dart",
         "lib/app/composition/**",
         "lib/app/local_test_auto_login_policy.dart",
@@ -66,86 +69,248 @@
         { "file": "lib/app/hover_app.dart", "symbol": "HoverApp", "kind": "class" },
         { "file": "lib/app/composition/desktop_feature_services.dart", "symbol": "DesktopFeatureServices", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "reporting", "account-auth", "practice-training", "app-state", "audio-media", "gateway-network", "local-storage", "system-services", "shared-foundation"],
+      "dependencies": [
+        "exam-core",
+        "practice-training",
+        "reporting",
+        "shared-ui",
+        "app-state",
+        "device-services",
+        "shared-foundation",
+        "account-auth",
+        "desktop-ui",
+        "gateway-network"
+      ],
+      "health": {
+        "score": 63,
+        "coupling": "high",
+        "complexity": "high",
+        "churn": "medium",
+        "decay_flags": ["god_module", "coupling_high", "circular_dep"],
+        "review_note": "hover_app.dart 单文件 1343 行、23 个可选构造参数与 43 个 late final 服务字段，生产路径下无参构造即自行 new 出全部依赖，是 12 个模块中依赖面最宽的一个（出边 10 条）；与界面层构成双向依赖（装配 MainLayout，而 main_layout/desktop_main_layout 又回引 DesktopFeatureServices）。近 90 天 79 次文件改动。建议按功能域把组装逻辑拆成多个 composition 单元，并把 DesktopFeatureServices 容器下移到应用层，界面只接收抽象。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "hover_app.dart 1343 行内手工 new 出 43 个服务，是全库唯一的组装点，任何新服务都必须改这一个文件。",
+            "suggestion": "按域拆成 account/exam/reporting/practice 等多个 composition 单元，hover_app.dart 只保留编排与生命周期策略。"
+          },
+          {
+            "severity": "high",
+            "finding": "组合根与界面层互为依赖：组合根装配 MainLayout，而 main_layout.dart:10 与 desktop_main_layout.dart:10 又反向 import app/composition/desktop_feature_services.dart。",
+            "suggestion": "把 DesktopFeatureServices 容器移到应用层的独立文件，界面只接收注入的抽象接口，断开组合根与界面层之间的环。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop-ui",
+      "name": "桌面端界面",
+      "layer": "presentation",
+      "responsibility": "桌面端页面、工作区与桌面专用组件的呈现与交互",
+      "files": ["lib/views/desktop/**", "lib/widgets/desktop/**"],
+      "key_entries": [
+        { "file": "lib/views/desktop/shell/shell_layout.dart", "symbol": "DesktopMainLayout", "kind": "class" },
+        { "file": "lib/views/desktop/exam/exam_layout.dart", "symbol": "ExamView", "kind": "class" },
+        { "file": "lib/views/desktop/result/result_layout.dart", "symbol": "ResultView", "kind": "class" },
+        { "file": "lib/views/desktop/setup/setup_layout.dart", "symbol": "SetupView", "kind": "class" },
+        { "file": "lib/views/desktop/reports/reports_layout.dart", "symbol": "ReportsManagerView", "kind": "class" },
+        { "file": "lib/widgets/desktop/desktop_view_topology.dart", "symbol": "DesktopPageTopology", "kind": "class" }
+      ],
+      "dependencies": [
+        "shared-ui",
+        "app-state",
+        "exam-core",
+        "reporting",
+        "account-auth",
+        "practice-training",
+        "shared-foundation",
+        "device-services",
+        "gateway-network",
+        "app-composition"
+      ],
+      "health": {
+        "score": 58,
+        "coupling": "high",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": ["coupling_high", "layer_violation", "god_module"],
+        "review_note": "83 文件 22917 行，近 90 天 449 次文件改动为全库最热；采用「聚合文件 + part 子文件」组织（desktop_exam_view/desktop_result_view 各挂 5-8 个 part），presenter 只是 _ViewState 的 extension，业务逻辑仍写在 State 内。视图直接 import 并调用 application 服务与 infrastructure/network 的 DTO，甚至按需捕获 GatewayException，没有视图模型隔离层。建议先收敛对网关 DTO 的直接依赖，再把 part 化的 presenter 提升为独立视图模型。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "视图 State 直接调用 application 服务与网关客户端类型，presenter 仅为 State 的 extension，业务逻辑与 UI 状态无法分别测试。",
+            "suggestion": "把 result/exam/reports 的 presenter 提升为独立 ChangeNotifier 视图模型，视图只消费状态快照。"
+          },
+          {
+            "severity": "high",
+            "finding": "desktop_main_layout.dart:10 反向 import 组合根 app/composition/desktop_feature_services.dart（presentation → app-entry）。",
+            "suggestion": "将桌面服务容器移到应用层，通过构造参数以接口形式注入。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mobile-ui",
+      "name": "移动端界面",
+      "layer": "presentation",
+      "responsibility": "移动端页面、场景壳与移动专用组件的呈现与交互",
+      "files": ["lib/views/mobile/**", "lib/widgets/mobile/**"],
+      "key_entries": [
+        { "file": "lib/views/mobile/mobile_main_layout.dart", "symbol": "MobileMainLayout", "kind": "class" },
+        { "file": "lib/views/mobile/mobile_exam_page.dart", "symbol": "MobileExamPage", "kind": "class" },
+        { "file": "lib/views/mobile/mobile_result_view.dart", "symbol": "ResultView", "kind": "class" },
+        { "file": "lib/views/mobile/mobile_account_view.dart", "symbol": "MobileAccountView", "kind": "class" },
+        { "file": "lib/widgets/mobile/mobile_scene_shell.dart", "symbol": "MobileSceneSwitcherSheet", "kind": "class" }
+      ],
+      "dependencies": [
+        "shared-ui",
+        "app-state",
+        "exam-core",
+        "reporting",
+        "account-auth",
+        "practice-training",
+        "shared-foundation",
+        "device-services",
+        "gateway-network"
+      ],
+      "health": {
+        "score": 58,
+        "coupling": "high",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": ["coupling_high", "god_module"],
+        "review_note": "33 文件 24700 行，单文件均值 748 行：mobile_exam_page.dart 3860 行、mobile_editorial_reports_view.dart 2513 行，考试流程、练习与 UI 状态集中在同一 State；近 90 天 352 次文件改动。移动端与桌面端各自实现了一套页面与状态逻辑，共享的只有 shared-ui 的组件与展示映射，改动常需双端同步。建议先拆分 mobile_exam_page 的 State，再评估把双端共有的会话展示逻辑上移到 shared-ui。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "mobile_exam_page.dart 单文件 3860 行（全库最大），考试/练习流程与 UI 状态混在一个 State 中。",
+            "suggestion": "按答题、准备、交卷契约把该文件拆成独立页面与视图模型，状态提升到单一 controller。"
+          },
+          {
+            "severity": "high",
+            "finding": "桌面端与移动端各自实现一套页面逻辑，shared-ui 只沉淀了组件与文案，行为改动需要双端重复实现。",
+            "suggestion": "把双端共有的会话/报告展示逻辑抽到 shared-ui 的展示映射层，两端只保留布局差异。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "shared-ui",
+      "name": "共享界面资源",
+      "layer": "presentation",
+      "responsibility": "主题、用户文案、路由常量、展示映射与跨端公共组件",
+      "files": [
+        "lib/views/main_layout.dart",
+        "lib/widgets/*.dart",
+        "lib/theme/**",
+        "lib/utils/**",
+        "lib/presentation/**",
+        "lib/app/app_strings.dart",
+        "lib/app/hover_app_route.dart",
+        "lib/app/device_route_middleware.dart",
+        "lib/app/scenario_info_resources.dart",
+        "lib/application/documents/**",
+        "lib/infrastructure/documents/**"
+      ],
+      "key_entries": [
+        { "file": "lib/views/main_layout.dart", "symbol": "MainLayout", "kind": "class" },
+        { "file": "lib/app/app_strings.dart", "symbol": "AppStrings", "kind": "class" },
+        { "file": "lib/app/hover_app_route.dart", "symbol": "HoverAppRoute", "kind": "route" },
+        { "file": "lib/theme/app_theme.dart", "symbol": "AppTheme", "kind": "class" },
+        { "file": "lib/widgets/exam_report_viewer.dart", "symbol": "ExamReportViewer", "kind": "class" },
+        { "file": "lib/presentation/reporting/report_html_document.dart", "symbol": "ReportHtmlDocument", "kind": "class" },
+        { "file": "lib/app/device_route_middleware.dart", "symbol": "DeviceRouteMiddleware", "kind": "class" }
+      ],
+      "dependencies": [
+        "exam-core",
+        "reporting",
+        "shared-foundation",
+        "app-state",
+        "device-services",
+        "account-auth",
+        "practice-training",
+        "desktop-ui",
+        "mobile-ui",
+        "gateway-network",
+        "app-composition"
+      ],
       "health": {
         "score": 60,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
-        "decay_flags": ["god_module", "coupling_high"],
-        "review_note": "hover_app.dart 约 1343 行手工组装约 40 个服务，近 3 个月 50 次提交为全库最热；建议按功能域拆分为多个 composition 模块或引入显式 DI 容器，并把 iOS 延迟结算等生命周期策略抽出。"
-      }
-    },
-    {
-      "id": "ui-shell",
-      "name": "界面外壳",
-      "layer": "presentation",
-      "responsibility": "页面路由、桌面/移动视图组件与文档报告渲染",
-      "files": [
-        "lib/views/**",
-        "lib/widgets/**",
-        "lib/theme/**",
-        "lib/utils/**",
-        "lib/presentation/**",
-        "lib/application/documents/**",
-        "lib/infrastructure/documents/**",
-        "lib/app/app_strings.dart",
-        "lib/app/hover_app_route.dart",
-        "lib/app/device_route_middleware.dart",
-        "lib/app/scenario_info_resources.dart"
-      ],
-      "key_entries": [
-        { "file": "lib/views/main_layout.dart", "symbol": "MainLayout", "kind": "class" },
-        { "file": "lib/app/hover_app_route.dart", "symbol": "HoverAppRoute", "kind": "route" },
-        { "file": "lib/app/app_strings.dart", "symbol": "AppStrings", "kind": "class" },
-        { "file": "lib/theme/app_theme.dart", "symbol": "AppTheme", "kind": "class" },
-        { "file": "lib/widgets/html_document_frame.dart", "symbol": "HtmlDocumentFrame", "kind": "class" }
-      ],
-      "dependencies": ["app-composition", "exam-core", "reporting", "account-auth", "practice-training", "app-state", "gateway-network", "local-storage", "system-services", "shared-foundation"],
-      "health": {
-        "score": 68,
-        "coupling": "high",
-        "complexity": "high",
-        "churn": "high",
-        "decay_flags": ["coupling_high", "layer_violation"],
-        "review_note": "约 4.5 万行、110+ 视图直接调用各应用服务（无 ViewModel 隔离），setup/main_layout/result 等页面变更极热；main_layout 反向 import hover_app.dart 构成与装配层的环。建议为桌面/移动视图引入薄 ViewModel 层收敛服务直连，并断开对组合根的引用。"
+        "decay_flags": ["responsibility_overlap", "coupling_high", "layer_violation"],
+        "review_note": "58 文件 23384 行，被 12 个模块中的 10 个依赖（入边条数全库第一：desktop-ui 91 + mobile-ui 115 + 其余约 50），同时混合了主题、用户文案、路由常量、场景说明 HTML、展示映射与跨端公共组件六类职责。app_strings.dart(2318 行) 与 theme/app_theme.dart 被 5 个下层模块反向 import 约 32 处，是逆向依赖的最大来源。建议把文案、路由常量与主题下沉到 foundation 层独立资源模块，展示映射与文档渲染保留在本层。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "app_strings.dart(2318 行) 与 theme/app_theme.dart 定义在界面层，却被 exam-core、reporting、account-auth、practice-training、app-state、device-services 反向 import 约 32 处。",
+            "suggestion": "把用户文案与主题下沉为 foundation 层的独立「资源与文案」模块，下层只依赖该模块而不依赖界面层。"
+          }
+        ]
       }
     },
     {
       "id": "exam-core",
       "name": "考试与评测核心",
       "layer": "application",
-      "responsibility": "考试会话编排、答题流程与评测提交管线",
+      "responsibility": "考试会话生命周期编排、答题流程、单题录音评测提交与评测状态机",
       "files": [
         "lib/application/exam/**",
         "lib/application/evaluation/**",
         "lib/domain/exam/**",
         "lib/domain/evaluation/**",
-        "lib/infrastructure/exam/**",
         "lib/models/**"
       ],
       "key_entries": [
         { "file": "lib/application/exam/exam_session_control_service.dart", "symbol": "ExamSessionControlService", "kind": "class" },
         { "file": "lib/application/exam/exam_flow_coordinator_service.dart", "symbol": "ExamFlowCoordinatorService", "kind": "class" },
-        { "file": "lib/application/evaluation/evaluation_submission_service.dart", "symbol": "EvaluationSubmissionService", "kind": "class" },
         { "file": "lib/application/exam/gateway_exam_plan_service.dart", "symbol": "GatewayExamPlanService", "kind": "class" },
-        { "file": "lib/domain/exam/exam_session_plan.dart", "symbol": "ExamSessionPlan", "kind": "class" }
+        { "file": "lib/application/evaluation/evaluation_pipeline_service.dart", "symbol": "EvaluationPipelineService", "kind": "class" },
+        { "file": "lib/domain/exam/exam_session_plan.dart", "symbol": "ExamSessionPlan", "kind": "class" },
+        { "file": "lib/domain/evaluation/question_async_state.dart", "symbol": "QuestionAsyncStateStore", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "reporting", "account-auth", "practice-training", "app-state", "audio-media", "gateway-network", "local-storage", "shared-foundation"],
+      "dependencies": [
+        "device-services",
+        "shared-ui",
+        "gateway-network",
+        "reporting",
+        "app-state",
+        "account-auth",
+        "shared-foundation",
+        "practice-training"
+      ],
       "health": {
-        "score": 64,
+        "score": 62,
         "coupling": "high",
         "complexity": "high",
-        "churn": "medium",
-        "decay_flags": ["circular_dep", "coupling_high", "layer_violation"],
-        "review_note": "与 reporting 双向引用（9/38 条 import）接近环状，评测阶段状态机在考试、评测、报告三处分散维护；评测服务反向 import AppStrings（ui-shell）。建议把评测状态机收敛为单一领域对象，用户文案经端口注入而非直引 UI 层。"
+        "churn": "high",
+        "decay_flags": ["god_module", "circular_dep", "coupling_high", "layer_violation"],
+        "review_note": "27 文件 13358 行、近 90 天 134 次改动，是全库最大的应用模块；exam 与 evaluation 互为文件级循环（question_context_service.dart:3 ↔ evaluation_result_materialization_service.dart:9），与 reporting 又构成 9/38 的双向强耦合。评测状态机分散在 4 个 domain stage 枚举（QuestionAsyncStage/ReportEvaluationStage/SummaryAsyncStage/SessionReportPhase）与 application 的多个驱动服务中。另有 14 处反向 import 界面层资源。建议先断开与 reporting 的回引，再把评测状态机收敛到单一所有者。",
+        "concerns": [
+          {
+            "severity": "critical",
+            "finding": "与 reporting 双向强耦合：exam-core→reporting 9 条 import、reporting→exam-core 38 条，报告模块实质读写了考试会话的内部状态与提交快照。",
+            "suggestion": "明确 exam-core 为会话生命周期唯一所有者，reporting 只依赖其暴露的只读快照接口，禁止反向 import。"
+          },
+          {
+            "severity": "high",
+            "finding": "exam 与 evaluation 存在文件级循环依赖（question_context_service ↔ evaluation_result_materialization_service），且评测状态机跨 4 个 stage 枚举与多个驱动服务分散维护。",
+            "suggestion": "把评测状态迁移收敛到单一领域对象，exam 侧只通过端口查询评测结果。"
+          },
+          {
+            "severity": "high",
+            "finding": "application/exam 反向 import 界面层资源 14 处（app_strings.dart 用户文案、theme/app_theme.dart 主题、hover_app_route.dart 路由常量）。",
+            "suggestion": "用户文案改由调用方注入，主题与路由常量下沉到 foundation 层。"
+          }
+        ]
       }
     },
     {
       "id": "reporting",
       "name": "报告中心",
       "layer": "application",
-      "responsibility": "考后报告生成、索引、刷新补偿与导出操作",
+      "responsibility": "考后报告索引、数据构建、生成、评测请求补偿与导出操作",
       "files": [
         "lib/application/reporting/**",
         "lib/domain/reporting/**",
@@ -153,54 +318,88 @@
       ],
       "key_entries": [
         { "file": "lib/application/reporting/report_generation_service.dart", "symbol": "ReportGenerationService", "kind": "class" },
-        { "file": "lib/application/reporting/report_index_service.dart", "symbol": "ReportIndexService", "kind": "class" },
+        { "file": "lib/application/reporting/report_evaluation_request_service.dart", "symbol": "ReportEvaluationRequestService", "kind": "class" },
+        { "file": "lib/application/reporting/report_compensation_service.dart", "symbol": "ReportCompensationService", "kind": "class" },
         { "file": "lib/application/reporting/report_action_service.dart", "symbol": "ReportActionService", "kind": "class" },
         { "file": "lib/infrastructure/reporting/exam_sessions_index.dart", "symbol": "ExamSessionsIndex", "kind": "class" },
-        { "file": "lib/domain/reporting/training_report.dart", "symbol": "TrainingReport", "kind": "class" }
+        { "file": "lib/domain/reporting/report_evaluation_state.dart", "symbol": "ReportEvaluationStateStore", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "account-auth", "app-state", "gateway-network", "local-storage", "system-services"],
+      "dependencies": [
+        "exam-core",
+        "shared-ui",
+        "device-services",
+        "gateway-network",
+        "account-auth",
+        "app-state"
+      ],
       "health": {
-        "score": 63,
+        "score": 58,
         "coupling": "high",
         "complexity": "high",
         "churn": "medium",
-        "decay_flags": ["circular_dep", "coupling_high", "layer_violation"],
-        "review_note": "对 exam-core 的 38 条 import 是全库最强单向边，实质上共享考试会话的生命周期与提交状态；infrastructure/reporting/report_action_adapters 反向 import 应用服务。建议明确报告模块只依赖 exam-core 暴露的只读快照接口，打断双向耦合。"
+        "decay_flags": ["coupling_high", "circular_dep", "layer_violation", "god_module"],
+        "review_note": "17 文件 8415 行，对 exam-core 的 38 条 import 是全库最强单向边；report_evaluation_request_service.dart 单文件 2259 行承载评测请求状态机的绝大部分迁移点，report_compensation_service 再叠加一层重试补偿。infrastructure/reporting 与 domain/reporting 被放在同一模块，其中 exam_sessions_index.dart 反向 import presentation/reporting/report_html_document.dart，使存储索引依赖展示文档。建议按「请求状态机 / 索引 / 导出动作」拆分该模块，并把展示文档组装从索引中剥离。",
+        "concerns": [
+          {
+            "severity": "critical",
+            "finding": "report_evaluation_request_service.dart 单文件 2259 行集中了评测请求状态机的 20+ 处状态写入，是评测链路唯一执行体，无法局部测试或替换。",
+            "suggestion": "把状态迁移抽成显式状态机对象，服务只负责 I/O 与调度。"
+          },
+          {
+            "severity": "high",
+            "finding": "反向依赖界面/展示层 11 处，其中 infrastructure/reporting/exam_sessions_index.dart:12 反向 import presentation/reporting/report_html_document.dart，存储索引依赖展示文档。",
+            "suggestion": "把报告 HTML 组装移出索引路径，由应用层在读取索引后自行组装。"
+          }
+        ]
       }
     },
     {
       "id": "account-auth",
       "name": "账户与认证",
       "layer": "application",
-      "responsibility": "账户登录会话、资料同步与在线状态协调",
+      "responsibility": "登录会话与令牌刷新、资料同步、订阅权益目录与登录表单状态",
       "files": [
         "lib/application/account/**",
         "lib/domain/account/**",
         "lib/domain/subscription/**",
-        "lib/infrastructure/account/**",
-        "lib/controllers/**"
+        "lib/controllers/**",
+        "lib/infrastructure/account/**"
       ],
       "key_entries": [
         { "file": "lib/application/account/account_state_service.dart", "symbol": "AccountStateService", "kind": "class" },
         { "file": "lib/application/account/account_session_coordinator_service.dart", "symbol": "AccountSessionCoordinatorService", "kind": "class" },
         { "file": "lib/infrastructure/account/auth_client.dart", "symbol": "AuthClient", "kind": "class" },
-        { "file": "lib/controllers/auth_form_controller.dart", "symbol": "AuthFormController", "kind": "class" }
+        { "file": "lib/controllers/auth_form_controller.dart", "symbol": "AuthFormController", "kind": "class" },
+        { "file": "lib/domain/subscription/subscription_catalog.dart", "symbol": "SubscriptionCatalog", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "reporting", "app-state", "gateway-network", "system-services", "shared-foundation"],
+      "dependencies": [
+        "gateway-network",
+        "shared-foundation",
+        "shared-ui",
+        "exam-core",
+        "device-services"
+      ],
       "health": {
-        "score": 74,
+        "score": 72,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
-        "decay_flags": ["layer_violation"],
-        "review_note": "会话协调与 iOS 延迟结算逻辑较清晰，但被 exam-core/reporting 广泛依赖且自身反向引用 AppStrings 与报告助手；建议把 account 提供的消息文案改为由调用方注入。"
+        "decay_flags": ["god_module", "layer_violation"],
+        "review_note": "10 文件 4435 行，会话协调与 iOS 延迟结算逻辑较清晰，被 exam-core/reporting/practice-training 稳定复用；主要问题是 auth_client.dart 单文件 1972 行同时承载登录、会话刷新、微信支付与结算状态，且本模块有 3 处反向 import AppStrings。近 90 天 48 次改动。建议把支付与结算相关类型从 auth_client 拆出独立文件。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "auth_client.dart 单文件 1972 行同时承载登录、会话刷新、微信支付结算与会话持久化四类职责。",
+            "suggestion": "按 auth / billing / storage 三个方向拆分该文件，支付契约独立成文件。"
+          }
+        ]
       }
     },
     {
       "id": "practice-training",
       "name": "练习与训练",
       "layer": "application",
-      "responsibility": "练习会话启停回放、训练阶段、发音分析与题库工作区",
+      "responsibility": "练习会话启停回放、训练阶段、发音分析洞察与题库工作区",
       "files": [
         "lib/application/practice/**",
         "lib/application/pronunciation/**",
@@ -211,27 +410,42 @@
         "lib/infrastructure/question_bank/**"
       ],
       "key_entries": [
-        { "file": "lib/application/practice/practice_session_starter_service.dart", "symbol": "PracticeSessionStarterService", "kind": "class" },
         { "file": "lib/application/practice/practice_workflow_service.dart", "symbol": "PracticeWorkflowService", "kind": "class" },
+        { "file": "lib/application/practice/practice_session_starter_service.dart", "symbol": "PracticeSessionStarterService", "kind": "class" },
         { "file": "lib/application/pronunciation/pronunciation_insights_service.dart", "symbol": "PronunciationInsightsService", "kind": "class" },
         { "file": "lib/application/question_bank/question_bank_workspace_service.dart", "symbol": "QuestionBankWorkspaceService", "kind": "class" },
         { "file": "lib/domain/pronunciation/pronunciation_assessment_analyzer.dart", "symbol": "PronunciationAssessmentAnalyzer", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "reporting", "account-auth", "app-state", "gateway-network", "local-storage", "system-services", "shared-foundation"],
+      "dependencies": [
+        "exam-core",
+        "gateway-network",
+        "reporting",
+        "account-auth",
+        "shared-ui",
+        "device-services",
+        "app-state"
+      ],
       "health": {
-        "score": 71,
+        "score": 72,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
-        "decay_flags": ["layer_violation"],
-        "review_note": "题库、发音、练习三个子域合置后边界尚可（题库经 repository 隔离），但对 exam-core 有 17 条 import 且训练恢复依赖会话目录结构；建议把训练恢复的领域模型从 exam 会话目录解耦，稳定后再考虑拆分为独立题库模块。"
+        "decay_flags": ["coupling_high", "layer_violation"],
+        "review_note": "19 文件 3461 行，题库、发音、练习三个子域合置后边界尚可（题库经 repository 隔离，domain 层为纯模型）；主要耦合是对 exam-core 的 17 条 import，训练恢复依赖考试会话的目录结构与报告元数据。近 90 天 66 次改动。建议先稳定训练恢复的领域模型，再评估拆出独立题库模块。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "对 exam-core 有 17 条 import，训练与练习的启动恢复直接依赖考试会话目录结构与报告元数据。",
+            "suggestion": "把训练恢复的领域模型从 exam 会话目录解耦，改用独立的恢复快照契约。"
+          }
+        ]
       }
     },
     {
       "id": "app-state",
       "name": "应用状态",
       "layer": "shared-state",
-      "responsibility": "应用偏好、外壳导航状态与桌面设置操作",
+      "responsibility": "跨功能共享的偏好读写、桌面设置操作与外壳导航状态",
       "files": [
         "lib/application/preferences/**",
         "lib/application/settings/**",
@@ -242,91 +456,67 @@
         { "file": "lib/application/shell/app_shell_state.dart", "symbol": "AppShellState", "kind": "class" },
         { "file": "lib/application/settings/desktop_settings_operations_service.dart", "symbol": "DesktopSettingsOperationsService", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "reporting", "local-storage", "system-services"],
+      "dependencies": ["shared-ui", "device-services", "exam-core", "reporting"],
       "health": {
-        "score": 74,
+        "score": 70,
         "coupling": "medium",
         "complexity": "low",
-        "churn": "medium",
+        "churn": "low",
         "decay_flags": ["layer_violation"],
-        "review_note": "作为共享状态被全库依赖属合理，但 app_preference_service/app_shell_state 反向 import exam-core 与 reporting 的领域类型，使共享层被功能层绑架；建议偏好模型只存原始值，领域映射上移到应用服务。"
+        "review_note": "6 文件 1371 行、近 90 天仅 12 次改动，是最稳定的应用模块；作为共享状态被界面层大量依赖（desktop-ui 22 + mobile-ui 40 + shared-ui 9）属合理，但自身反向 import 界面层与功能层 7 处（app_strings、hover_app_route、exam-core 与 reporting 的领域模型），使共享层被上下两层同时绑架。建议偏好模型只存原始值，领域映射上移到应用服务。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "共享状态层同时反向依赖界面层（AppStrings、HoverAppRoute）与功能层（exam-core、reporting 领域模型），共 7 处。",
+            "suggestion": "偏好只存原始标量，领域类型映射交由调用方完成，路由常量下沉到 foundation 层。"
+          }
+        ]
       }
     },
     {
       "id": "gateway-network",
       "name": "网关网络",
       "layer": "infrastructure",
-      "responsibility": "core-auth-service 网关 HTTP 客户端与契约定义",
-      "files": ["lib/infrastructure/network/**"],
+      "responsibility": "core-auth-service 网关 HTTP 客户端、wire 契约校验与考试资源下载",
+      "files": ["lib/infrastructure/network/**", "lib/infrastructure/exam/**"],
       "key_entries": [
         { "file": "lib/infrastructure/network/gateway_client.dart", "symbol": "GatewayClient", "kind": "class" },
-        { "file": "lib/infrastructure/network/credential_client.dart", "symbol": "CredentialClient", "kind": "class" },
-        { "file": "lib/infrastructure/network/http_endpoint.dart", "symbol": "HttpEndpoint", "kind": "class" },
-        { "file": "lib/infrastructure/network/evaluation_artifact_contract.dart", "symbol": "EvaluationArtifactContract", "kind": "interface" }
+        { "file": "lib/infrastructure/network/credential_client.dart", "symbol": "CredentialBroker", "kind": "class" },
+        { "file": "lib/infrastructure/network/evaluation_artifact_contract.dart", "symbol": "validateEvaluationArtifact", "kind": "function" },
+        { "file": "lib/infrastructure/network/question_content_contract.dart", "symbol": "validateQuestionDelivery", "kind": "function" },
+        { "file": "lib/infrastructure/exam/gateway_exam_plan_asset_loader.dart", "symbol": "GatewayExamPlanAssetDownload", "kind": "class" }
       ],
       "dependencies": ["exam-core", "reporting"],
       "health": {
-        "score": 76,
+        "score": 70,
         "coupling": "medium",
-        "complexity": "medium",
+        "complexity": "high",
         "churn": "medium",
-        "decay_flags": ["layer_violation"],
-        "review_note": "gateway_client.dart 近 3 个月 19 次提交较热；网络层反向 import exam-core/reporting 的领域模型作为请求/响应类型，属于分层错位。建议把网关契约（question_content/artifact contract）下沉为独立共享契约模块，领域层只做映射。"
+        "decay_flags": ["god_module", "layer_violation"],
+        "review_note": "10 文件 5943 行，网关访问集中在此层是优点；但 gateway_client.dart 单文件 4456 行承载全部 DTO 与静态接口方法，且网络层反向 import 领域模型（gateway_client.dart:1,14 → domain/reporting 的 training_report/exam_overall_review，evaluation_artifact_contract.dart:1 与 gateway_client.dart:15 → models/exam_question_item），使 wire 契约与领域模型互相锁定。近 90 天 40 次改动。建议把 wire 契约（question_content_contract / evaluation_artifact_contract / http_endpoint）下沉为共享契约模块。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "gateway_client.dart 单文件 4456 行（全库最大非 UI 文件），承载全部请求方法、DTO 与错误类型。",
+            "suggestion": "按域（evaluation / exam-plan / report / account）拆分为多个客户端文件，共用同一 http 底层。"
+          },
+          {
+            "severity": "high",
+            "finding": "网络层反向 import 领域模型（domain/reporting、models/exam_question_item），wire 契约与领域类型互相锁定，任何领域改动都会波及网关层。",
+            "suggestion": "抽取独立 contracts 模块存放 wire 契约，领域层只做映射，网关不再引用 domain。"
+          }
+        ]
       }
     },
     {
-      "id": "audio-media",
-      "name": "音频媒体",
+      "id": "device-services",
+      "name": "设备与系统服务",
       "layer": "infrastructure",
-      "responsibility": "录音采集、音频预处理与播放",
+      "responsibility": "录音播放与音频预处理、本地文件缓存，以及更新/日志/诊断/遥测/平台能力",
       "files": [
         "lib/application/audio/**",
-        "lib/infrastructure/audio/**"
-      ],
-      "key_entries": [
-        { "file": "lib/application/audio/audio_capture_service.dart", "symbol": "AudioCaptureService", "kind": "class" },
-        { "file": "lib/application/audio/audio_playback_service.dart", "symbol": "AudioPlaybackService", "kind": "class" },
-        { "file": "lib/infrastructure/audio/audio_preprocessor.dart", "symbol": "AudioPreprocessor", "kind": "class" },
-        { "file": "lib/infrastructure/audio/native_audio_recorder.dart", "symbol": "NativeAudioRecorder", "kind": "class" }
-      ],
-      "dependencies": ["system-services"],
-      "health": {
-        "score": 84,
-        "coupling": "low",
-        "complexity": "low",
-        "churn": "low",
-        "decay_flags": [],
-        "review_note": "职责单一、变更平稳，仅 exam_ding 依赖日志组件；保持现状即可。"
-      }
-    },
-    {
-      "id": "local-storage",
-      "name": "本地存储",
-      "layer": "infrastructure",
-      "responsibility": "会话进度、考试计划与报告的本地文件缓存",
-      "files": ["lib/infrastructure/storage/**"],
-      "key_entries": [
-        { "file": "lib/infrastructure/storage/app_data_paths.dart", "symbol": "AppDataPaths", "kind": "class" },
-        { "file": "lib/infrastructure/storage/local_cache_service.dart", "symbol": "LocalCacheService", "kind": "class" },
-        { "file": "lib/infrastructure/storage/answer_session_progress.dart", "symbol": "AnswerSessionProgress", "kind": "class" },
-        { "file": "lib/infrastructure/storage/durable_idempotency_key_store.dart", "symbol": "DurableIdempotencyKeyStore", "kind": "class" }
-      ],
-      "dependencies": ["exam-core", "gateway-network", "shared-foundation"],
-      "health": {
-        "score": 74,
-        "coupling": "medium",
-        "complexity": "medium",
-        "churn": "low",
-        "decay_flags": ["layer_violation"],
-        "review_note": "atomic_file_writer/idempotency 等基础件设计良好；但缓存读写直接复用 exam-core 的考试计划模型（8 条 import），存储层被领域模型反向锁定。建议以 JSON/字节接口隔离，领域侧负责序列化。"
-      }
-    },
-    {
-      "id": "system-services",
-      "name": "系统服务",
-      "layer": "infrastructure",
-      "responsibility": "应用更新、日志、崩溃诊断、遥测与平台启动器",
-      "files": [
+        "lib/infrastructure/audio/**",
+        "lib/infrastructure/storage/**",
         "lib/application/update/**",
         "lib/infrastructure/update/**",
         "lib/infrastructure/platform/**",
@@ -336,136 +526,171 @@
         "lib/shared/**"
       ],
       "key_entries": [
+        { "file": "lib/application/audio/audio_capture_service.dart", "symbol": "AudioCaptureService", "kind": "class" },
+        { "file": "lib/infrastructure/audio/audio_preprocessor.dart", "symbol": "AudioPreprocessor", "kind": "class" },
+        { "file": "lib/infrastructure/storage/app_data_paths.dart", "symbol": "AppDataPaths", "kind": "class" },
         { "file": "lib/application/update/app_update_service.dart", "symbol": "AppUpdateService", "kind": "class" },
-        { "file": "lib/infrastructure/update/app_update_client.dart", "symbol": "AppUpdateClient", "kind": "class" },
-        { "file": "lib/infrastructure/update/app_update_verifier.dart", "symbol": "AppUpdateVerifier", "kind": "class" },
         { "file": "lib/infrastructure/logging/app_file_log.dart", "symbol": "AppFileLog", "kind": "class" },
         { "file": "lib/infrastructure/diagnostics/runtime_error_reporter.dart", "symbol": "RuntimeErrorReporter", "kind": "class" },
         { "file": "lib/infrastructure/operations/operations_telemetry.dart", "symbol": "OperationsActivityTracker", "kind": "class" }
       ],
-      "dependencies": ["ui-shell", "exam-core", "account-auth", "local-storage", "gateway-network", "shared-foundation"],
+      "dependencies": ["gateway-network", "shared-foundation", "exam-core", "shared-ui", "account-auth"],
       "health": {
-        "score": 72,
+        "score": 74,
         "coupling": "medium",
         "complexity": "medium",
-        "churn": "low",
-        "decay_flags": ["layer_violation"],
-        "review_note": "更新/日志/诊断/遥测各自内聚，但 app_update_service 引用 exam-core 的配额文案、operations_telemetry 引用 account-auth 状态，拼合的系统服务层仍向上渗漏；建议以回调/事件替代直引，或把遥测与更新拆为独立模块。"
+        "churn": "medium",
+        "decay_flags": ["layer_violation", "responsibility_overlap"],
+        "review_note": "30 文件 6929 行，由音频、本地存储、更新、平台、日志、诊断、遥测七类设备与本地能力合置而成。内部基础件质量较好（atomic_file_writer、durable_idempotency_key_store、音频预处理各自内聚），主要问题是存储层反向 import 网关契约与 DTO 共 11 处复用线上 wire 格式，以及 5 处对上层（exam-core 配额文案、AppStrings、account-auth 登录态）的反向引用。建议把共享 wire 契约下沉，并以回调替代对上层状态的直读。",
+        "concerns": [
+          {
+            "severity": "high",
+            "finding": "考试计划缓存（exam_plan_cache_writer_io/web.dart）直接 import 网关契约、DTO 与考试资源下载器，本地缓存格式与线上 wire 格式强绑定，网关字段变更会同时击穿存储与网络两侧。",
+            "suggestion": "缓存只持久化规范化后的本地模型字节，wire 解析留在网关层。"
+          },
+          {
+            "severity": "high",
+            "finding": "对上层有 5 处反向引用：app_update_service 引用考试配额文案与 AppStrings，operations_telemetry 读取 account-auth 登录态。",
+            "suggestion": "改为由调用方注入文案与登录态提供者，遥测不再直读账户模块。"
+          }
+        ]
       }
     },
     {
       "id": "shared-foundation",
       "name": "共享基础",
       "layer": "foundation",
-      "responsibility": "编译期环境配置与多语言生成资源",
-      "files": [
-        "lib/config/**",
-        "lib/l10n/**"
-      ],
+      "responsibility": "编译期环境配置与多语言生成资源，无任何库内依赖",
+      "files": ["lib/config/**", "lib/l10n/**"],
       "key_entries": [
-        { "file": "lib/config/app_environment.dart", "symbol": "AppEnvironment", "kind": "config" },
         { "file": "lib/config/deployment_environment.dart", "symbol": "EnvironmentConfig", "kind": "config" },
+        { "file": "lib/config/app_environment.dart", "symbol": "AppEnvironment", "kind": "config" },
         { "file": "lib/l10n/app_localizations.dart", "symbol": "AppLocalizations", "kind": "class" }
       ],
       "dependencies": [],
       "health": {
-        "score": 88,
+        "score": 90,
         "coupling": "low",
         "complexity": "low",
         "churn": "high",
         "decay_flags": [],
-        "review_note": "零库内依赖、被全库安全引用；高 churn 主要来自 l10n 生成文件随文案迭代，属正常现象。建议保持其为唯一允许被所有层依赖的叶子模块。"
+        "review_note": "7 文件 27447 行，零库内出边，是唯一可被所有层安全依赖的叶子模块，被 6 个模块引用共 31 处。行数主体是 l10n 生成物（26954 行）与编译期环境配置（493 行），近 90 天 195 次文件改动主要来自文案迭代与 .arb 生成，属正常现象。建议把界面层的用户文案（app_strings.dart）与主题一并下沉到本层，从根上消除下层对界面层的反向依赖。",
+        "concerns": []
       }
     }
   ],
   "edges": [
-    { "from": "app-composition", "to": "ui-shell", "type": "import", "label": "视图树装配", "strength": "strong" },
     { "from": "app-composition", "to": "exam-core", "type": "import", "label": "考试/评测服务装配", "strength": "strong" },
+    { "from": "app-composition", "to": "practice-training", "type": "import", "label": "练习/题库/发音服务装配", "strength": "strong" },
     { "from": "app-composition", "to": "reporting", "type": "import", "label": "报告服务装配", "strength": "strong" },
-    { "from": "app-composition", "to": "account-auth", "type": "import", "label": "账户服务装配", "strength": "normal" },
-    { "from": "app-composition", "to": "practice-training", "type": "import", "label": "练习/题库服务装配", "strength": "strong" },
+    { "from": "app-composition", "to": "shared-ui", "type": "import", "label": "MainLayout · 训练刷新 Scope · 展示映射装配", "strength": "normal" },
     { "from": "app-composition", "to": "app-state", "type": "import", "label": "偏好/外壳状态装配", "strength": "normal" },
-    { "from": "app-composition", "to": "audio-media", "type": "import", "label": "音频服务装配", "strength": "weak" },
+    { "from": "app-composition", "to": "device-services", "type": "import", "label": "日志/遥测/更新/存储装配", "strength": "normal" },
+    { "from": "app-composition", "to": "shared-foundation", "type": "config", "label": "EnvironmentConfig · AppLocalizations", "strength": "normal" },
+    { "from": "app-composition", "to": "account-auth", "type": "import", "label": "账户服务装配", "strength": "normal" },
+    { "from": "app-composition", "to": "desktop-ui", "type": "import", "label": "debug/ui_review_main.dart 预览入口", "strength": "weak" },
     { "from": "app-composition", "to": "gateway-network", "type": "import", "label": "GatewayClient 直连", "strength": "weak" },
-    { "from": "app-composition", "to": "local-storage", "type": "import", "label": "会话文件日志", "strength": "weak" },
-    { "from": "app-composition", "to": "system-services", "type": "import", "label": "日志/崩溃/遥测装配", "strength": "normal" },
-    { "from": "app-composition", "to": "shared-foundation", "type": "config", "label": "EnvironmentConfig · l10n", "strength": "normal" },
 
-    { "from": "ui-shell", "to": "app-composition", "type": "import", "label": "main_layout 引用 HoverApp", "strength": "weak", "direction_violation": true },
-    { "from": "ui-shell", "to": "exam-core", "type": "call", "label": "会话控制/流程服务", "strength": "strong" },
-    { "from": "ui-shell", "to": "reporting", "type": "call", "label": "报告生成/索引/操作", "strength": "strong" },
-    { "from": "ui-shell", "to": "account-auth", "type": "call", "label": "账户状态/登录", "strength": "strong" },
-    { "from": "ui-shell", "to": "practice-training", "type": "call", "label": "练习启动/题库/发音", "strength": "strong" },
-    { "from": "ui-shell", "to": "app-state", "type": "call", "label": "偏好与外壳导航", "strength": "strong" },
-    { "from": "ui-shell", "to": "gateway-network", "type": "api", "label": "GatewayClient 静态调用", "strength": "normal" },
-    { "from": "ui-shell", "to": "local-storage", "type": "call", "label": "本地缓存/路径", "strength": "weak" },
-    { "from": "ui-shell", "to": "system-services", "type": "call", "label": "更新/平台启动器/日志", "strength": "normal" },
-    { "from": "ui-shell", "to": "shared-foundation", "type": "import", "label": "AppStrings · AppLocalizations", "strength": "strong" },
+    { "from": "desktop-ui", "to": "shared-ui", "type": "import", "label": "公共组件/主题/文案/展示映射", "strength": "strong" },
+    { "from": "desktop-ui", "to": "app-state", "type": "call", "label": "AppPreferenceService · AppShellState", "strength": "strong" },
+    { "from": "desktop-ui", "to": "exam-core", "type": "call", "label": "ExamSessionControlService · PostExamPresentationService", "strength": "strong" },
+    { "from": "desktop-ui", "to": "reporting", "type": "call", "label": "ReportGenerationService · ReportActionService", "strength": "strong" },
+    { "from": "desktop-ui", "to": "account-auth", "type": "call", "label": "AccountStateService", "strength": "normal" },
+    { "from": "desktop-ui", "to": "practice-training", "type": "call", "label": "PracticeWorkflowService", "strength": "normal" },
+    { "from": "desktop-ui", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "weak" },
+    { "from": "desktop-ui", "to": "device-services", "type": "call", "label": "AppUpdateService · AppFileLog", "strength": "weak" },
+    { "from": "desktop-ui", "to": "gateway-network", "type": "api", "label": "GatewayClient DTO · GatewayException", "strength": "weak" },
+    { "from": "desktop-ui", "to": "app-composition", "type": "import", "label": "shell_layout 引用 DesktopFeatureServices 容器", "strength": "weak", "direction_violation": true },
 
-    { "from": "exam-core", "to": "ui-shell", "type": "import", "label": "AppStrings 用户文案", "strength": "normal", "direction_violation": true },
+    { "from": "mobile-ui", "to": "shared-ui", "type": "import", "label": "公共组件/主题/文案/展示映射", "strength": "strong" },
+    { "from": "mobile-ui", "to": "app-state", "type": "call", "label": "AppPreferenceService · AppShellState", "strength": "strong" },
+    { "from": "mobile-ui", "to": "exam-core", "type": "call", "label": "考试会话/评测提交服务", "strength": "strong" },
+    { "from": "mobile-ui", "to": "reporting", "type": "call", "label": "报告生成/索引/操作", "strength": "strong" },
+    { "from": "mobile-ui", "to": "account-auth", "type": "call", "label": "AccountStateService · AuthFormController", "strength": "strong" },
+    { "from": "mobile-ui", "to": "practice-training", "type": "call", "label": "练习工作流 · 题库", "strength": "normal" },
+    { "from": "mobile-ui", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "normal" },
+    { "from": "mobile-ui", "to": "device-services", "type": "call", "label": "更新/日志/本地路径", "strength": "normal" },
+    { "from": "mobile-ui", "to": "gateway-network", "type": "api", "label": "GatewayClient DTO", "strength": "weak" },
+
+    { "from": "shared-ui", "to": "exam-core", "type": "call", "label": "ExamScenarioCatalog · ExamQuestionPresentation · 备考展示服务", "strength": "strong" },
+    { "from": "shared-ui", "to": "reporting", "type": "import", "label": "ReportHtmlDocument · TrainingReportPresentation", "strength": "normal" },
+    { "from": "shared-ui", "to": "shared-foundation", "type": "import", "label": "AppStrings 包装 AppLocalizations", "strength": "normal" },
+    { "from": "shared-ui", "to": "app-state", "type": "call", "label": "main_layout 注入偏好/外壳状态", "strength": "normal" },
+    { "from": "shared-ui", "to": "device-services", "type": "call", "label": "ReaderDocumentService · AppDataPaths", "strength": "normal" },
+    { "from": "shared-ui", "to": "account-auth", "type": "call", "label": "main_layout 账户服务", "strength": "normal" },
+    { "from": "shared-ui", "to": "practice-training", "type": "call", "label": "main_layout 题库/练习服务", "strength": "weak" },
+    { "from": "shared-ui", "to": "desktop-ui", "type": "import", "label": "main_layout 分发 DesktopMainLayout", "strength": "weak" },
+    { "from": "shared-ui", "to": "mobile-ui", "type": "import", "label": "main_layout 分发 MobileMainLayout", "strength": "weak" },
+    { "from": "shared-ui", "to": "gateway-network", "type": "api", "label": "DesktopScoreCurvePanel 使用网关 DTO", "strength": "weak" },
+    { "from": "shared-ui", "to": "app-composition", "type": "import", "label": "main_layout 引用 DesktopFeatureServices 容器", "strength": "weak", "direction_violation": true },
+
+    { "from": "exam-core", "to": "device-services", "type": "call", "label": "AudioCaptureService · AudioPreprocessor · 会话持久化", "strength": "strong" },
+    { "from": "exam-core", "to": "shared-ui", "type": "import", "label": "AppStrings 用户文案 · AppTheme 主题", "strength": "strong", "direction_violation": true },
+    { "from": "exam-core", "to": "gateway-network", "type": "api", "label": "评测提交/考试计划拉取/资源下载", "strength": "normal" },
     { "from": "exam-core", "to": "reporting", "type": "call", "label": "报告生成请求/展示状态", "strength": "normal" },
-    { "from": "exam-core", "to": "account-auth", "type": "call", "label": "访问令牌/登录态", "strength": "normal" },
-    { "from": "exam-core", "to": "practice-training", "type": "call", "label": "训练阶段/题库上下文", "strength": "weak" },
     { "from": "exam-core", "to": "app-state", "type": "call", "label": "偏好快照", "strength": "normal" },
-    { "from": "exam-core", "to": "audio-media", "type": "call", "label": "录音/播放/预处理", "strength": "normal" },
-    { "from": "exam-core", "to": "gateway-network", "type": "api", "label": "评测提交/计划拉取", "strength": "normal" },
-    { "from": "exam-core", "to": "local-storage", "type": "call", "label": "会话持久化/计划缓存", "strength": "normal" },
+    { "from": "exam-core", "to": "account-auth", "type": "call", "label": "访问令牌/登录态", "strength": "normal" },
     { "from": "exam-core", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "weak" },
+    { "from": "exam-core", "to": "practice-training", "type": "call", "label": "训练阶段启动状态", "strength": "weak" },
 
-    { "from": "reporting", "to": "ui-shell", "type": "import", "label": "AppStrings/文档组件", "strength": "normal", "direction_violation": true },
-    { "from": "reporting", "to": "exam-core", "type": "call", "label": "会话生命周期/提交快照", "strength": "strong" },
+    { "from": "reporting", "to": "exam-core", "type": "call", "label": "会话生命周期/提交快照/报告元数据", "strength": "strong" },
+    { "from": "reporting", "to": "shared-ui", "type": "import", "label": "AppStrings · training_ui_copy · report_html_document", "strength": "normal", "direction_violation": true },
+    { "from": "reporting", "to": "device-services", "type": "call", "label": "报告落盘/原子写/幂等键", "strength": "normal" },
+    { "from": "reporting", "to": "gateway-network", "type": "api", "label": "报告数据/评测状态探测", "strength": "normal" },
     { "from": "reporting", "to": "account-auth", "type": "call", "label": "账户命名空间/令牌", "strength": "normal" },
-    { "from": "reporting", "to": "app-state", "type": "call", "label": "偏好快照", "strength": "weak" },
-    { "from": "reporting", "to": "gateway-network", "type": "api", "label": "报告数据/评估状态探测", "strength": "normal" },
-    { "from": "reporting", "to": "local-storage", "type": "call", "label": "会话索引/报告文件", "strength": "normal" },
-    { "from": "reporting", "to": "system-services", "type": "call", "label": "导出路径/遥测", "strength": "weak" },
+    { "from": "reporting", "to": "app-state", "type": "call", "label": "路由常量/偏好快照", "strength": "weak" },
 
-    { "from": "account-auth", "to": "ui-shell", "type": "import", "label": "AppStrings/报告助手", "strength": "weak", "direction_violation": true },
-    { "from": "account-auth", "to": "exam-core", "type": "call", "label": "报告元数据/会话计划", "strength": "weak" },
-    { "from": "account-auth", "to": "reporting", "type": "call", "label": "报告助手", "strength": "weak" },
-    { "from": "account-auth", "to": "app-state", "type": "call", "label": "外壳状态", "strength": "weak" },
     { "from": "account-auth", "to": "gateway-network", "type": "api", "label": "认证/资料/统计接口", "strength": "weak" },
-    { "from": "account-auth", "to": "system-services", "type": "call", "label": "安全存储/日志", "strength": "weak" },
     { "from": "account-auth", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "weak" },
+    { "from": "account-auth", "to": "shared-ui", "type": "import", "label": "AppStrings 用户文案", "strength": "weak", "direction_violation": true },
+    { "from": "account-auth", "to": "exam-core", "type": "import", "label": "报告元数据/会话计划", "strength": "weak" },
+    { "from": "account-auth", "to": "device-services", "type": "call", "label": "安全存储/遥测", "strength": "weak" },
 
-    { "from": "practice-training", "to": "ui-shell", "type": "import", "label": "AppStrings/共享组件", "strength": "weak", "direction_violation": true },
-    { "from": "practice-training", "to": "exam-core", "type": "call", "label": "会话启动/生命周期", "strength": "strong" },
-    { "from": "practice-training", "to": "reporting", "type": "call", "label": "报告索引/刷新", "strength": "normal" },
-    { "from": "practice-training", "to": "account-auth", "type": "call", "label": "账户/配额状态", "strength": "normal" },
-    { "from": "practice-training", "to": "app-state", "type": "call", "label": "偏好快照", "strength": "weak" },
+    { "from": "practice-training", "to": "exam-core", "type": "call", "label": "会话启动/生命周期/持久化", "strength": "strong" },
     { "from": "practice-training", "to": "gateway-network", "type": "api", "label": "题库/发音接口", "strength": "normal" },
-    { "from": "practice-training", "to": "local-storage", "type": "call", "label": "训练恢复仓库", "strength": "weak" },
-    { "from": "practice-training", "to": "system-services", "type": "call", "label": "平台启动器", "strength": "weak" },
-    { "from": "practice-training", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "weak" },
+    { "from": "practice-training", "to": "reporting", "type": "call", "label": "报告索引/训练报告刷新", "strength": "normal" },
+    { "from": "practice-training", "to": "account-auth", "type": "call", "label": "账户/配额状态", "strength": "normal" },
+    { "from": "practice-training", "to": "shared-ui", "type": "import", "label": "AppStrings 用户文案", "strength": "weak", "direction_violation": true },
+    { "from": "practice-training", "to": "device-services", "type": "call", "label": "训练恢复仓库/本地存储", "strength": "weak" },
+    { "from": "practice-training", "to": "app-state", "type": "call", "label": "偏好快照", "strength": "weak" },
 
-    { "from": "app-state", "to": "ui-shell", "type": "import", "label": "路由常量/领域文案", "strength": "weak", "direction_violation": true },
+    { "from": "app-state", "to": "shared-ui", "type": "import", "label": "AppStrings · HoverAppRoute 路由常量", "strength": "weak", "direction_violation": true },
+    { "from": "app-state", "to": "device-services", "type": "call", "label": "设置持久化/平台操作", "strength": "weak" },
     { "from": "app-state", "to": "exam-core", "type": "import", "label": "考试领域模型", "strength": "weak", "direction_violation": true },
     { "from": "app-state", "to": "reporting", "type": "import", "label": "报告领域模型", "strength": "weak", "direction_violation": true },
-    { "from": "app-state", "to": "local-storage", "type": "call", "label": "设置持久化", "strength": "weak" },
-    { "from": "app-state", "to": "system-services", "type": "call", "label": "平台操作", "strength": "weak" },
 
-    { "from": "gateway-network", "to": "exam-core", "type": "import", "label": "考试领域契约", "strength": "weak", "direction_violation": true },
-    { "from": "gateway-network", "to": "reporting", "type": "import", "label": "报告领域契约", "strength": "weak", "direction_violation": true },
+    { "from": "gateway-network", "to": "exam-core", "type": "import", "label": "models/exam_question_item 题目标注契约", "strength": "weak", "direction_violation": true },
+    { "from": "gateway-network", "to": "reporting", "type": "import", "label": "domain/reporting 领域模型", "strength": "weak", "direction_violation": true },
 
-    { "from": "audio-media", "to": "system-services", "type": "call", "label": "文件日志", "strength": "weak" },
-
-    { "from": "local-storage", "to": "exam-core", "type": "import", "label": "考试计划/会话模型", "strength": "normal", "direction_violation": true },
-    { "from": "local-storage", "to": "gateway-network", "type": "import", "label": "内容契约复用", "strength": "weak" },
-    { "from": "local-storage", "to": "shared-foundation", "type": "import", "label": "AppEnvironment", "strength": "weak" },
-
-    { "from": "system-services", "to": "ui-shell", "type": "import", "label": "AppStrings", "strength": "weak", "direction_violation": true },
-    { "from": "system-services", "to": "exam-core", "type": "import", "label": "配额/会话状态", "strength": "weak", "direction_violation": true },
-    { "from": "system-services", "to": "account-auth", "type": "import", "label": "登录态判断", "strength": "weak", "direction_violation": true },
-    { "from": "system-services", "to": "local-storage", "type": "call", "label": "更新包落地/缓存", "strength": "weak" },
-    { "from": "system-services", "to": "gateway-network", "type": "api", "label": "更新注册表请求", "strength": "weak" },
-    { "from": "system-services", "to": "shared-foundation", "type": "config", "label": "AppEnvironment", "strength": "weak" }
+    { "from": "device-services", "to": "gateway-network", "type": "api", "label": "考试计划缓存复用资源下载契约 · 遥测凭据客户端", "strength": "normal" },
+    { "from": "device-services", "to": "shared-foundation", "type": "config", "label": "AppEnvironment", "strength": "weak" },
+    { "from": "device-services", "to": "exam-core", "type": "import", "label": "考试配额文案", "strength": "weak", "direction_violation": true },
+    { "from": "device-services", "to": "shared-ui", "type": "import", "label": "AppStrings 用户文案", "strength": "weak", "direction_violation": true },
+    { "from": "device-services", "to": "account-auth", "type": "import", "label": "登录态判断", "strength": "weak", "direction_violation": true }
   ],
   "health": {
-    "score": 58,
+    "score": 57,
     "coupling": "high",
     "complexity": "high",
     "churn": "high",
     "decay_flags": ["layer_violation", "layering_mismatch", "circular_dep", "responsibility_overlap"],
-    "review_note": "分层大方向成立（装配→界面→应用→共享状态→基础设施→基础支撑，70 条边中 14 条逆向），但三类系统性问题压低架构分：1) exam-core↔reporting 双向强耦合（9/38 条 import）且评测状态机分散在考试、评测、报告三处，属职责重叠而非两个健康模块的简单叠加；2) 领域模型内嵌在功能目录（domain/exam、domain/reporting 归应用层），迫使 gateway-network、local-storage 反向依赖应用层，形成 layering_mismatch；3) 用户文案 AppStrings 放在界面层被应用服务反向引用，ui-shell 又回引组合根 hover_app.dart。建议：抽取独立领域/契约共享内核供基础设施依赖；把评测状态机收敛到 exam-core 单一所有者，reporting 只读快照；AppStrings 与路由常量移至 foundation 层；拆分 hover_app.dart 组合根。多数模块个体健康度尚可（60-88），但耦合形态决定架构整体仅中等偏下，禁止以模块均分代替本评估。"
+    "review_note": "宏观分层成立（装配 → 界面 → 应用 → 共享状态 → 基础设施 → 基础支撑，依赖大体自上而下），组合根采用构造注入而非服务定位器，网关访问收敛在一处，shared-foundation 是干净的零依赖叶子。但三类系统性问题把架构分压到中等偏下：1) 逆向依赖密度高——77 条模块边中 14 条违反分层（18%），根因是用户文案、主题、路由常量与展示映射被放在界面层（app_strings.dart 2318 行、theme/app_theme.dart、presentation/**），被 5 个下层模块反向 import 约 32 处；2) 应用层内部没有依赖方向——exam-core/reporting/account-auth/practice-training/app-state 相互引用构成强连通分量，reporting→exam-core 38 条与 exam-core→reporting 9 条是最大双向耦合，报告模块实质读写了考试会话内部状态；3) 领域模型内嵌在功能目录（domain/exam、domain/reporting 归属应用层），迫使基础设施反向依赖应用与领域类型 19 处（gateway_client、exam_sessions_index、report_action_adapters、训练恢复仓库），形成 layering_mismatch。界面侧另有 71k 行分布在三个模块中且无视图模型隔离层，desktop-ui 与 mobile-ui 各实现一套页面逻辑。模块个体健康度多在 58-90 之间，但上述形态问题独立于模块分存在，不能以模块均分代替本评估。",
+    "concerns": [
+      {
+        "severity": "critical",
+        "finding": "77 条模块边中 14 条逆向（18%），根因是用户文案、主题、路由常量与展示映射定义在界面层，被 exam-core、reporting、account-auth、practice-training、app-state、device-services 反向 import 约 32 处。",
+        "suggestion": "把文案、主题与路由常量下沉为 foundation 层的独立资源模块，展示映射改写为下层可依赖的纯函数，界面层不再被下层引用。"
+      },
+      {
+        "severity": "critical",
+        "finding": "应用服务层 5 个模块（exam-core/reporting/account-auth/practice-training/app-state）互相引用形成强连通分量，层内没有依赖方向，reporting→exam-core 38 条与 exam-core→reporting 9 条构成最大双向耦合。",
+        "suggestion": "确立 exam-core 为会话生命周期唯一所有者，reporting 与 evaluation 只经只读快照接口依赖它并禁止回引，把应用层内部收敛为单向依赖。"
+      },
+      {
+        "severity": "high",
+        "finding": "组合根与界面层互为依赖：组合根装配 MainLayout，而 main_layout.dart:10 与 desktop_main_layout.dart:10 又反向 import app/composition/desktop_feature_services.dart，同时 hover_app.dart 1343 行手工组装 43 个服务。",
+        "suggestion": "把 DesktopFeatureServices 移到应用层并抽象为接口，组装根按功能域拆分，消除装配层与界面层之间的环。"
+      }
+    ]
   }
 }
