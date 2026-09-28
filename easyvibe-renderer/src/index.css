@@ -73,3 +73,11 @@
     @apply bg-background text-foreground;
   }
 }
+/* 生长模式：模块/层入场动画 */
+@keyframes ev-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.growth-born {
+  animation: ev-fade-in 0.7s ease;
+}

@@ -14,7 +14,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus } from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles } from 'lucide-react'
 
 import type { CodeMap, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -35,12 +35,27 @@ interface Filters {
 
 const MAX_EXPANDED = 3
 
+// growth.log 事件（v2.2 协议）
+type GrowthEvent =
+  | { type: 'layer'; layer: CodeMap['layers'][number] }
+  | { type: 'module'; module: CodeMap['modules'][number]; out_edges: CodeMap['edges'] }
+  | { type: 'arch_health'; health: CodeMap['health'] }
+  | { type: 'done' }
+
+interface GrowthState {
+  events: GrowthEvent[]
+  index: number // 已消费事件数
+  playing: boolean
+  done: boolean
+}
+
 function buildFlow(
   map: CodeMap,
   selection: Selection,
   filters: Filters,
   expanded: Map<string, SubMap | 'loading'>,
   onSelectLayer: (id: string) => void,
+  growth?: { layers: Set<string>; modules: Set<string> } | null,
 ) {
   // 展开元信息：加载中给 4 个骨架位
   const expandedMeta = new Map<string, { ids: string[]; loading: boolean }>()
@@ -76,15 +91,16 @@ function buildFlow(
   }
 
   const nodes: Node[] = [
-    ...bands.map((box, i): BandNodeType => {
+    ...bands.flatMap((box, i): BandNodeType[] => {
       const layer = map.layers.find((l) => l.id === box.layerId)!
+      if (growth && !growth.layers.has(layer.id)) return []
       const mods = map.modules.filter((m) => m.layer === layer.id)
       const avgScore = Math.round(mods.reduce((s, m) => s + m.health.score, 0) / Math.max(mods.length, 1))
       const modIds = new Set(mods.map((m) => m.id))
       const violations = map.edges.filter(
         (e) => e.direction_violation && (modIds.has(e.from) || modIds.has(e.to)),
       ).length
-      return {
+      return [{
         id: `band-${box.layerId}`,
         type: 'band',
         position: { x: box.x, y: box.y },
@@ -99,13 +115,15 @@ function buildFlow(
         zIndex: -1,
         width: box.width,
         height: box.height,
-      }
+        className: growth ? 'growth-born' : undefined,
+      }]
     }),
-    ...map.modules.map((mod): Node => {
+    ...map.modules.flatMap((mod): Node[] => {
+      if (growth && !growth.modules.has(mod.id)) return []
       if (expanded.has(mod.id)) {
         const block = blocks.get(mod.id)!
         const sm = expanded.get(mod.id)!
-        return {
+        return [{
           id: mod.id,
           type: 'moduleExpanded',
           position: positions.get(mod.id)!,
@@ -122,9 +140,10 @@ function buildFlow(
           height: block.height,
           style: { opacity: nodeDim(mod.id) },
           zIndex: 1,
-        } satisfies ExpandedModuleNodeType
+          className: growth ? 'growth-born' : undefined,
+        } satisfies ExpandedModuleNodeType]
       }
-      return {
+      return [{
         id: mod.id,
         type: 'module',
         position: positions.get(mod.id)!,
@@ -134,7 +153,8 @@ function buildFlow(
         width: NODE_W,
         height: NODE_H,
         style: { opacity: nodeDim(mod.id) },
-      } satisfies ModuleNodeType
+        className: growth ? 'growth-born' : undefined,
+      } satisfies ModuleNodeType]
     }),
     // 子模块节点（父节点内部，extent=parent）
     ...[...blocks.entries()].flatMap(([parentId, block]): Node[] => {
@@ -179,7 +199,10 @@ function buildFlow(
     return dim
   }
 
-  const edges: Edge[] = map.edges.map((e, i) => {
+  const visibleEdges = growth
+    ? map.edges.filter((e) => growth.modules.has(e.from) && growth.modules.has(e.to))
+    : map.edges
+  const edges: Edge[] = visibleEdges.map((e, i) => {
     const violation = e.direction_violation === true
     const si = outIdx.get(e.from) ?? 0
     outIdx.set(e.from, si + 1)
@@ -375,6 +398,66 @@ function ModuleToolbar({
   )
 }
 
+// 生长回放控制条（消费 v2.2 growth.log 事件流）
+function GrowthPanel({
+  growth,
+  onPause,
+  onRestart,
+  onExit,
+}: {
+  growth: GrowthState
+  onPause: () => void
+  onRestart: () => void
+  onExit: () => void
+}) {
+  const total = growth.events.length
+  const pct = Math.round((growth.index / total) * 100)
+  const cur = growth.index < growth.events.length ? growth.events[growth.index] : null
+  const status = growth.done
+    ? '归纳完成'
+    : cur?.type === 'layer'
+      ? `分层：${cur.layer.name}`
+      : cur?.type === 'module'
+        ? `正在分析模块：${cur.module.name}`
+        : cur?.type === 'arch_health'
+          ? '架构级健康评估'
+          : '初始化'
+
+  return (
+    <div className="flex w-[460px] items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur">
+      <button
+        onClick={onPause}
+        disabled={growth.done}
+        className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+        title={growth.playing ? '暂停' : '继续'}
+      >
+        {growth.playing ? <Pause size={14} /> : <Play size={14} />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between">
+          <span className="truncate text-[11.5px] font-semibold text-slate-700">
+            <Sparkles size={11} className="mr-1 inline text-blue-500" />
+            {status}
+          </span>
+          <span className="text-[10px] tabular-nums text-slate-400">{pct}%</span>
+        </div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${growth.done ? 'bg-emerald-500' : 'bg-blue-500'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+      <button onClick={onRestart} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="重播">
+        <RotateCcw size={13} />
+      </button>
+      <button onClick={onExit} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="退出演示">
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
 function Canvas({ map }: { map: CodeMap }) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
@@ -382,7 +465,50 @@ function Canvas({ map }: { map: CodeMap }) {
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading'>>({})
+  const [growth, setGrowth] = useState<GrowthState | null>(null)
   const { fitView } = useReactFlow()
+
+  // 生长回放：消费 growth.log（v2.2 协议），已到达的层/模块集合
+  const arrived = useMemo(() => {
+    if (!growth) return null
+    const layers = new Set<string>()
+    const modules = new Set<string>()
+    for (let i = 0; i < growth.index && i < growth.events.length; i++) {
+      const e = growth.events[i]
+      if (e.type === 'layer') layers.add(e.layer.id)
+      if (e.type === 'module') modules.add(e.module.id)
+    }
+    return { layers, modules }
+  }, [growth])
+
+  // 事件推进定时器
+  useEffect(() => {
+    if (!growth?.playing) return
+    const t = setInterval(() => {
+      setGrowth((g) => {
+        if (!g || !g.playing) return g
+        const next = g.index + 1
+        if (next >= g.events.length) return { ...g, index: g.events.length, playing: false, done: true }
+        return { ...g, index: next }
+      })
+    }, 700)
+    return () => clearInterval(t)
+  }, [growth?.playing])
+
+  const startGrowth = useCallback(() => {
+    fetch('/data/growth.log')
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        return r.text()
+      })
+      .then((text) => {
+        const events = text.trim().split('\n').map((l) => JSON.parse(l) as GrowthEvent)
+        setSelection(null)
+        setExpandedIds([])
+        setGrowth({ events, index: 0, playing: true, done: false })
+      })
+      .catch(() => setGrowth(null))
+  }, [])
 
   const onSelectLayer = useCallback((id: string) => {
     setSelection({ kind: 'layer', id })
@@ -421,9 +547,13 @@ function Canvas({ map }: { map: CodeMap }) {
     return m
   }, [expandedIds, submaps])
 
+  const emptyExpanded = useMemo(() => new Map<string, SubMap | 'loading'>(), [])
+  const effectiveExpanded = growth ? emptyExpanded : expanded
+  const growthVisible = growth ? arrived : null
+
   const { nodes, edges } = useMemo(
-    () => buildFlow(map, selection, filters, expanded, onSelectLayer),
-    [map, selection, filters, expanded, onSelectLayer],
+    () => buildFlow(map, selection, filters, effectiveExpanded, onSelectLayer, growthVisible),
+    [map, selection, filters, effectiveExpanded, onSelectLayer, growthVisible],
   )
 
   useEffect(() => {
@@ -432,6 +562,7 @@ function Canvas({ map }: { map: CodeMap }) {
   }, [fitView, map])
 
   const onNodeClick = useCallback((_e: unknown, node: Node) => {
+    if (growth) return // 生长回放期间禁用选中
     if (node.type === 'module' || node.type === 'moduleExpanded') {
       setSelection({ kind: 'module', id: node.id })
       setTab('detail')
@@ -444,7 +575,7 @@ function Canvas({ map }: { map: CodeMap }) {
       setTab('detail')
       setPanelOpen(true)
     }
-  }, [])
+  }, [growth])
   const onPaneClick = useCallback(() => setSelection(null), [])
 
   const toggleFilter = (key: keyof Filters) => setFilters((f) => ({ ...f, [key]: !f[key] }))
@@ -506,30 +637,39 @@ function Canvas({ map }: { map: CodeMap }) {
             </Panel>
           )}
 
-          {/* 底部中央：全局过滤 */}
+          {/* 底部中央：生长回放控制条 或 全局过滤 */}
           <Panel position="bottom-center" className="mb-2">
-            <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
-              <FilterButton
-                active={filters.violationsOnly}
-                onClick={() => toggleFilter('violationsOnly')}
-                label="只看违规"
-                activeClass="border-red-300 bg-red-50 text-red-600"
+            {growth ? (
+              <GrowthPanel
+                growth={growth}
+                onPause={() => setGrowth((g) => (g ? { ...g, playing: !g.playing } : g))}
+                onRestart={() => setGrowth((g) => (g ? { ...g, index: 0, playing: true, done: false } : g))}
+                onExit={() => setGrowth(null)}
               />
-              <FilterButton
-                active={filters.issuesOnly}
-                onClick={() => toggleFilter('issuesOnly')}
-                label="问题视图"
-                activeClass="border-amber-300 bg-amber-50 text-amber-700"
-              />
-              {(filters.violationsOnly || filters.issuesOnly) && (
-                <button
-                  onClick={() => setFilters({ violationsOnly: false, issuesOnly: false, solo: filters.solo })}
-                  className="rounded-full px-2 py-1 text-[10.5px] text-slate-400 hover:text-slate-600"
-                >
-                  重置
-                </button>
-              )}
-            </div>
+            ) : (
+              <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
+                <FilterButton
+                  active={filters.violationsOnly}
+                  onClick={() => toggleFilter('violationsOnly')}
+                  label="只看违规"
+                  activeClass="border-red-300 bg-red-50 text-red-600"
+                />
+                <FilterButton
+                  active={filters.issuesOnly}
+                  onClick={() => toggleFilter('issuesOnly')}
+                  label="问题视图"
+                  activeClass="border-amber-300 bg-amber-50 text-amber-700"
+                />
+                {(filters.violationsOnly || filters.issuesOnly) && (
+                  <button
+                    onClick={() => setFilters({ violationsOnly: false, issuesOnly: false, solo: filters.solo })}
+                    className="rounded-full px-2 py-1 text-[10.5px] text-slate-400 hover:text-slate-600"
+                  >
+                    重置
+                  </button>
+                )}
+              </div>
+            )}
           </Panel>
         </ReactFlow>
 
@@ -551,6 +691,15 @@ function Canvas({ map }: { map: CodeMap }) {
                 <span>{map.layers.length} 层</span>
                 <span>{map.edges.length} 依赖</span>
                 <span className="text-red-500">{violations} 逆向</span>
+                <button
+                  onClick={startGrowth}
+                  disabled={!!growth}
+                  className="ml-1 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-semibold text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-40"
+                  title="回放归纳过程（消费 growth.log，v2.2 协议）"
+                >
+                  <Play size={10} />
+                  生长演示
+                </button>
               </div>
             </div>
           </div>
