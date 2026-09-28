@@ -595,6 +595,7 @@ function Canvas({ map }: { map: CodeMap }) {
           nodeTypes={nodeTypes}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
+          nodesDraggable={false}
           minZoom={0.08}
           maxZoom={1.6}
           proOptions={{ hideAttribution: true }}

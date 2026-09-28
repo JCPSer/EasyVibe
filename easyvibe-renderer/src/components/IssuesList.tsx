@@ -20,8 +20,8 @@ export function collectIssues(map: CodeMap): Issue[] {
 
   const arch = map.health
   if (arch.concerns?.length) {
-    for (const c of arch.concerns) {
-      issues.push({ key: 'arch-0', scope: 'arch', severity: c.severity, finding: c.finding, suggestion: c.suggestion, impact: map.modules.length })
+    for (const [i, c] of arch.concerns.entries()) {
+      issues.push({ key: `arch-${i}`, scope: 'arch', severity: c.severity, finding: c.finding, suggestion: c.suggestion, impact: map.modules.length })
     }
   } else if (arch.decay_flags.length > 0) {
     issues.push({
