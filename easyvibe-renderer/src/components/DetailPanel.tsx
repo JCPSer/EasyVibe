@@ -350,7 +350,12 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, onLocat
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />
         )}
-        {tab === 'detail' && !module && !layer && !sub && (
+        {tab === 'detail' && !module && !layer && !sub && selection?.kind === 'submodule' && (
+          <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
+            子模块数据不存在或仍在加载中，请稍候再点击。
+          </p>
+        )}
+        {tab === 'detail' && !module && !layer && !sub && selection?.kind !== 'submodule' && (
           <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
             点击画布中的模块卡片、层标签或展开的子模块查看详情；
             <br />

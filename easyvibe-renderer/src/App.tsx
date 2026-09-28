@@ -437,6 +437,8 @@ function Canvas({ map }: { map: CodeMap }) {
       setTab('detail')
       setPanelOpen(true)
     } else if (node.type === 'submodule' && node.parentId) {
+      // 加载中的骨架不可选中（其 id 是占位符，选中后数据到达会无法匹配）
+      if ((node.data as { loading?: boolean }).loading) return
       const subId = node.id.slice(`sub:${node.parentId}:`.length)
       setSelection({ kind: 'submodule', parentId: node.parentId, subId })
       setTab('detail')
