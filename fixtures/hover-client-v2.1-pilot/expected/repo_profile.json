@@ -1,0 +1,55 @@
+{
+ "entrypoints": [
+  "lib/main.dart",
+  "lib/main_local.dart",
+  "lib/main_production.dart",
+  "lib/main_staging.dart"
+ ],
+ "languages": [
+  "Dart"
+ ],
+ "dart_files": 308,
+ "loc": 144389,
+ "churn_top10": [
+  [
+   "lib/view_models/hover_view_model.dart",
+   67
+  ],
+  [
+   "lib/app/hover_app.dart",
+   50
+  ],
+  [
+   "lib/views/mobile/mobile_main_layout.dart",
+   44
+  ],
+  [
+   "lib/l10n/app_localizations_zh.dart",
+   39
+  ],
+  [
+   "lib/l10n/app_localizations.dart",
+   38
+  ],
+  [
+   "lib/l10n/app_localizations_en.dart",
+   38
+  ],
+  [
+   "lib/l10n/app_localizations_ja.dart",
+   38
+  ],
+  [
+   "lib/l10n/app_localizations_ko.dart",
+   38
+  ],
+  [
+   "lib/views/desktop/desktop_setup_view.dart",
+   37
+  ],
+  [
+   "lib/views/desktop/desktop_main_layout.dart",
+   37
+  ]
+ ]
+}

@@ -1,0 +1,54 @@
+{
+  "layers": [
+    {
+      "id": "foundation",
+      "name": "基础支撑层",
+      "order": 5,
+      "description": "编译期环境配置与多语言生成资源，无任何库内依赖"
+    },
+    {
+      "id": "infrastructure",
+      "name": "基础设施层",
+      "order": 4,
+      "description": "网关 HTTP 客户端、音频采集播放、本地文件存储与平台系统能力（更新/日志/诊断/遥测）"
+    },
+    {
+      "id": "shared-state",
+      "name": "共享状态层",
+      "order": 3,
+      "description": "应用偏好设置、外壳导航状态与桌面设置操作，被各功能模块共享"
+    },
+    {
+      "id": "application",
+      "name": "应用服务层",
+      "order": 2,
+      "description": "考试会话、评测提交、报告、账户、练习训练等领域流程编排与领域模型"
+    },
+    {
+      "id": "presentation",
+      "name": "界面呈现层",
+      "order": 1,
+      "description": "桌面/移动页面、通用组件、主题、路由常量、文案与 HTML/报告文档渲染，直接调用应用服务"
+    },
+    {
+      "id": "app-entry",
+      "name": "应用装配层",
+      "order": 0,
+      "description": "进程入口、运行环境校验与服务组装（组合根），main_<env>.dart 按环境锁定启动"
+    }
+  ],
+  "modules": [
+    "shared-foundation",
+    "audio-media",
+    "gateway-network",
+    "local-storage",
+    "system-services",
+    "app-state",
+    "account-auth",
+    "exam-core",
+    "practice-training",
+    "reporting",
+    "ui-shell",
+    "app-composition"
+  ]
+}
