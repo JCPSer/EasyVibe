@@ -1,11 +1,14 @@
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info } from 'lucide-react'
-import type { CodeMap, Layer, Module } from '@/types/map'
+import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
 
-export type Selection = { kind: 'module' | 'layer'; id: string } | null
+export type Selection =
+  | { kind: 'module' | 'layer'; id: string }
+  | { kind: 'submodule'; parentId: string; subId: string }
+  | null
 export type PanelTab = 'issues' | 'detail'
 
 interface Props {
@@ -13,6 +16,7 @@ interface Props {
   selection: Selection
   tab: PanelTab
   onTabChange: (tab: PanelTab) => void
+  submaps: Record<string, SubMap | 'loading'>
   onLocateModule: (moduleId: string) => void
   onClose: () => void
 }
@@ -209,9 +213,110 @@ function LayerView({ map, layer }: { map: CodeMap; layer: Layer }) {
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, onLocateModule, onClose }: Props) {
+// 子模块详情（§8 子图 drill-down 层）
+function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule; submap: SubMap }) {
+  const color = healthColor(sub.health.score)
+  const siblings = new Map(submap.sub_modules.map((s) => [s.id, s]))
+  const deps = sub.dependencies.map((id) => siblings.get(id)).filter(Boolean) as SubModule[]
+  const dependents = submap.edges.filter((e) => e.to === sub.id).map((e) => siblings.get(e.from)).filter(Boolean) as SubModule[]
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center gap-2">
+          <h2 className="text-[15px] font-bold text-slate-800">{sub.name}</h2>
+          <Badge variant="outline" className="border-slate-200 text-slate-500">
+            {sub.id}
+          </Badge>
+        </div>
+        <p className="mt-1 text-[12px] leading-5 text-slate-500">{sub.responsibility}</p>
+        <p className="mt-1 text-[11px] text-slate-400">
+          所属模块：{parent.name}（内部结构，无层概念）
+        </p>
+      </div>
+
+      <div className="rounded-lg border p-3" style={{ borderColor: `${color}55`, background: `${color}0d` }}>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold" style={{ color }}>
+            {healthLabel(sub.health.score)} · {sub.health.score}/100
+          </span>
+          <span className="text-[10.5px] text-slate-400">
+            coupling {sub.health.coupling} · complexity {sub.health.complexity} · churn {sub.health.churn}
+          </span>
+        </div>
+        {sub.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{sub.health.review_note}</p>}
+      </div>
+
+      <Row icon={<KeyRound size={12} />} label="关键入口">
+        <div className="space-y-1.5">
+          {sub.key_entries.slice(0, 6).map((k) => (
+            <div key={k.file + k.symbol} className="rounded-md bg-slate-50 px-2.5 py-1.5">
+              <div className="font-mono text-[11px] font-medium text-slate-700">{k.symbol}</div>
+              <div className="truncate font-mono text-[10px] text-slate-400">{k.file}</div>
+            </div>
+          ))}
+        </div>
+      </Row>
+
+      <Row icon={<FileCode2 size={12} />} label="文件归属">
+        <div className="space-y-1">
+          {sub.files.map((f) => (
+            <div key={f} className="truncate font-mono text-[10.5px] text-slate-500">{f}</div>
+          ))}
+        </div>
+      </Row>
+
+      <Row icon={<ArrowDownToLine size={12} />} label={`内部依赖（${deps.length}）`}>
+        <div className="flex flex-wrap gap-1.5">
+          {deps.map((d) => (
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">{d.name}</Badge>
+          ))}
+          {deps.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+        </div>
+      </Row>
+
+      <Row icon={<ArrowUpFromLine size={12} />} label={`被内部依赖（${dependents.length}）`}>
+        <div className="flex flex-wrap gap-1.5">
+          {dependents.map((d) => (
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">{d.name}</Badge>
+          ))}
+          {dependents.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+        </div>
+      </Row>
+
+      {sub.health.decay_flags.length > 0 && (
+        <Row icon={<Flag size={12} />} label="腐化标记">
+          <div className="flex flex-wrap gap-1.5">
+            {sub.health.decay_flags.map((f) => (
+              <Badge key={f} className="border-red-200 bg-red-50 font-normal text-red-600">{f}</Badge>
+            ))}
+          </div>
+        </Row>
+      )}
+
+      <Separator />
+
+      <Row icon={<Info size={12} />} label="说明">
+        <p className="text-[11px] leading-5 text-slate-400">
+          子模块健康为<b>展开时的派生评估</b>（父模块内部的实现质量），不回流父模块分、不写入主地图文件；
+          LLM 独立评估仍只有模块级与架构级两级。生成者：{submap.generator}。
+        </p>
+      </Row>
+    </>
+  )
+}
+
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, onLocateModule, onClose }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
+  const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
+  const submap = selection?.kind === 'submodule' ? submaps[selection.parentId] : undefined
+  const smLoaded = submap && submap !== 'loading' ? submap : undefined
+  const sub = selection?.kind === 'submodule' && smLoaded
+    ? smLoaded.sub_modules.find((s) => s.id === selection.subId)
+    : undefined
+
+  const detailLabel = module ? '模块详情' : layer ? '架构层详情' : sub ? '子模块详情' : '选中详情'
 
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l border-slate-200 bg-white">
@@ -220,7 +325,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, onLocateModule, 
           {(
             [
               ['issues', '问题清单'],
-              ['detail', module ? '模块详情' : layer ? '架构层详情' : '选中详情'],
+              ['detail', detailLabel],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -242,11 +347,14 @@ export function DetailPanel({ map, selection, tab, onTabChange, onLocateModule, 
         {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} />}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} />}
-        {tab === 'detail' && !module && !layer && (
+        {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
+          <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />
+        )}
+        {tab === 'detail' && !module && !layer && !sub && (
           <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
-            点击画布中的模块卡片或层标签查看详情；
+            点击画布中的模块卡片、层标签或展开的子模块查看详情；
             <br />
-            切换到「问题清单」查看全库最需要关注的问题。
+            选中模块后顶部工具栏可展开内部结构。
           </p>
         )}
       </div>

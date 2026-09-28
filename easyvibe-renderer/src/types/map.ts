@@ -68,3 +68,32 @@ export interface CodeMap {
   edges: MapEdge[]
   health: Health
 }
+
+// §8 子图（模块展开 drill-down）
+export interface SubModule {
+  id: string
+  name: string
+  responsibility: string
+  files: string[]
+  key_entries: KeyEntry[]
+  dependencies: string[]
+  health: Health
+}
+
+export interface SubEdge {
+  from: string
+  to: string
+  type: EdgeType
+  label?: string
+  strength: EdgeStrength
+  circular_dep?: boolean
+}
+
+export interface SubMap {
+  version: string
+  parent: { module_id: string; files_snapshot: string[] }
+  generated_at: string
+  generator: string
+  sub_modules: SubModule[]
+  edges: SubEdge[]
+}
