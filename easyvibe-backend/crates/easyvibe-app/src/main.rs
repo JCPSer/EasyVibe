@@ -103,6 +103,10 @@ async fn get_submap(
     State(st): State<AppState>,
     Path((id, module_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
+    // 路径遍历防线：module_id 必须满足 Schema 的 id 字符集（审查 🔴1）
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     Ok(Json(st.map_service.load_submap(&repo, &module_id).await?).into_response())
 }
@@ -292,7 +296,16 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
     ws.on_upgrade(move |mut socket| async move {
         use axum::extract::ws::Message;
         let mut rx = st.event_bus.subscribe();
-        while let Ok(event) = rx.recv().await {
+        // Lagged（广播滞后）不致命：跳过丢失的批次继续收；Closed 才退出
+        loop {
+            let event = match rx.recv().await {
+                Ok(e) => e,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!("[ws] 滞后，丢弃 {skipped} 个事件（客户端应经 REST 重同步）");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
             let msg: WsMessage<Value> = match event {
                 BusEvent::MapChanged(d) => WsMessage { name: ev::MAP_CHANGED.into(), data: serde_json::to_value(d).unwrap_or_default() },
                 BusEvent::MapInvalid(d) => WsMessage { name: ev::MAP_INVALID.into(), data: serde_json::to_value(d).unwrap_or_default() },

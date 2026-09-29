@@ -17,7 +17,7 @@ interface Props {
   selection: Selection
   tab: PanelTab
   onTabChange: (tab: PanelTab) => void
-  submaps: Record<string, SubMap | 'loading'>
+  submaps: Record<string, SubMap | 'loading' | 'error'>
   backendRepo: string | null
   onLocateModule: (moduleId: string) => void
   onClose: () => void
@@ -63,7 +63,7 @@ function ModuleView({ map, mod }: { map: CodeMap; mod: Module }) {
             {healthLabel(mod.health.score)} · {mod.health.score}/100
           </span>
           <span className="text-[10.5px] text-slate-400">
-            coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn}
+            coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
           </span>
         </div>
         {mod.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{mod.health.review_note}</p>}
@@ -243,7 +243,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
             {healthLabel(sub.health.score)} · {sub.health.score}/100
           </span>
           <span className="text-[10.5px] text-slate-400">
-            coupling {sub.health.coupling} · complexity {sub.health.complexity} · churn {sub.health.churn}
+            coupling {sub.health.coupling} · complexity {sub.health.complexity} · churn {sub.health.churn ?? 'n/a'}
           </span>
         </div>
         {sub.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{sub.health.review_note}</p>}
@@ -313,7 +313,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
   const submap = selection?.kind === 'submodule' ? submaps[selection.parentId] : undefined
-  const smLoaded = submap && submap !== 'loading' ? submap : undefined
+  const smLoaded = submap && submap !== 'loading' && submap !== 'error' ? submap : undefined
   const sub = selection?.kind === 'submodule' && smLoaded
     ? smLoaded.sub_modules.find((s) => s.id === selection.subId)
     : undefined

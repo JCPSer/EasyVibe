@@ -10,7 +10,19 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-/// 独立轻量自检（不依赖 MapService 实例；PatrolService 等复用）
+/// 模块/层 id 的合法字符集（与 Schema pattern 一致）——用于校验 URL 路径参数，防路径遍历
+pub fn is_valid_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+/// 独立轻量自检（不依赖 MapService 实例）：结构级最低要求。
+/// 读路径（load_map/缓存）用这一级——存量 v1.0 地图（无 edge id）必须可读；
+/// 写验收（巡检产物）用 validate_strict。
 pub fn validate_minimum(json: &Value) -> Result<(), ApiError> {
     let obj = json.as_object().ok_or_else(|| ApiError::MapInvalid("根节点必须是对象".into()))?;
     for key in ["version", "meta", "layers", "modules", "edges", "health"] {
@@ -18,8 +30,62 @@ pub fn validate_minimum(json: &Value) -> Result<(), ApiError> {
             return Err(ApiError::MapInvalid(format!("缺少必填字段 {key}")));
         }
     }
-    if obj["modules"].as_array().map(|a| a.is_empty()).unwrap_or(true) {
+    let modules = obj["modules"].as_array().ok_or_else(|| ApiError::MapInvalid("modules 必须是数组".into()))?;
+    if modules.is_empty() {
         return Err(ApiError::MapInvalid("modules 不能为空".into()));
+    }
+    Ok(())
+}
+
+/// 严格验收（写路径）：结构 + v1.1 一致性规则（边 id/端点/层/依赖/封闭枚举）。
+/// 审查 Y5 的落地：后端验收不能比外部 agent 还松。
+pub fn validate_strict(json: &Value) -> Result<(), ApiError> {
+    validate_minimum(json)?;
+    let obj = json.as_object().expect("validate_minimum 已确认是对象");
+    let modules = obj["modules"].as_array().expect("validate_minimum 已确认");
+    let layer_ids: std::collections::HashSet<&str> = obj["layers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|l| l["id"].as_str()).collect())
+        .unwrap_or_default();
+    let module_ids: std::collections::HashSet<&str> = modules.iter().filter_map(|m| m["id"].as_str()).collect();
+    let mut edge_ids = std::collections::HashSet::new();
+    for e in obj["edges"].as_array().into_iter().flatten() {
+        let id = e["id"].as_str().ok_or_else(|| ApiError::MapInvalid("边缺少 id（v1.1 必填）".into()))?;
+        if !edge_ids.insert(id) {
+            return Err(ApiError::MapInvalid(format!("边 id 重复: {id}")));
+        }
+        for ep in ["from", "to"] {
+            let v = e[ep].as_str().ok_or_else(|| ApiError::MapInvalid(format!("边 {id} 缺少 {ep}")))?;
+            if !module_ids.contains(v) {
+                return Err(ApiError::MapInvalid(format!("边 {id} 的 {ep}={v} 不存在")));
+            }
+        }
+    }
+    for m in modules {
+        let mid = m["id"].as_str().unwrap_or("?");
+        let layer = m["layer"].as_str().ok_or_else(|| ApiError::MapInvalid(format!("模块 {mid} 缺少 layer")))?;
+        if !layer_ids.contains(layer) {
+            return Err(ApiError::MapInvalid(format!("模块 {mid} 的 layer={layer} 不存在")));
+        }
+        for dep in m["dependencies"].as_array().into_iter().flatten() {
+            let d = dep.as_str().unwrap_or("");
+            if !module_ids.contains(d) {
+                return Err(ApiError::MapInvalid(format!("模块 {mid} 依赖 {d} 不存在")));
+            }
+        }
+        // 封闭枚举校验
+        let h = &m["health"];
+        for (field, allowed) in [
+            ("coupling", ["low", "medium", "high", "critical"].as_slice()),
+            ("complexity", ["low", "medium", "high"].as_slice()),
+            ("churn", ["low", "medium", "high"].as_slice()),
+        ] {
+            if let Some(v) = h[field].as_str() {
+                if !allowed.contains(&v) {
+                    return Err(ApiError::MapInvalid(format!("模块 {mid} health.{field}={v} 非法")));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -156,7 +222,15 @@ pub fn spawn_growth_watcher(repo: Repo) -> watch::Receiver<Vec<Value>> {
                 Ok(r) => r,
                 Err(_) => continue,
             };
-            let new_part = if reset { raw.as_str() } else { &raw[offset as usize..] };
+            // 防 panic（审查 🟡）：offset 可能越界或落在多字节字符中间（metadata 与 read 间文件被换写），
+            // get() 在两个场景都返回 None → 回退从头读
+            let new_part = match raw.get((if reset { 0 } else { offset as usize })..) {
+                Some(p) => p,
+                None => {
+                    offset = 0;
+                    raw.as_str()
+                }
+            };
             offset = len;
             let mut batch = Vec::new();
             for (i, line) in new_part.lines().enumerate() {
@@ -253,10 +327,42 @@ mod tests {
         let bad = serde_json::json!({"version": "1.0"});
         assert!(svc.check_minimum(&bad).is_err());
         let good = serde_json::json!({
-            "version": "1.0", "meta": {}, "layers": [], "modules": [{"id": "m"}],
-            "edges": [], "health": {}
+            "version": "1.0", "meta": {}, "layers": [{"id": "l1"}],
+            "modules": [{"id": "m1", "layer": "l1", "dependencies": [],
+                "health": {"coupling": "low", "complexity": "low", "churn": "low"}}],
+            "edges": [{"id": "e1", "from": "m1", "to": "m1", "type": "call", "strength": "weak"}],
+            "health": {}
         });
         assert!(svc.check_minimum(&good).is_ok());
+        // 结构级对 v1.0 旧数据（无 edge id）保持可读
+        let mut legacy = good.clone();
+        legacy["edges"] = serde_json::json!([{"from": "m1", "to": "m1", "type": "call", "strength": "weak"}]);
+        assert!(svc.check_minimum(&legacy).is_ok());
+        // 严格验收（写路径）：重复边 id / 悬空边 / 非法枚举 / 未知 layer 必须被拒
+        let mut dup = good.clone();
+        dup["edges"].as_array_mut().unwrap().push(good["edges"][0].clone());
+        assert!(validate_strict(&dup).is_err());
+        let mut dangling = good.clone();
+        dangling["edges"][0]["to"] = serde_json::json!("ghost");
+        assert!(validate_strict(&dangling).is_err());
+        let mut bad_enum = good.clone();
+        bad_enum["modules"][0]["health"]["coupling"] = serde_json::json!("extreme");
+        assert!(validate_strict(&bad_enum).is_err());
+        let mut bad_layer = good.clone();
+        bad_layer["modules"][0]["layer"] = serde_json::json!("nope");
+        assert!(validate_strict(&bad_layer).is_err());
+        assert!(validate_strict(&legacy).is_err()); // 无 edge id 的旧数据不能通过写验收
+    }
+
+    #[tokio::test]
+    async fn submap_path_traversal_rejected() {
+        // is_valid_id 防线（审查 🔴1 的回归测试）
+        assert!(is_valid_id("exam-core"));
+        assert!(!is_valid_id("../etc/passwd"));
+        assert!(!is_valid_id("..%2F..%2Fetc"));
+        assert!(!is_valid_id("a/b"));
+        assert!(!is_valid_id(""));
+        assert!(!is_valid_id("1abc"));
     }
 
     #[test]

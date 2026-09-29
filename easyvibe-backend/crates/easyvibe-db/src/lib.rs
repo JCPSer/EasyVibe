@@ -51,9 +51,13 @@ impl Database {
         Ok(Self { pool })
     }
 
-    /// 内存库（测试）：单连接保证内存数据一致性
+    /// 内存库（测试）：单连接保证内存数据一致性（审查：原默认 10 连接会让内存库裂库）
     pub async fn connect_memory() -> Result<Self, ApiError> {
-        let pool = SqlitePool::connect("sqlite::memory:").await.map_err(db_err)?;
+        let pool = sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .map_err(db_err)?;
         Self::migrate(&pool).await?;
         Ok(Self { pool })
     }

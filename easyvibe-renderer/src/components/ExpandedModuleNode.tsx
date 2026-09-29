@@ -1,11 +1,19 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { ChevronDown, Loader2, UnfoldVertical } from 'lucide-react'
+import { ChevronDown, Loader2, RotateCcw, UnfoldVertical, AlertTriangle } from 'lucide-react'
 import type { Module } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 
 export type ExpandedModuleNodeType = Node<
-  { module: Module; inCount: number; outCount: number; loading: boolean; subCount: number },
+  {
+    module: Module
+    inCount: number
+    outCount: number
+    loading: boolean
+    error: boolean
+    subCount: number
+    onRetry?: () => void
+  },
   'moduleExpanded'
 >
 
@@ -56,6 +64,22 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
         {data.loading ? (
           <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-slate-400">
             <Loader2 size={12} className="animate-spin" /> 归纳子模块中…
+          </span>
+        ) : data.error ? (
+          <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-red-500">
+            <AlertTriangle size={11} /> 子图加载失败
+            {data.onRetry && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  data.onRetry!()
+                }}
+                className="flex items-center gap-0.5 rounded-full border border-red-200 bg-white px-1.5 py-0.5 font-semibold hover:bg-red-50"
+                title="重试加载子图"
+              >
+                <RotateCcw size={9} /> 重试
+              </button>
+            )}
           </span>
         ) : (
           <span className="ml-auto flex items-center gap-1 text-[10.5px] text-slate-400">

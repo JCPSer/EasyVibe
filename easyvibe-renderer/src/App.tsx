@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Component, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
   Background,
@@ -16,7 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles } from 'lucide-react'
 
-import type { CodeMap, SubMap } from '@/types/map'
+import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
 import { ModuleNode, type ModuleNodeType } from '@/components/ModuleNode'
 import { BandNode, type BandNodeType } from '@/components/BandNode'
@@ -24,7 +24,8 @@ import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/Ex
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitGrowthEvent, emitSessionEvent, onGrowthEvent, onSessionEvent } from '@/lib/growthBus'
+import { emitGrowthEvent, emitSessionEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
+import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
@@ -35,13 +36,6 @@ interface Filters {
 }
 
 const MAX_EXPANDED = 3
-
-// growth.log 事件（v2.2 协议）
-type GrowthEvent =
-  | { type: 'layer'; layer: CodeMap['layers'][number] }
-  | { type: 'module'; module: CodeMap['modules'][number]; out_edges: CodeMap['edges'] }
-  | { type: 'arch_health'; health: CodeMap['health'] }
-  | { type: 'done' }
 
 interface GrowthState {
   events: GrowthEvent[]
@@ -54,14 +48,15 @@ function buildFlow(
   map: CodeMap,
   selection: Selection,
   filters: Filters,
-  expanded: Map<string, SubMap | 'loading'>,
+  expanded: Map<string, SubMap | 'loading' | 'error'>,
   onSelectLayer: (id: string) => void,
+  retrySubmap?: (id: string) => void,
   growth?: { layers: Set<string>; modules: Set<string> } | null,
 ) {
   // 展开元信息：加载中给 4 个骨架位
   const expandedMeta = new Map<string, { ids: string[]; loading: boolean }>()
   for (const [id, sm] of expanded) {
-    expandedMeta.set(id, sm === 'loading' ? { ids: ['__s0', '__s1', '__s2', '__s3'], loading: true } : { ids: sm.sub_modules.map((s) => s.id), loading: false })
+    expandedMeta.set(id, sm === 'loading' || sm === 'error' ? { ids: ['__s0', '__s1', '__s2', '__s3'], loading: true } : { ids: sm.sub_modules.map((s) => s.id), loading: false })
   }
   const { positions, bands, blocks } = layoutMap(map, expandedMeta)
 
@@ -133,7 +128,9 @@ function buildFlow(
             inCount: inCount.get(mod.id) ?? 0,
             outCount: outCount.get(mod.id) ?? 0,
             loading: sm === 'loading',
-            subCount: sm === 'loading' ? 0 : sm.sub_modules.length,
+            error: sm === 'error',
+            subCount: sm === 'loading' || sm === 'error' ? 0 : sm.sub_modules.length,
+            onRetry: retrySubmap ? () => retrySubmap(mod.id) : undefined,
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,
@@ -163,7 +160,7 @@ function buildFlow(
       const parent = map.modules.find((m) => m.id === parentId)!
       const inDeg = new Map<string, number>()
       const outDeg = new Map<string, number>()
-      if (sm !== 'loading') {
+      if (sm !== 'loading' && sm !== 'error') {
         for (const e of sm.edges) {
           outDeg.set(e.from, (outDeg.get(e.from) ?? 0) + 1)
           inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1)
@@ -174,8 +171,8 @@ function buildFlow(
         type: 'submodule',
         position: block.childPositions.get(sid)!,
         data: {
-          sub: sm === 'loading' ? undefined : sm.sub_modules.find((s) => s.id === sid),
-          loading: sm === 'loading',
+          sub: sm === 'loading' || sm === 'error' ? undefined : sm.sub_modules.find((s) => s.id === sid),
+          loading: sm === 'loading' || sm === 'error',
           inCount: inDeg.get(sid) ?? 0,
           outCount: outDeg.get(sid) ?? 0,
           parentName: parent.name,
@@ -205,10 +202,10 @@ function buildFlow(
     : map.edges
   const edges: Edge[] = visibleEdges.map((e, i) => {
     const violation = e.direction_violation === true
-    const si = outIdx.get(e.from) ?? 0
-    outIdx.set(e.from, si + 1)
-    const ti = inIdx.get(e.to) ?? 0
-    inIdx.set(e.to, ti + 1)
+    const si = Math.min(outIdx.get(e.from) ?? 0, 17) // 与节点 MAX_HANDLES=18 对齐，超出复用最后一个 handle
+    outIdx.set(e.from, (outIdx.get(e.from) ?? 0) + 1)
+    const ti = Math.min(inIdx.get(e.to) ?? 0, 17)
+    inIdx.set(e.to, (inIdx.get(e.to) ?? 0) + 1)
     const strengthStyle =
       e.strength === 'strong'
         ? { strokeWidth: 2.1, stroke: '#64748b', opacity: 0.85 }
@@ -217,7 +214,7 @@ function buildFlow(
           : { strokeWidth: 1.1, stroke: '#cbd5e1', opacity: 0.6 }
     const dim = edgeDim(e.from === selModuleId || e.to === selModuleId, violation)
     return {
-      id: `e-${i}`,
+      id: `e-${e.id ?? i}`,
       source: e.from,
       target: e.to,
       sourceHandle: `s${si}`,
@@ -236,15 +233,15 @@ function buildFlow(
 
   // 内部连线（展开模块的子图边）
   for (const [parentId, sm] of expanded) {
-    if (sm === 'loading') continue
+    if (sm === 'loading' || sm === 'error') continue
     const sin = new Map<string, number>()
     const sout = new Map<string, number>()
     sm.edges.forEach((e, i) => {
       const cyclic = e.circular_dep === true
-      const si = sout.get(e.from) ?? 0
-      sout.set(e.from, si + 1)
-      const ti = sin.get(e.to) ?? 0
-      sin.set(e.to, ti + 1)
+      const si = Math.min(sout.get(e.from) ?? 0, 9) // 子模块节点 MAX_HANDLES=10
+      sout.set(e.from, (sout.get(e.from) ?? 0) + 1)
+      const ti = Math.min(sin.get(e.to) ?? 0, 9)
+      sin.set(e.to, (sin.get(e.to) ?? 0) + 1)
       const touches = selection?.kind === 'submodule'
         ? (selection.parentId === parentId && (selection.subId === e.from || selection.subId === e.to))
         : selModuleId === parentId || !selModuleId
@@ -429,10 +426,12 @@ function GrowthPanel({
   onExit: () => void
 }) {
   const total = growth.events.length
-  const pct = Math.round((growth.index / total) * 100)
+  const pct = total === 0 ? 0 : Math.round((growth.index / total) * 100)
   const cur = growth.index < growth.events.length ? growth.events[growth.index] : null
   const status = growth.done
     ? '归纳完成'
+    : total === 0
+      ? '等待生长事件…'
     : cur?.type === 'layer'
       ? `分层：${cur.layer.name}`
       : cur?.type === 'module'
@@ -482,7 +481,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [tab, setTab] = useState<PanelTab>('issues')
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
-  const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading'>>({})
+  const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading' | 'error'>>({})
   const [growth, setGrowth] = useState<GrowthState | null>(null)
   const [liveActivity, setLiveActivity] = useState(false)
   const [inducing, setInducing] = useState(false)
@@ -491,6 +490,9 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   useEffect(() => {
     growthRef.current = growth
   }, [growth])
+
+  // R2：WS 断线 → 退出生长模式（重连后由用户重新进入，startGrowth 拉全量对齐）
+  useEffect(() => setWsCloseListener(() => setGrowth(null)), [])
 
   // 会话状态：终态（succeeded/failed）解除"归纳中"/"巡检中"（patrol 会话以 patrol- 前缀区分）
   useEffect(
@@ -507,12 +509,13 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   useEffect(
     () =>
       onGrowthEvent((event) => {
+        if (!isValidGrowthEvent(event)) return // 坏消息直接丢弃（R1）
         const g = growthRef.current
         if (!g) {
           setLiveActivity(true)
           return
         }
-        setGrowth({ ...g, events: [...g.events, event as unknown as GrowthEvent] })
+        setGrowth({ ...g, events: [...g.events, event] })
       }),
     [],
   )
@@ -556,9 +559,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
         return r.text()
       })
       .then((text) => {
-        const events = backendRepo
-          ? (JSON.parse(text) as GrowthEvent[])
-          : text.trim().split('\n').map((l) => JSON.parse(l) as GrowthEvent)
+        const events = parseGrowthText(text, !!backendRepo) // 坏行/坏消息跳过（Y1/R1）
         setSelection(null)
         setExpandedIds([])
         setLiveActivity(false)
@@ -613,45 +614,36 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
         })
         .then((d) => setSubmaps((p) => ({ ...p, [id]: d })))
         .catch(() => {
-          setSubmaps((p) => {
-            const { [id]: _dropped, ...rest } = p
-            return rest
-          })
-          setExpandedIds((prev) => prev.filter((x) => x !== id))
+          // R4：失败保留展开态并标记 error（容器内显示重试），不再无声消失
+          setSubmaps((p) => ({ ...p, [id]: 'error' }))
         })
     }
   }, [submaps, backendRepo])
 
+  const retrySubmap = useCallback((id: string) => {
+    setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
+  }, [])
+
   const expanded = useMemo(() => {
-    const m = new Map<string, SubMap | 'loading'>()
+    const m = new Map<string, SubMap | 'loading' | 'error'>()
     for (const id of expandedIds) if (submaps[id]) m.set(id, submaps[id])
     return m
   }, [expandedIds, submaps])
 
   // 直播合并：生长事件的模块/层/边合入基准地图——map.json 在归纳完成前不含新模块，
   // 生长事件本身才是"进行中模块"的事实源。合并用全量事件（布局稳定），显隐由 arrived 控制。
-  const mergedMap = useMemo(() => {
-    if (!growth) return map
-    const layers = new Map(map.layers.map((l) => [l.id, l]))
-    const modules = new Map(map.modules.map((m) => [m.id, m]))
-    const edges = new Map(map.edges.map((e) => [e.id, e]))
-    for (const e of growth.events) {
-      if (e.type === 'layer') layers.set(e.layer.id, e.layer)
-      if (e.type === 'module') {
-        modules.set(e.module.id, e.module)
-        for (const oe of e.out_edges ?? []) edges.set(oe.id, oe)
-      }
-    }
-    return { ...map, layers: [...layers.values()], modules: [...modules.values()], edges: [...edges.values()] } as CodeMap
-  }, [map, growth?.events])
+  const mergedMap = useMemo(
+    () => (growth ? mergeGrowthEvents(map, growth.events) : map),
+    [map, growth?.events],
+  )
 
-  const emptyExpanded = useMemo(() => new Map<string, SubMap | 'loading'>(), [])
+  const emptyExpanded = useMemo(() => new Map<string, SubMap | 'loading' | 'error'>(), [])
   const effectiveExpanded = growth ? emptyExpanded : expanded
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, growthVisible),
-    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, growthVisible],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible],
   )
 
   useEffect(() => {
@@ -872,6 +864,28 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   )
 }
 
+// R1 兜底：渲染异常拦截，白屏换成可恢复提示
+class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Error | null }> {
+  state = { err: null as Error | null }
+  static getDerivedStateFromError(err: Error) {
+    return { err }
+  }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
+          <span className="font-semibold text-slate-700">画布渲染出错（已拦截白屏）</span>
+          <span className="max-w-[420px] text-center text-slate-400">{String(this.state.err).slice(0, 200)}</span>
+          <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-blue-600 hover:bg-slate-50" onClick={() => location.reload()}>
+            刷新恢复
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export default function App() {
   const [map, setMap] = useState<CodeMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -926,6 +940,7 @@ export default function App() {
       }
       ws.onclose = () => {
         if (closed) return
+        notifyWsClosed() // R2：断线时通知 Canvas 退出生长模式（重连后重新进入会拉全量）
         retry += 1
         timer = window.setTimeout(connect, Math.min(15000, 1000 * 2 ** retry))
       }
@@ -964,8 +979,10 @@ export default function App() {
     )
   }
   return (
-    <ReactFlowProvider>
-      <Canvas map={map} backendRepo={backendRepo} />
-    </ReactFlowProvider>
+    <CanvasBoundary>
+      <ReactFlowProvider>
+        <Canvas map={map} backendRepo={backendRepo} />
+      </ReactFlowProvider>
+    </CanvasBoundary>
   )
 }

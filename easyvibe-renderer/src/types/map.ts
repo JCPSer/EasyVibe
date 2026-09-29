@@ -11,13 +11,20 @@ export type {
   Concern,
   MapEdge,
 } from './generated'
-import type { KeyEntry, Health } from './generated'
+import type { KeyEntry, Health, Layer, Module, MapEdge } from './generated'
 
 // ---- 以下类型尚无机器 Schema（格式规范 §8/§9 仅文档定义），先手工维护 ----
 // TODO(v1.2)：为子图与用户视图补 JSON Schema 后并入自动生成
 
 export type EdgeType = 'call' | 'import' | 'api' | 'event' | 'db' | 'config'
 export type EdgeStrength = 'strong' | 'normal' | 'weak'
+
+// growth.log 事件（v2.2 协议）
+export type GrowthEvent =
+  | { type: 'layer'; layer: Layer }
+  | { type: 'module'; module: Module; out_edges: MapEdge[] }
+  | { type: 'arch_health'; health: Health }
+  | { type: 'done' }
 
 // §8 子图（模块展开 drill-down）
 export interface SubModule {

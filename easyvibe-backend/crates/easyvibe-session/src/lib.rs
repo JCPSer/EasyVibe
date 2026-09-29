@@ -37,19 +37,20 @@ impl SessionManager {
 
     /// 注册一个外部活动会话（如巡检）；仓库已有活动会话（归纳/巡检任一）则拒绝。
     /// 与 start_induction 共用同一纪律：地图写操作全局单飞。
+    /// 注意：检查与插入必须在同一把写锁内完成（修代码审查发现的 TOCTOU 竞态）。
     pub async fn try_register(&self, s: SessionStatusChanged) -> Result<(), ApiError> {
-        {
-            let map = self.active.read().await;
-            if let Some(existing) = map.get(&s.repo) {
-                if matches!(existing.status, SessionStatus::Starting | SessionStatus::Running) {
-                    return Err(ApiError::Conflict(format!(
-                        "仓库 {} 有活动会话 {}，地图写操作需排队",
-                        s.repo, existing.session_id
-                    )));
-                }
+        let mut map = self.active.write().await;
+        if let Some(existing) = map.get(&s.repo) {
+            if matches!(existing.status, SessionStatus::Starting | SessionStatus::Running) {
+                return Err(ApiError::Conflict(format!(
+                    "仓库 {} 有活动会话 {}，地图写操作需排队",
+                    s.repo, existing.session_id
+                )));
             }
         }
-        self.publish(s).await;
+        map.insert(s.repo.clone(), s.clone());
+        drop(map);
+        let _ = self.events.send(s).await;
         Ok(())
     }
 
@@ -86,9 +87,19 @@ impl SessionManager {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = cmd.spawn().map_err(|e| {
-            ApiError::Internal(format!("spawn {command} 失败: {e}"))
-        })?;
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                // spawn 失败必须释放会话注册，否则仓库写路径永久锁死（审查发现 Y1）
+                self.note_status(SessionStatusChanged {
+                    repo: repo_id.to_string(),
+                    session_id: session_id.clone(),
+                    status: SessionStatus::Failed,
+                })
+                .await;
+                return Err(ApiError::Internal(format!("spawn {command} 失败: {e}")));
+            }
+        };
 
         // prompt 经 stdin 注入（避免 argv 长度限制；agent 自行读 SCHEMA 文件）
         if let Some(mut stdin) = child.stdin.take() {
@@ -140,7 +151,23 @@ impl SessionManager {
                     SessionStatus::Failed
                 }
             };
-            let _ = stderr; // stderr 随进程关闭丢弃（详细排查看 agent 自身日志）
+            // stderr 必须排空：管道 64KB 写满会挂死 agent（审查发现）
+            if let Some(mut err) = stderr {
+                use tokio::io::AsyncBufReadExt as _;
+                let mut reader = tokio::io::BufReader::new(&mut err);
+                let mut line = String::new();
+                loop {
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            let peek: String = line.chars().take(200).collect();
+                            warn!("[session {session_id_task}] stderr: {peek}");
+                            line.clear();
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
             let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
             active.write().await.insert(repo.clone(), final_status.clone());
             let _ = events.send(final_status).await;
@@ -225,6 +252,43 @@ mod tests {
             })
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn try_register_race_is_closed() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let mgr = SessionManager::new(tx);
+        let mk = |sid: &str| SessionStatusChanged {
+            repo: "race".into(),
+            session_id: sid.into(),
+            status: SessionStatus::Running,
+        };
+        // 真并发双注册：必须恰好一个成功（审查 🔴2 的回归测试）
+        let (a, b) = tokio::join!(mgr.try_register(mk("s1")), mgr.try_register(mk("s2")));
+        let ok_count = [a.is_ok(), b.is_ok()].into_iter().filter(|x| *x).count();
+        assert_eq!(ok_count, 1, "并发注册必须恰好一个成功");
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_releases_registration() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let mgr = SessionManager::new(tx);
+        let dir = std::env::temp_dir();
+        // 不存在的命令 → spawn 失败 → 会话必须被判 Failed 并释放（审查 Y1）
+        let err = mgr.start_induction("repo1", &dir, "t", "definitely-not-a-real-cmd-xyz", &[]).await;
+        assert!(matches!(err, Err(ApiError::Internal(_))));
+        // 终态 Failed 事件已发布
+        let mut saw_failed = false;
+        while let Ok(evt) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+            let Some(e) = evt else { break };
+            if e.status == SessionStatus::Failed {
+                saw_failed = true;
+                break;
+            }
+        }
+        assert!(saw_failed, "spawn 失败必须发布 Failed 终态");
+        // 注册已释放：同仓库可再注册
+        assert!(mgr.try_register(SessionStatusChanged { repo: "repo1".into(), session_id: "next".into(), status: SessionStatus::Running }).await.is_ok());
     }
 
     #[tokio::test]

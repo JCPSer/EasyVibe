@@ -27,3 +27,12 @@ export function onSessionEvent(listener: SessionEventListener): () => void {
     sessionListeners.delete(listener)
   }
 }
+
+// WS 断线通知（R2）：App 层 WS onclose 触发，Canvas 消费（退出生长模式）
+let wsCloseListener: (() => void) | null = null
+export function setWsCloseListener(fn: (() => void) | null) {
+  wsCloseListener = fn
+}
+export function notifyWsClosed() {
+  wsCloseListener?.()
+}

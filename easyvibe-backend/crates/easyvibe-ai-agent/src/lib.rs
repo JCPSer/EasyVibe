@@ -3,7 +3,7 @@
 //! ai-agent 管"后端自己调 LLM API"（巡检/审查等槽位，PRD 5.2 的多 LLM 服务配置）。
 use easyvibe_common::ApiError;
 use easyvibe_db::{FinishPatrolRun, HealthRepository, ModuleHealthRow, NewPatrolRun};
-use easyvibe_map::{atomic_write_json, validate_minimum};
+use easyvibe_map::{atomic_write_json, validate_strict};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -56,7 +56,12 @@ impl LlmClient for AnthropicClient {
             system: &'a str,
             messages: [Msg<'a>; 1],
         }
-        let client = reqwest::Client::new();
+        // 无超时会让会话永久 Running（审查 Y2）
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| ApiError::Internal(format!("LLM client 构建失败: {e}")))?;
         let resp = client
             .post(format!("{}/v1/messages", self.base_url))
             .header("x-api-key", &self.api_key)
@@ -203,7 +208,7 @@ impl<R: HealthRepository> PatrolService<R> {
         let raw = llm.chat(ChatRequest { system: "你是 EasyVibe 巡检 Agent，只输出 JSON 本身。", user: &user }).await?;
 
         let new_map = extract_json(&raw)?;
-        validate_minimum(&new_map).map_err(|e| ApiError::MapInvalid(format!("巡检产物未通过自检: {e}")))?;
+        validate_strict(&new_map).map_err(|e| ApiError::MapInvalid(format!("巡检产物未通过严格验收: {e}")))?;
 
         // 健康历史落库（先库后文件：库失败不覆盖合法地图）
         self.persist_module_health(run_id, &new_map).await?;
