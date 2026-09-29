@@ -9,6 +9,7 @@ use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, Sessi
 use easyvibe_common::{events as ev, ApiError, ApiResponse, ErrorResponse};
 use easyvibe_map::{repo_from_root, spawn_map_watcher, MapService};
 use easyvibe_session::SessionManager;
+use easyvibe_ai_agent::QaClient as _;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -62,6 +63,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
+        .route("/repos/{id}/chat", axum::routing::post(chat))
+        .route("/repos/{id}/views", axum::routing::post(save_view))
         .with_state(state.clone());
 
     Router::new()
@@ -187,6 +190,101 @@ async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) ->
     use easyvibe_db::HealthRepository as _;
     let runs = st.health_repo.list_runs(&id, 20).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": runs })).into_response())
+}
+
+// ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
+
+#[derive(serde::Deserialize)]
+struct ChatHttpRequest {
+    message: String,
+    #[serde(default)]
+    history: Vec<ChatTurn>,
+}
+
+#[derive(serde::Deserialize, Clone)]
+struct ChatTurn {
+    role: String, // user / assistant
+    content: String,
+}
+
+/// 入口对话：基于语义地图问答（M2-5 范围：地图级回答；代码级追问留待 M3 工具能力）
+async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<ChatHttpRequest>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    // 历史折叠为 (q, a) 对（容错奇数/乱序）
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut pending_q: Option<String> = None;
+    for t in &body.history {
+        match t.role.as_str() {
+            "user" => pending_q = Some(t.content.clone()),
+            "assistant" => {
+                if let Some(q) = pending_q.take() {
+                    pairs.push((q, t.content.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+    let answer: easyvibe_ai_agent::QaAnswer = match *st.llm_mode {
+        LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs).await?,
+        LlmMode::Anthropic => {
+            let llm = easyvibe_ai_agent::AnthropicClient::new(
+                &std::env::var("EASYVIBE_LLM_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".into()),
+                &std::env::var("EASYVIBE_LLM_API_KEY").unwrap_or_default(),
+                &std::env::var("EASYVIBE_LLM_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".into()),
+            );
+            easyvibe_ai_agent::LlmQaClient::new(llm).ask(&snap.json, &body.message, &pairs).await?
+        }
+    };
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": { "reply": answer.reply, "refs": answer.refs }
+    }))
+    .into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct SaveViewRequest {
+    name: String,
+    #[serde(default)]
+    nodes: Vec<String>, // ["module:exam-core", ...]
+    #[serde(default)]
+    edges: Vec<serde_json::Value>,
+    #[serde(default)]
+    annotations: Vec<serde_json::Value>,
+}
+
+/// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
+async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<SaveViewRequest>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let slug: String = body
+        .name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(40)
+        .collect();
+    let slug = if slug.is_empty() {
+        format!("view-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0))
+    } else {
+        slug
+    };
+    let view = serde_json::json!({
+        "version": "1.0",
+        "name": body.name,
+        "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
+        "source": { "conversation_id": "manual" },
+        "nodes": body.nodes.iter().map(|r| serde_json::json!({ "ref": r })).collect::<Vec<_>>(),
+        "edges": body.edges,
+        "annotations": body.annotations,
+    });
+    let dir = repo.root.join(".easyvibe/views");
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| ApiError::Internal(format!("创建 views 目录失败: {e}")))?;
+    let path = dir.join(format!("{slug}.json"));
+    easyvibe_map::atomic_write_json(&path, &view).await?;
+    Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "success": true, "data": { "path": path.to_string_lossy() } }))).into_response())
 }
 
 /// WS：订阅事件总线，向前端推送 domain.camelCase 事件

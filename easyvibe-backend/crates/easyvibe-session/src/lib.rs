@@ -134,7 +134,7 @@ impl SessionManager {
             }
             let status = match child.wait().await {
                 Ok(exit) if exit.success() => SessionStatus::Succeeded,
-                Ok(exit) => SessionStatus::Failed,
+                Ok(_exit) => SessionStatus::Failed,
                 Err(e) => {
                     warn!("[session {session_id_task}] wait 失败: {e}");
                     SessionStatus::Failed

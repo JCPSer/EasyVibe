@@ -4,12 +4,13 @@ import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
+import { ChatPanel } from '@/components/ChatPanel'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
   | { kind: 'submodule'; parentId: string; subId: string }
   | null
-export type PanelTab = 'issues' | 'detail'
+export type PanelTab = 'issues' | 'detail' | 'chat'
 
 interface Props {
   map: CodeMap
@@ -17,6 +18,7 @@ interface Props {
   tab: PanelTab
   onTabChange: (tab: PanelTab) => void
   submaps: Record<string, SubMap | 'loading'>
+  backendRepo: string | null
   onLocateModule: (moduleId: string) => void
   onClose: () => void
 }
@@ -306,7 +308,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, onLocateModule, onClose }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onLocateModule, onClose }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -326,6 +328,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, onLocat
             [
               ['issues', '问题清单'],
               ['detail', detailLabel],
+              ['chat', '对话'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -345,6 +348,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, onLocat
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
         {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} />}
+        {tab === 'chat' && <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (

@@ -851,6 +851,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
           tab={tab}
           onTabChange={setTab}
           submaps={submaps}
+          backendRepo={backendRepo}
           onLocateModule={(id) => {
             setSelection({ kind: 'module', id })
             setTab('detail')
