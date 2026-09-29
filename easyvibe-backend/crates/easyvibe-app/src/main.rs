@@ -5,9 +5,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use easyvibe_api_types::{
-    GrowthEvent, HealthResponse, MapChanged, MapInvalid, RepoInfo, WsMessage,
-};
+use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, WsMessage};
 use easyvibe_common::{events as ev, ApiError, ApiResponse, ErrorResponse};
 use easyvibe_map::{repo_from_root, spawn_map_watcher, MapService};
 use serde_json::Value;
@@ -29,7 +27,8 @@ pub struct AppState {
 pub enum BusEvent {
     MapChanged(MapChanged),
     MapInvalid(MapInvalid),
-    Growth(GrowthEvent),
+    Growth { repo: String, event: Value },
+    Progress { repo: String, progress: Value },
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -69,17 +68,8 @@ async fn get_map(State(st): State<AppState>, Path(id): Path<String>) -> Result<R
 
 async fn get_growth(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
-    let events: Vec<GrowthEvent> = st
-        .map_service
-        .load_growth(&repo)
-        .await?
-        .into_iter()
-        .map(|payload| {
-            let event_type = payload.get("type").and_then(|t| t.as_str()).unwrap_or("unknown").to_string();
-            GrowthEvent { event_type, payload }
-        })
-        .collect();
-    Ok(Json(events).into_response())
+    // 原样返回 growth.log 事件数组（与文件行一致，前端状态机统一消费）
+    Ok(Json(st.map_service.load_growth(&repo).await?).into_response())
 }
 
 async fn get_submap(
@@ -99,7 +89,14 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
             let msg: WsMessage<Value> = match event {
                 BusEvent::MapChanged(d) => WsMessage { name: ev::MAP_CHANGED.into(), data: serde_json::to_value(d).unwrap_or_default() },
                 BusEvent::MapInvalid(d) => WsMessage { name: ev::MAP_INVALID.into(), data: serde_json::to_value(d).unwrap_or_default() },
-                BusEvent::Growth(g) => WsMessage { name: ev::GROWTH_EVENT.into(), data: serde_json::to_value(g).unwrap_or_default() },
+                BusEvent::Growth { repo, event } => WsMessage {
+                    name: ev::GROWTH_EVENT.into(),
+                    data: serde_json::json!({ "repo": repo, "event": event }),
+                },
+                BusEvent::Progress { repo, progress } => WsMessage {
+                    name: ev::PROGRESS_UPDATED.into(),
+                    data: serde_json::json!({ "repo": repo, "progress": progress }),
+                },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -173,6 +170,31 @@ async fn main() {
                     Err(e) => BusEvent::MapInvalid(MapInvalid { repo: repo_id.clone(), error: e }),
                 };
                 let _ = bus.send(event);
+            }
+        });
+
+        // growth.log 增量 → growth.event
+        let mut grx = easyvibe_map::spawn_growth_watcher(r.clone());
+        let bus = event_bus.clone();
+        let repo_id = r.id.clone();
+        tokio::spawn(async move {
+            while grx.changed().await.is_ok() {
+                let batch = grx.borrow().clone();
+                for event in batch {
+                    let _ = bus.send(BusEvent::Growth { repo: repo_id.clone(), event });
+                }
+            }
+        });
+
+        // progress.json → progress.updated
+        let mut prx = easyvibe_map::spawn_progress_watcher(r.clone());
+        let bus = event_bus.clone();
+        let repo_id = r.id.clone();
+        tokio::spawn(async move {
+            while prx.changed().await.is_ok() {
+                let progress = prx.borrow().clone();
+                if progress.is_null() { continue; }
+                let _ = bus.send(BusEvent::Progress { repo: repo_id.clone(), progress });
             }
         });
     }

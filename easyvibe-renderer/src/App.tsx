@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
   Background,
@@ -24,6 +24,7 @@ import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/Ex
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
 import { isIssueModule } from '@/components/IssuesList'
+import { emitGrowthEvent, onGrowthEvent } from '@/lib/growthBus'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
@@ -466,6 +467,25 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading'>>({})
   const [growth, setGrowth] = useState<GrowthState | null>(null)
+  const [liveActivity, setLiveActivity] = useState(false)
+  const growthRef = useRef<GrowthState | null>(null)
+  useEffect(() => {
+    growthRef.current = growth
+  }, [growth])
+
+  // 直播订阅：WS 到达的 growth.event 追加进当前生长会话；未在生长模式则点亮"归纳活动"指示
+  useEffect(
+    () =>
+      onGrowthEvent((event) => {
+        const g = growthRef.current
+        if (!g) {
+          setLiveActivity(true)
+          return
+        }
+        setGrowth({ ...g, events: [...g.events, event as unknown as GrowthEvent] })
+      }),
+    [],
+  )
   const [headerExpanded, setHeaderExpanded] = useState(false)
   const { fitView } = useReactFlow()
 
@@ -482,34 +502,40 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
     return { layers, modules }
   }, [growth])
 
-  // 事件推进定时器
+  // 事件推进定时器：500ms 一帧；直播模式下新事件经总线追加后由同一节奏点亮
   useEffect(() => {
     if (!growth?.playing) return
     const t = setInterval(() => {
       setGrowth((g) => {
         if (!g || !g.playing) return g
-        const next = g.index + 1
-        if (next >= g.events.length) return { ...g, index: g.events.length, playing: false, done: true }
-        return { ...g, index: next }
+        if (g.index >= g.events.length) {
+          const last = g.events[g.events.length - 1]
+          return last?.type === 'done' ? { ...g, playing: false, done: true } : g
+        }
+        return { ...g, index: g.index + 1 }
       })
-    }, 700)
+    }, 500)
     return () => clearInterval(t)
   }, [growth?.playing])
 
   const startGrowth = useCallback(() => {
-    fetch('/data/growth.log')
+    const url = backendRepo ? `/api/repos/${backendRepo}/growth` : '/data/growth.log'
+    fetch(url)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.text()
       })
       .then((text) => {
-        const events = text.trim().split('\n').map((l) => JSON.parse(l) as GrowthEvent)
+        const events = backendRepo
+          ? (JSON.parse(text) as GrowthEvent[])
+          : text.trim().split('\n').map((l) => JSON.parse(l) as GrowthEvent)
         setSelection(null)
         setExpandedIds([])
+        setLiveActivity(false)
         setGrowth({ events, index: 0, playing: true, done: false })
       })
       .catch(() => setGrowth(null))
-  }, [])
+  }, [backendRepo])
 
   const onSelectLayer = useCallback((id: string) => {
     setSelection({ kind: 'layer', id })
@@ -549,13 +575,30 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
     return m
   }, [expandedIds, submaps])
 
+  // 直播合并：生长事件的模块/层/边合入基准地图——map.json 在归纳完成前不含新模块，
+  // 生长事件本身才是"进行中模块"的事实源。合并用全量事件（布局稳定），显隐由 arrived 控制。
+  const mergedMap = useMemo(() => {
+    if (!growth) return map
+    const layers = new Map(map.layers.map((l) => [l.id, l]))
+    const modules = new Map(map.modules.map((m) => [m.id, m]))
+    const edges = new Map(map.edges.map((e) => [e.id, e]))
+    for (const e of growth.events) {
+      if (e.type === 'layer') layers.set(e.layer.id, e.layer)
+      if (e.type === 'module') {
+        modules.set(e.module.id, e.module)
+        for (const oe of e.out_edges ?? []) edges.set(oe.id, oe)
+      }
+    }
+    return { ...map, layers: [...layers.values()], modules: [...modules.values()], edges: [...edges.values()] } as CodeMap
+  }, [map, growth?.events])
+
   const emptyExpanded = useMemo(() => new Map<string, SubMap | 'loading'>(), [])
   const effectiveExpanded = growth ? emptyExpanded : expanded
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(map, selection, filters, effectiveExpanded, onSelectLayer, growthVisible),
-    [map, selection, filters, effectiveExpanded, onSelectLayer, growthVisible],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, growthVisible),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, growthVisible],
   )
 
   useEffect(() => {
@@ -582,7 +625,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
 
   const toggleFilter = (key: keyof Filters) => setFilters((f) => ({ ...f, [key]: !f[key] }))
 
-  const violations = map.edges.filter((e) => e.direction_violation).length
+  const violations = mergedMap.edges.filter((e) => e.direction_violation).length
   // 工具栏对模块选中与其子模块选中都生效（收起/展开操作的是父模块）
   const toolbarModuleId = selection?.kind === 'module' ? selection.id : selection?.kind === 'submodule' ? selection.parentId : null
   const selModule = toolbarModuleId ? map.modules.find((m) => m.id === toolbarModuleId) : undefined
@@ -701,18 +744,22 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                 <span className="flex items-center gap-1">
                   <GitBranch size={11} /> {map.meta.generator}
                 </span>
-                <span>{map.modules.length} 模块</span>
-                <span>{map.layers.length} 层</span>
-                <span>{map.edges.length} 依赖</span>
+                <span>{mergedMap.modules.length} 模块</span>
+                <span>{mergedMap.layers.length} 层</span>
+                <span>{mergedMap.edges.length} 依赖</span>
                 <span className="text-red-500">{violations} 逆向</span>
                 <button
                   onClick={startGrowth}
                   disabled={!!growth}
-                  className="ml-1 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-semibold text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-40"
-                  title="回放归纳过程（消费 growth.log，v2.2 协议）"
+                  className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-40 ${
+                    liveActivity && !growth
+                      ? 'border-red-300 bg-red-50 text-red-600 animate-pulse'
+                      : 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100'
+                  }`}
+                  title={backendRepo ? '观看实时生长（直播 growth.log 事件）' : '回放归纳过程（静态 growth.log）'}
                 >
                   <Play size={10} />
-                  生长演示
+                  {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
                 </button>
               </div>
             </div>
@@ -780,6 +827,7 @@ export default function App() {
       try {
         const msg = JSON.parse(e.data)
         if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
+        if (msg.name === 'growth.event' && msg.data?.repo === backendRepo) emitGrowthEvent(msg.data.event)
       } catch {
         /* 忽略坏消息 */
       }

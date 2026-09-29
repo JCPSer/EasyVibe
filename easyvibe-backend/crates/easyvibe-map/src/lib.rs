@@ -120,6 +120,75 @@ pub fn content_hash(raw: &str) -> u64 {
     h.finish()
 }
 
+/// growth.log 增量监视：按字节偏移读取新增行，逐行解析（坏行跳过告警），
+/// 文件截断/轮换（len < offset）时从头重发全量。
+pub fn spawn_growth_watcher(repo: Repo) -> watch::Receiver<Vec<Value>> {
+    let (tx, rx) = watch::channel::<Vec<Value>>(Vec::new());
+    tokio::spawn(async move {
+        let path = repo.growth_path();
+        let mut offset: u64 = 0;
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            let len = match tokio::fs::metadata(&path).await {
+                Ok(m) => m.len(),
+                Err(_) => continue,
+            };
+            if len == offset {
+                continue;
+            }
+            let reset = len < offset;
+            let raw = match tokio::fs::read_to_string(&path).await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let new_part = if reset { raw.as_str() } else { &raw[offset as usize..] };
+            offset = len;
+            let mut batch = Vec::new();
+            for (i, line) in new_part.lines().enumerate() {
+                let line = line.trim();
+                if line.is_empty() { continue; }
+                match serde_json::from_str::<Value>(line) {
+                    Ok(v) => batch.push(v),
+                    Err(e) => warn!("[growth-watch] {} 新行{} 跳过: {e}", repo.id, i + 1),
+                }
+            }
+            if !batch.is_empty() {
+                info!("[growth-watch] {} +{} 事件", repo.id, batch.len());
+                let _ = tx.send(batch);
+            }
+        }
+    });
+    rx
+}
+
+/// progress.json 监视：内容变化即推送解析结果（M2-2 起广播 progress.updated）
+pub fn spawn_progress_watcher(repo: Repo) -> watch::Receiver<Value> {
+    let (tx, rx) = watch::channel::<Value>(Value::Null);
+    tokio::spawn(async move {
+        let path = repo.root.join(".easyvibe/map/progress.json");
+        let mut last: Option<u64> = None;
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            let raw = match tokio::fs::read_to_string(&path).await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let hash = content_hash(&raw);
+            if last == Some(hash) { continue; }
+            match serde_json::from_str::<Value>(&raw) {
+                Ok(v) => {
+                    last = Some(hash);
+                    let _ = tx.send(v);
+                }
+                Err(_) => continue, // 写一半（临时文件 rename 前），等下一轮
+            }
+        }
+    });
+    rx
+}
+
 /// 地图变更监视：1s 轮询内容哈希，变化即上报（返回 watch::Receiver，消费者订阅）
 pub fn spawn_map_watcher(
     service: Arc<MapService>,
