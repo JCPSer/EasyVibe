@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-09-29T03:05:00+08:00",
+  "modules": [
+    {
+      "id": "exam-core",
+      "generated_at": "2026-09-29T03:05:00+08:00",
+      "generator": "easyvibe-submap/demo-from-real-repo-data"
+    }
+  ]
+}

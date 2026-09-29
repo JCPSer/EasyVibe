@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen:types": "node scripts/gen-types.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -69,6 +70,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "json-schema-to-typescript": "^16.0.0",
     "kimi-plugin-inspect-react": "^1.0.3",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",

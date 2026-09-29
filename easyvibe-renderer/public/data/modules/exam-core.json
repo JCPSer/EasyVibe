@@ -18,19 +18,42 @@
       "id": "session-orchestration",
       "name": "会话编排",
       "responsibility": "考试会话控制、流程协调、运行时与考计划网关编排",
-      "files": ["lib/application/exam/**"],
-      "key_entries": [
-        { "file": "lib/application/exam/exam_session_control_service.dart", "symbol": "ExamSessionControlService", "kind": "class" },
-        { "file": "lib/application/exam/exam_flow_coordinator_service.dart", "symbol": "ExamFlowCoordinatorService", "kind": "class" },
-        { "file": "lib/application/exam/exam_session_runtime_service.dart", "symbol": "ExamSessionRuntimeService", "kind": "class" }
+      "files": [
+        "lib/application/exam/**"
       ],
-      "dependencies": ["evaluation-pipeline", "exam-domain-model", "evaluation-domain-model", "exam-infra-adapters", "shared-dto-models"],
+      "key_entries": [
+        {
+          "file": "lib/application/exam/exam_session_control_service.dart",
+          "symbol": "ExamSessionControlService",
+          "kind": "class"
+        },
+        {
+          "file": "lib/application/exam/exam_flow_coordinator_service.dart",
+          "symbol": "ExamFlowCoordinatorService",
+          "kind": "class"
+        },
+        {
+          "file": "lib/application/exam/exam_session_runtime_service.dart",
+          "symbol": "ExamSessionRuntimeService",
+          "kind": "class"
+        }
+      ],
+      "dependencies": [
+        "evaluation-pipeline",
+        "exam-domain-model",
+        "evaluation-domain-model",
+        "exam-infra-adapters",
+        "shared-dto-models"
+      ],
       "health": {
         "score": 62,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
-        "decay_flags": ["god_object", "circular_dep"],
+        "decay_flags": [
+          "god_object",
+          "circular_dep"
+        ],
         "review_note": "12 文件 8.2k 行集中了会话控制、流程协调、运行时、考计划网关四个职责（近 3 月 20 次提交为模块内最热），并与 evaluation-pipeline 互为 import 构成内部环。建议拆出会话运行时与考计划网关两个子域，提交链路改为单向。",
         "concerns": [
           {
@@ -50,19 +73,39 @@
       "id": "evaluation-pipeline",
       "name": "评测提交管线",
       "responsibility": "评测请求组装、提交执行与结果物化",
-      "files": ["lib/application/evaluation/**"],
-      "key_entries": [
-        { "file": "lib/application/evaluation/evaluation_submission_service.dart", "symbol": "EvaluationSubmissionService", "kind": "class" },
-        { "file": "lib/application/evaluation/evaluation_pipeline_service.dart", "symbol": "EvaluationPipelineService", "kind": "class" },
-        { "file": "lib/application/evaluation/evaluation_submission_request_factory.dart", "symbol": "EvaluationSubmissionRequestFactory", "kind": "class" }
+      "files": [
+        "lib/application/evaluation/**"
       ],
-      "dependencies": ["session-orchestration", "evaluation-domain-model", "shared-dto-models"],
+      "key_entries": [
+        {
+          "file": "lib/application/evaluation/evaluation_submission_service.dart",
+          "symbol": "EvaluationSubmissionService",
+          "kind": "class"
+        },
+        {
+          "file": "lib/application/evaluation/evaluation_pipeline_service.dart",
+          "symbol": "EvaluationPipelineService",
+          "kind": "class"
+        },
+        {
+          "file": "lib/application/evaluation/evaluation_submission_request_factory.dart",
+          "symbol": "EvaluationSubmissionRequestFactory",
+          "kind": "class"
+        }
+      ],
+      "dependencies": [
+        "session-orchestration",
+        "evaluation-domain-model",
+        "shared-dto-models"
+      ],
       "health": {
         "score": 66,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
-        "decay_flags": ["circular_dep"],
+        "decay_flags": [
+          "circular_dep"
+        ],
         "review_note": "请求工厂、提交管线、结果物化三职责耦合在 5 个文件内；反向 import session-orchestration 形成内部环。建议管线只消费会话快照，结果物化独立为出口子域。",
         "concerns": [
           {
@@ -77,13 +120,30 @@
       "id": "exam-domain-model",
       "name": "考试领域模型",
       "responsibility": "考试会话计划、场景目录与领域策略",
-      "files": ["lib/domain/exam/**"],
-      "key_entries": [
-        { "file": "lib/domain/exam/exam_session_plan.dart", "symbol": "ExamSessionPlan", "kind": "class" },
-        { "file": "lib/domain/exam/exam_scenario_catalog.dart", "symbol": "ExamScenarioCatalog", "kind": "class" },
-        { "file": "lib/domain/exam/service_relationship_policy.dart", "symbol": "ServiceRelationshipPolicy", "kind": "class" }
+      "files": [
+        "lib/domain/exam/**"
       ],
-      "dependencies": ["evaluation-domain-model", "shared-dto-models"],
+      "key_entries": [
+        {
+          "file": "lib/domain/exam/exam_session_plan.dart",
+          "symbol": "ExamSessionPlan",
+          "kind": "class"
+        },
+        {
+          "file": "lib/domain/exam/exam_scenario_catalog.dart",
+          "symbol": "ExamScenarioCatalog",
+          "kind": "class"
+        },
+        {
+          "file": "lib/domain/exam/service_relationship_policy.dart",
+          "symbol": "ServiceRelationshipPolicy",
+          "kind": "class"
+        }
+      ],
+      "dependencies": [
+        "evaluation-domain-model",
+        "shared-dto-models"
+      ],
       "health": {
         "score": 74,
         "coupling": "medium",
@@ -104,9 +164,15 @@
       "id": "evaluation-domain-model",
       "name": "评测领域模型",
       "responsibility": "评测提交状态等领域对象",
-      "files": ["lib/domain/evaluation/**"],
+      "files": [
+        "lib/domain/evaluation/**"
+      ],
       "key_entries": [
-        { "file": "lib/domain/evaluation/question_async_state.dart", "symbol": "QuestionAsyncState", "kind": "class" }
+        {
+          "file": "lib/domain/evaluation/question_async_state.dart",
+          "symbol": "QuestionAsyncState",
+          "kind": "class"
+        }
       ],
       "dependencies": [],
       "health": {
@@ -123,9 +189,15 @@
       "id": "exam-infra-adapters",
       "name": "考试基础设施适配",
       "responsibility": "考试会话索引等基础设施适配",
-      "files": ["lib/infrastructure/exam/**"],
+      "files": [
+        "lib/infrastructure/exam/**"
+      ],
       "key_entries": [
-        { "file": "lib/infrastructure/exam/exam_sessions_index.dart", "symbol": "ExamSessionsIndex", "kind": "class" }
+        {
+          "file": "lib/infrastructure/exam/exam_sessions_index.dart",
+          "symbol": "ExamSessionsIndex",
+          "kind": "class"
+        }
       ],
       "dependencies": [],
       "health": {
@@ -142,9 +214,15 @@
       "id": "shared-dto-models",
       "name": "共享 DTO 模型",
       "responsibility": "跨层共享的数据传输对象（题目项等）",
-      "files": ["lib/models/**"],
+      "files": [
+        "lib/models/**"
+      ],
       "key_entries": [
-        { "file": "lib/models/exam_question_item.dart", "symbol": "ExamQuestionItem", "kind": "class" }
+        {
+          "file": "lib/models/exam_question_item.dart",
+          "symbol": "ExamQuestionItem",
+          "kind": "class"
+        }
       ],
       "dependencies": [],
       "health": {
@@ -159,15 +237,87 @@
     }
   ],
   "edges": [
-    { "from": "session-orchestration", "to": "evaluation-pipeline", "type": "call", "label": "发起评测提交", "strength": "strong", "circular_dep": true },
-    { "from": "evaluation-pipeline", "to": "session-orchestration", "type": "import", "label": "反向引用会话控制（环）", "strength": "normal", "circular_dep": true },
-    { "from": "session-orchestration", "to": "exam-domain-model", "type": "import", "label": "会话计划/场景目录", "strength": "strong" },
-    { "from": "session-orchestration", "to": "evaluation-domain-model", "type": "import", "label": "评测状态", "strength": "normal" },
-    { "from": "session-orchestration", "to": "exam-infra-adapters", "type": "call", "label": "会话索引读写", "strength": "normal" },
-    { "from": "session-orchestration", "to": "shared-dto-models", "type": "import", "label": "题目 DTO", "strength": "strong" },
-    { "from": "evaluation-pipeline", "to": "evaluation-domain-model", "type": "import", "label": "提交状态", "strength": "normal" },
-    { "from": "evaluation-pipeline", "to": "shared-dto-models", "type": "import", "label": "请求/结果 DTO", "strength": "strong" },
-    { "from": "exam-domain-model", "to": "evaluation-domain-model", "type": "import", "label": "复用评测状态类型", "strength": "weak" },
-    { "from": "exam-domain-model", "to": "shared-dto-models", "type": "import", "label": "题目模型", "strength": "weak" }
+    {
+      "id": "e1",
+      "from": "session-orchestration",
+      "to": "evaluation-pipeline",
+      "type": "call",
+      "label": "发起评测提交",
+      "strength": "strong",
+      "circular_dep": true
+    },
+    {
+      "id": "e2",
+      "from": "evaluation-pipeline",
+      "to": "session-orchestration",
+      "type": "import",
+      "label": "反向引用会话控制（环）",
+      "strength": "normal",
+      "circular_dep": true
+    },
+    {
+      "id": "e3",
+      "from": "session-orchestration",
+      "to": "exam-domain-model",
+      "type": "import",
+      "label": "会话计划/场景目录",
+      "strength": "strong"
+    },
+    {
+      "id": "e4",
+      "from": "session-orchestration",
+      "to": "evaluation-domain-model",
+      "type": "import",
+      "label": "评测状态",
+      "strength": "normal"
+    },
+    {
+      "id": "e5",
+      "from": "session-orchestration",
+      "to": "exam-infra-adapters",
+      "type": "call",
+      "label": "会话索引读写",
+      "strength": "normal"
+    },
+    {
+      "id": "e6",
+      "from": "session-orchestration",
+      "to": "shared-dto-models",
+      "type": "import",
+      "label": "题目 DTO",
+      "strength": "strong"
+    },
+    {
+      "id": "e7",
+      "from": "evaluation-pipeline",
+      "to": "evaluation-domain-model",
+      "type": "import",
+      "label": "提交状态",
+      "strength": "normal"
+    },
+    {
+      "id": "e8",
+      "from": "evaluation-pipeline",
+      "to": "shared-dto-models",
+      "type": "import",
+      "label": "请求/结果 DTO",
+      "strength": "strong"
+    },
+    {
+      "id": "e9",
+      "from": "exam-domain-model",
+      "to": "evaluation-domain-model",
+      "type": "import",
+      "label": "复用评测状态类型",
+      "strength": "weak"
+    },
+    {
+      "id": "e10",
+      "from": "exam-domain-model",
+      "to": "shared-dto-models",
+      "type": "import",
+      "label": "题目模型",
+      "strength": "weak"
+    }
   ]
 }

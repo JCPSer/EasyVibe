@@ -71,6 +71,11 @@ def main():
              for x in m['modules'])
     check('deps==edges', ok)
 
+    # v1.1：边稳定 id 存在、唯一、e 前缀
+    eids = [e.get('id', '') for e in m.get('edges', [])]
+    check('edge ids (v1.1)', bool(eids) and all(eids) and len(set(eids)) == len(eids) and all(re.match(r'^e[a-z0-9_-]*$', i) for i in eids),
+          'missing/duplicate/bad-format edge id')
+
     # 5. 覆盖率
     files = []
     for root, _, fs in os.walk(os.path.join(repo, 'lib')):

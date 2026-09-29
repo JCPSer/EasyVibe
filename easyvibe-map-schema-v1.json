@@ -1,19 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://easyvibe.dev/schemas/map-v1.json",
-  "title": "EasyVibe Code Map v1",
-  "description": "EasyVibe 语义代码地图数据格式。数据文件存语义，不存布局；布局由渲染器推导。",
+  "title": "CodeMap",
+  "description": "EasyVibe 语义代码地图数据格式 v1.1（边稳定 id + meta.stats 溯源 + 模块级时间戳；向后兼容）。数据文件存语义，不存布局；布局由渲染器推导。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "meta", "layers", "modules", "edges", "health"],
+  "required": [
+    "version",
+    "meta",
+    "layers",
+    "modules",
+    "edges",
+    "health"
+  ],
   "properties": {
     "version": {
       "const": "1.0"
     },
     "meta": {
       "type": "object",
+      "title": "MapMeta",
       "additionalProperties": false,
-      "required": ["repo", "generated_at", "generator"],
+      "required": [
+        "repo",
+        "generated_at",
+        "generator"
+      ],
       "properties": {
         "repo": {
           "type": "string",
@@ -23,6 +35,48 @@
         "generated_at": {
           "type": "string",
           "description": "ISO 8601 时间戳"
+        },
+        "last_patrol_at": {
+          "type": "string",
+          "description": "ISO 8601；上次巡检时间，F7 新鲜度提醒依据"
+        },
+        "stats": {
+          "type": "object",
+          "description": "溯源统计（finalize 阶段确定性计算，非 LLM 自评）",
+          "additionalProperties": false,
+          "properties": {
+            "files_total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "产品代码文件总数"
+            },
+            "files_covered": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "被 modules[].files 覆盖的文件数"
+            },
+            "coverage_ratio": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "覆盖率"
+            },
+            "edges_derived": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "确定性推导（import 扫描等）的边数"
+            },
+            "edges_inferred": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "LLM 断言的边数"
+            },
+            "retried_modules": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "校验-重试循环中重试过的模块数"
+            }
+          }
         },
         "generator": {
           "type": "string",
@@ -34,7 +88,9 @@
         },
         "languages": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "主要编程语言列表"
         },
         "loc": {
@@ -43,7 +99,11 @@
           "description": "估算代码行数"
         },
         "map_freshness": {
-          "enum": ["fresh", "drifting", "stale"],
+          "enum": [
+            "fresh",
+            "drifting",
+            "stale"
+          ],
           "description": "fresh=与代码一致；drifting=存在漂移；stale=已明显过期"
         }
       }
@@ -54,8 +114,14 @@
       "description": "矩形分层架构图的层定义，由 LLM 按项目实际结构动态生成（层数、层名、层职责均不预设）。order=0 为最顶层，数字越大越靠底。",
       "items": {
         "type": "object",
+        "title": "Layer",
         "additionalProperties": false,
-        "required": ["id", "name", "order", "description"],
+        "required": [
+          "id",
+          "name",
+          "order",
+          "description"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -81,13 +147,27 @@
       "minItems": 1,
       "items": {
         "type": "object",
+        "title": "Module",
         "additionalProperties": false,
-        "required": ["id", "name", "layer", "responsibility", "files", "key_entries", "dependencies", "health"],
+        "required": [
+          "id",
+          "name",
+          "layer",
+          "responsibility",
+          "files",
+          "key_entries",
+          "dependencies",
+          "health"
+        ],
         "properties": {
           "id": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9_-]*$",
             "description": "模块唯一标识，小写字母/数字/下划线/中划线"
+          },
+          "last_analyzed_at": {
+            "type": "string",
+            "description": "ISO 8601；该模块上次归纳/巡检时间，F7 模块级新鲜度依据"
           },
           "name": {
             "type": "string",
@@ -106,7 +186,9 @@
           "files": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "归属该模块的文件/目录，glob 路径，相对仓库根"
           },
           "key_entries": {
@@ -114,20 +196,39 @@
             "description": "关键入口标注",
             "items": {
               "type": "object",
+              "title": "KeyEntry",
               "additionalProperties": false,
-              "required": ["file", "symbol", "kind"],
+              "required": [
+                "file",
+                "symbol",
+                "kind"
+              ],
               "properties": {
-                "file": { "type": "string" },
-                "symbol": { "type": "string" },
+                "file": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": "string"
+                },
                 "kind": {
-                  "enum": ["function", "class", "interface", "route", "cli", "job", "config"]
+                  "enum": [
+                    "function",
+                    "class",
+                    "interface",
+                    "route",
+                    "cli",
+                    "job",
+                    "config"
+                  ]
                 }
               }
             }
           },
           "dependencies": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "依赖的模块 id 列表；edges[] 中必须有对应 from=本模块 的边"
           },
           "health": {
@@ -145,9 +246,21 @@
       "description": "模块间依赖边，渲染依赖关系的唯一事实来源",
       "items": {
         "type": "object",
+        "title": "MapEdge",
         "additionalProperties": false,
-        "required": ["from", "to", "type", "strength"],
+        "required": [
+          "id",
+          "from",
+          "to",
+          "type",
+          "strength"
+        ],
         "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^e[a-z0-9_-]*$",
+            "description": "边稳定 id（v1.1 起必填）：供边级证据、置信度、视图引用。按确定性生成序编排（如 e1、e2），重归纳时必须保持稳定"
+          },
           "from": {
             "type": "string",
             "description": "起点模块 id"
@@ -157,7 +270,14 @@
             "description": "终点模块 id"
           },
           "type": {
-            "enum": ["call", "import", "api", "event", "db", "config"],
+            "enum": [
+              "call",
+              "import",
+              "api",
+              "event",
+              "db",
+              "config"
+            ],
             "description": "call=函数调用；import=代码引用；api=HTTP/RPC；event=消息事件；db=共享数据库；config=配置依赖"
           },
           "label": {
@@ -165,7 +285,11 @@
             "description": "边上显示的文字（可选），如方法名"
           },
           "strength": {
-            "enum": ["strong", "normal", "weak"],
+            "enum": [
+              "strong",
+              "normal",
+              "weak"
+            ],
             "description": "耦合强度估计：strong=频繁/核心路径，weak=偶发"
           },
           "direction_violation": {
@@ -176,15 +300,20 @@
       }
     },
     "health": {
-      "$ref": "#/$defs/health",
-      "description": "架构级 LLM 评估（跨模块耦合形态、分层合理性、逆向依赖密度、职责重叠/缺失）；模块全绿 ≠ 架构健康，须独立评估"
+      "$ref": "#/$defs/health"
     }
   },
   "$defs": {
     "health": {
       "type": "object",
+      "title": "Health",
       "additionalProperties": false,
-      "required": ["score", "coupling", "complexity", "decay_flags"],
+      "required": [
+        "score",
+        "coupling",
+        "complexity",
+        "decay_flags"
+      ],
       "properties": {
         "score": {
           "type": "integer",
@@ -193,18 +322,33 @@
           "description": "LLM 综合健康分"
         },
         "coupling": {
-          "enum": ["low", "medium", "high", "critical"]
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
         },
         "complexity": {
-          "enum": ["low", "medium", "high"]
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "churn": {
-          "enum": ["low", "medium", "high"],
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
           "description": "近期变更频率，LLM 依据 git 历史判断"
         },
         "decay_flags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "腐化标记，模块级如 coupling_high, god_module, circular_dep；架构级如 layer_violation, responsibility_overlap, layering_mismatch"
         },
         "review_note": {
@@ -217,11 +361,19 @@
           "description": "LLM 提名最值得关注的 top-3 问题（架构级与模块级共用结构）",
           "items": {
             "type": "object",
+            "title": "Concern",
             "additionalProperties": false,
-            "required": ["severity", "finding", "suggestion"],
+            "required": [
+              "severity",
+              "finding",
+              "suggestion"
+            ],
             "properties": {
               "severity": {
-                "enum": ["critical", "high"],
+                "enum": [
+                  "critical",
+                  "high"
+                ],
                 "description": "critical=建议尽快处理；high=值得关注"
               },
               "finding": {
@@ -235,7 +387,8 @@
             }
           }
         }
-      }
+      },
+      "description": "架构级 LLM 评估（跨模块耦合形态、分层合理性、逆向依赖密度、职责重叠/缺失）；模块全绿 ≠ 架构健康，须独立评估"
     }
   }
 }

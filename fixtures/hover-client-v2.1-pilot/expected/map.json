@@ -701,6 +701,7 @@
   ],
   "edges": [
     {
+      "id": "e1",
       "from": "audio-media",
       "to": "system-services",
       "type": "call",
@@ -708,6 +709,7 @@
       "strength": "weak"
     },
     {
+      "id": "e2",
       "from": "gateway-network",
       "to": "exam-core",
       "type": "import",
@@ -716,6 +718,7 @@
       "direction_violation": true
     },
     {
+      "id": "e3",
       "from": "gateway-network",
       "to": "reporting",
       "type": "import",
@@ -724,6 +727,7 @@
       "direction_violation": true
     },
     {
+      "id": "e4",
       "from": "local-storage",
       "to": "exam-core",
       "type": "import",
@@ -732,6 +736,7 @@
       "direction_violation": true
     },
     {
+      "id": "e5",
       "from": "local-storage",
       "to": "gateway-network",
       "type": "import",
@@ -739,6 +744,7 @@
       "strength": "weak"
     },
     {
+      "id": "e6",
       "from": "local-storage",
       "to": "shared-foundation",
       "type": "import",
@@ -746,6 +752,7 @@
       "strength": "weak"
     },
     {
+      "id": "e7",
       "from": "system-services",
       "to": "ui-shell",
       "type": "import",
@@ -754,6 +761,7 @@
       "direction_violation": true
     },
     {
+      "id": "e8",
       "from": "system-services",
       "to": "exam-core",
       "type": "import",
@@ -762,6 +770,7 @@
       "direction_violation": true
     },
     {
+      "id": "e9",
       "from": "system-services",
       "to": "account-auth",
       "type": "import",
@@ -770,6 +779,7 @@
       "direction_violation": true
     },
     {
+      "id": "e10",
       "from": "system-services",
       "to": "local-storage",
       "type": "call",
@@ -777,6 +787,7 @@
       "strength": "weak"
     },
     {
+      "id": "e11",
       "from": "system-services",
       "to": "gateway-network",
       "type": "api",
@@ -784,6 +795,7 @@
       "strength": "weak"
     },
     {
+      "id": "e12",
       "from": "system-services",
       "to": "shared-foundation",
       "type": "config",
@@ -791,6 +803,7 @@
       "strength": "weak"
     },
     {
+      "id": "e13",
       "from": "app-state",
       "to": "ui-shell",
       "type": "import",
@@ -799,6 +812,7 @@
       "direction_violation": true
     },
     {
+      "id": "e14",
       "from": "app-state",
       "to": "exam-core",
       "type": "import",
@@ -807,6 +821,7 @@
       "direction_violation": true
     },
     {
+      "id": "e15",
       "from": "app-state",
       "to": "reporting",
       "type": "import",
@@ -815,6 +830,7 @@
       "direction_violation": true
     },
     {
+      "id": "e16",
       "from": "app-state",
       "to": "local-storage",
       "type": "call",
@@ -822,6 +838,7 @@
       "strength": "weak"
     },
     {
+      "id": "e17",
       "from": "app-state",
       "to": "system-services",
       "type": "call",
@@ -829,6 +846,7 @@
       "strength": "weak"
     },
     {
+      "id": "e18",
       "from": "account-auth",
       "to": "ui-shell",
       "type": "import",
@@ -837,6 +855,7 @@
       "direction_violation": true
     },
     {
+      "id": "e19",
       "from": "account-auth",
       "to": "exam-core",
       "type": "call",
@@ -844,6 +863,7 @@
       "strength": "weak"
     },
     {
+      "id": "e20",
       "from": "account-auth",
       "to": "reporting",
       "type": "call",
@@ -851,6 +871,7 @@
       "strength": "weak"
     },
     {
+      "id": "e21",
       "from": "account-auth",
       "to": "app-state",
       "type": "call",
@@ -858,6 +879,7 @@
       "strength": "weak"
     },
     {
+      "id": "e22",
       "from": "account-auth",
       "to": "gateway-network",
       "type": "api",
@@ -865,6 +887,7 @@
       "strength": "weak"
     },
     {
+      "id": "e23",
       "from": "account-auth",
       "to": "system-services",
       "type": "call",
@@ -872,6 +895,7 @@
       "strength": "weak"
     },
     {
+      "id": "e24",
       "from": "account-auth",
       "to": "shared-foundation",
       "type": "import",
@@ -879,6 +903,7 @@
       "strength": "weak"
     },
     {
+      "id": "e25",
       "from": "exam-core",
       "to": "ui-shell",
       "type": "import",
@@ -887,6 +912,7 @@
       "direction_violation": true
     },
     {
+      "id": "e26",
       "from": "exam-core",
       "to": "reporting",
       "type": "call",
@@ -894,6 +920,7 @@
       "strength": "normal"
     },
     {
+      "id": "e27",
       "from": "exam-core",
       "to": "account-auth",
       "type": "call",
@@ -901,6 +928,7 @@
       "strength": "normal"
     },
     {
+      "id": "e28",
       "from": "exam-core",
       "to": "practice-training",
       "type": "call",
@@ -908,6 +936,7 @@
       "strength": "weak"
     },
     {
+      "id": "e29",
       "from": "exam-core",
       "to": "app-state",
       "type": "call",
@@ -915,6 +944,7 @@
       "strength": "normal"
     },
     {
+      "id": "e30",
       "from": "exam-core",
       "to": "audio-media",
       "type": "call",
@@ -922,6 +952,7 @@
       "strength": "normal"
     },
     {
+      "id": "e31",
       "from": "exam-core",
       "to": "gateway-network",
       "type": "api",
@@ -929,6 +960,7 @@
       "strength": "normal"
     },
     {
+      "id": "e32",
       "from": "exam-core",
       "to": "local-storage",
       "type": "call",
@@ -936,6 +968,7 @@
       "strength": "normal"
     },
     {
+      "id": "e33",
       "from": "exam-core",
       "to": "shared-foundation",
       "type": "import",
@@ -943,6 +976,7 @@
       "strength": "weak"
     },
     {
+      "id": "e34",
       "from": "practice-training",
       "to": "ui-shell",
       "type": "import",
@@ -951,6 +985,7 @@
       "direction_violation": true
     },
     {
+      "id": "e35",
       "from": "practice-training",
       "to": "exam-core",
       "type": "call",
@@ -958,6 +993,7 @@
       "strength": "strong"
     },
     {
+      "id": "e36",
       "from": "practice-training",
       "to": "reporting",
       "type": "call",
@@ -965,6 +1001,7 @@
       "strength": "normal"
     },
     {
+      "id": "e37",
       "from": "practice-training",
       "to": "account-auth",
       "type": "call",
@@ -972,6 +1009,7 @@
       "strength": "normal"
     },
     {
+      "id": "e38",
       "from": "practice-training",
       "to": "app-state",
       "type": "call",
@@ -979,6 +1017,7 @@
       "strength": "weak"
     },
     {
+      "id": "e39",
       "from": "practice-training",
       "to": "gateway-network",
       "type": "api",
@@ -986,6 +1025,7 @@
       "strength": "normal"
     },
     {
+      "id": "e40",
       "from": "practice-training",
       "to": "local-storage",
       "type": "call",
@@ -993,6 +1033,7 @@
       "strength": "weak"
     },
     {
+      "id": "e41",
       "from": "practice-training",
       "to": "system-services",
       "type": "call",
@@ -1000,6 +1041,7 @@
       "strength": "weak"
     },
     {
+      "id": "e42",
       "from": "practice-training",
       "to": "shared-foundation",
       "type": "import",
@@ -1007,6 +1049,7 @@
       "strength": "weak"
     },
     {
+      "id": "e43",
       "from": "reporting",
       "to": "ui-shell",
       "type": "import",
@@ -1015,6 +1058,7 @@
       "direction_violation": true
     },
     {
+      "id": "e44",
       "from": "reporting",
       "to": "exam-core",
       "type": "call",
@@ -1022,6 +1066,7 @@
       "strength": "strong"
     },
     {
+      "id": "e45",
       "from": "reporting",
       "to": "account-auth",
       "type": "call",
@@ -1029,6 +1074,7 @@
       "strength": "normal"
     },
     {
+      "id": "e46",
       "from": "reporting",
       "to": "app-state",
       "type": "call",
@@ -1036,6 +1082,7 @@
       "strength": "weak"
     },
     {
+      "id": "e47",
       "from": "reporting",
       "to": "gateway-network",
       "type": "api",
@@ -1043,6 +1090,7 @@
       "strength": "normal"
     },
     {
+      "id": "e48",
       "from": "reporting",
       "to": "local-storage",
       "type": "call",
@@ -1050,6 +1098,7 @@
       "strength": "normal"
     },
     {
+      "id": "e49",
       "from": "reporting",
       "to": "system-services",
       "type": "call",
@@ -1057,6 +1106,7 @@
       "strength": "weak"
     },
     {
+      "id": "e50",
       "from": "ui-shell",
       "to": "app-composition",
       "type": "import",
@@ -1065,6 +1115,7 @@
       "direction_violation": true
     },
     {
+      "id": "e51",
       "from": "ui-shell",
       "to": "exam-core",
       "type": "call",
@@ -1072,6 +1123,7 @@
       "strength": "strong"
     },
     {
+      "id": "e52",
       "from": "ui-shell",
       "to": "reporting",
       "type": "call",
@@ -1079,6 +1131,7 @@
       "strength": "strong"
     },
     {
+      "id": "e53",
       "from": "ui-shell",
       "to": "account-auth",
       "type": "call",
@@ -1086,6 +1139,7 @@
       "strength": "strong"
     },
     {
+      "id": "e54",
       "from": "ui-shell",
       "to": "practice-training",
       "type": "call",
@@ -1093,6 +1147,7 @@
       "strength": "strong"
     },
     {
+      "id": "e55",
       "from": "ui-shell",
       "to": "app-state",
       "type": "call",
@@ -1100,6 +1155,7 @@
       "strength": "strong"
     },
     {
+      "id": "e56",
       "from": "ui-shell",
       "to": "gateway-network",
       "type": "api",
@@ -1107,6 +1163,7 @@
       "strength": "normal"
     },
     {
+      "id": "e57",
       "from": "ui-shell",
       "to": "local-storage",
       "type": "call",
@@ -1114,6 +1171,7 @@
       "strength": "weak"
     },
     {
+      "id": "e58",
       "from": "ui-shell",
       "to": "system-services",
       "type": "call",
@@ -1121,6 +1179,7 @@
       "strength": "normal"
     },
     {
+      "id": "e59",
       "from": "ui-shell",
       "to": "shared-foundation",
       "type": "import",
@@ -1128,6 +1187,7 @@
       "strength": "strong"
     },
     {
+      "id": "e60",
       "from": "app-composition",
       "to": "ui-shell",
       "type": "import",
@@ -1135,6 +1195,7 @@
       "strength": "strong"
     },
     {
+      "id": "e61",
       "from": "app-composition",
       "to": "exam-core",
       "type": "import",
@@ -1142,6 +1203,7 @@
       "strength": "strong"
     },
     {
+      "id": "e62",
       "from": "app-composition",
       "to": "reporting",
       "type": "import",
@@ -1149,6 +1211,7 @@
       "strength": "strong"
     },
     {
+      "id": "e63",
       "from": "app-composition",
       "to": "account-auth",
       "type": "import",
@@ -1156,6 +1219,7 @@
       "strength": "normal"
     },
     {
+      "id": "e64",
       "from": "app-composition",
       "to": "practice-training",
       "type": "import",
@@ -1163,6 +1227,7 @@
       "strength": "strong"
     },
     {
+      "id": "e65",
       "from": "app-composition",
       "to": "app-state",
       "type": "import",
@@ -1170,6 +1235,7 @@
       "strength": "normal"
     },
     {
+      "id": "e66",
       "from": "app-composition",
       "to": "audio-media",
       "type": "import",
@@ -1177,6 +1243,7 @@
       "strength": "weak"
     },
     {
+      "id": "e67",
       "from": "app-composition",
       "to": "gateway-network",
       "type": "import",
@@ -1184,6 +1251,7 @@
       "strength": "weak"
     },
     {
+      "id": "e68",
       "from": "app-composition",
       "to": "local-storage",
       "type": "import",
@@ -1191,6 +1259,7 @@
       "strength": "weak"
     },
     {
+      "id": "e69",
       "from": "app-composition",
       "to": "system-services",
       "type": "import",
@@ -1198,6 +1267,7 @@
       "strength": "normal"
     },
     {
+      "id": "e70",
       "from": "app-composition",
       "to": "shared-foundation",
       "type": "config",

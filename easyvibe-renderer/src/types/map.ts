@@ -1,73 +1,23 @@
-export interface Concern {
-  severity: 'critical' | 'high'
-  finding: string
-  suggestion: string
-}
+// 数据类型的单一入口。
+// 主图类型由 easyvibe-map-schema-v1.json 自动生成（./generated），禁止手工镜像 schema 字段；
+// 改数据格式 = 改 Schema → npm run gen:types。
+export type {
+  CodeMap,
+  MapMeta,
+  Layer,
+  Module,
+  KeyEntry,
+  Health,
+  Concern,
+  MapEdge,
+} from './generated'
+import type { KeyEntry, Health } from './generated'
 
-export interface Health {
-  score: number
-  coupling: 'low' | 'medium' | 'high' | 'critical'
-  complexity: 'low' | 'medium' | 'high'
-  churn: 'low' | 'medium' | 'high'
-  decay_flags: string[]
-  review_note: string
-  concerns?: Concern[]
-}
-
-export interface Layer {
-  id: string
-  name: string
-  order: number
-  description: string
-}
-
-export interface KeyEntry {
-  file: string
-  symbol: string
-  kind: string
-}
-
-export interface Module {
-  id: string
-  name: string
-  layer: string
-  responsibility: string
-  files: string[]
-  key_entries: KeyEntry[]
-  dependencies: string[]
-  health: Health
-}
+// ---- 以下类型尚无机器 Schema（格式规范 §8/§9 仅文档定义），先手工维护 ----
+// TODO(v1.2)：为子图与用户视图补 JSON Schema 后并入自动生成
 
 export type EdgeType = 'call' | 'import' | 'api' | 'event' | 'db' | 'config'
 export type EdgeStrength = 'strong' | 'normal' | 'weak'
-
-export interface MapEdge {
-  from: string
-  to: string
-  type: EdgeType
-  label?: string
-  strength: EdgeStrength
-  direction_violation?: boolean
-}
-
-export interface MapMeta {
-  repo: string
-  generated_at: string
-  generator: string
-  description?: string
-  languages?: string[]
-  loc?: number
-  map_freshness?: 'fresh' | 'drifting' | 'stale'
-}
-
-export interface CodeMap {
-  version: string
-  meta: MapMeta
-  layers: Layer[]
-  modules: Module[]
-  edges: MapEdge[]
-  health: Health
-}
 
 // §8 子图（模块展开 drill-down）
 export interface SubModule {
@@ -81,6 +31,7 @@ export interface SubModule {
 }
 
 export interface SubEdge {
+  id: string // v1.1 起同主图规则
   from: string
   to: string
   type: EdgeType
@@ -96,4 +47,20 @@ export interface SubMap {
   generator: string
   sub_modules: SubModule[]
   edges: SubEdge[]
+}
+
+// §9 用户视图（对话沉淀）——引用式
+export type ViewNodeRef =
+  | { ref: `module:${string}` }
+  | { ref: `submodule:${string}/${string}` }
+  | { ref: `file:${string}` }
+
+export interface ViewFile {
+  version: string
+  name: string
+  created_at: string
+  source: { conversation_id: string }
+  nodes: ViewNodeRef[]
+  edges: { from_ref: string; to_ref: string; label?: string }[]
+  annotations: { ref: string; note: string }[]
 }
