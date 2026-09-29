@@ -47,3 +47,22 @@ pub struct GrowthEvent {
     #[serde(flatten)]
     pub payload: serde_json::Value,
 }
+
+/// 会话状态（M2-3 起）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Starting,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+/// session.statusChanged 事件的 data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStatusChanged {
+    pub repo: String,
+    pub session_id: String,
+    pub status: SessionStatus,
+}

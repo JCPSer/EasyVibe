@@ -5,9 +5,10 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, WsMessage};
+use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, SessionStatusChanged, WsMessage};
 use easyvibe_common::{events as ev, ApiError, ApiResponse, ErrorResponse};
 use easyvibe_map::{repo_from_root, spawn_map_watcher, MapService};
+use easyvibe_session::SessionManager;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -18,6 +19,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct AppState {
     pub map_service: Arc<MapService>,
+    pub session_manager: Arc<SessionManager>,
+    /// v2.2 提示词模板（含 <REPO_ROOT> 占位）
+    pub prompt_template: Arc<String>,
+    /// agent CLI 命令与参数（如 claude + ["-p"]）
+    pub agent_command: Arc<String>,
+    pub agent_args: Arc<Vec<String>>,
     /// 后端 → 前端事件总线（broadcast；WS handler 订阅）
     pub event_bus: broadcast::Sender<BusEvent>,
 }
@@ -29,6 +36,7 @@ pub enum BusEvent {
     MapInvalid(MapInvalid),
     Growth { repo: String, event: Value },
     Progress { repo: String, progress: Value },
+    SessionStatus(SessionStatusChanged),
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -38,6 +46,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/map", get(get_map))
         .route("/repos/{id}/growth", get(get_growth))
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
+        .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .with_state(state.clone());
 
     Router::new()
@@ -80,6 +89,17 @@ async fn get_submap(
     Ok(Json(st.map_service.load_submap(&repo, &module_id).await?).into_response())
 }
 
+/// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
+/// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
+async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let session = st
+        .session_manager
+        .start_induction(&repo.id, &repo.root, &st.prompt_template, &st.agent_command, &st.agent_args)
+        .await?;
+    Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
+}
+
 /// WS：订阅事件总线，向前端推送 domain.camelCase 事件
 async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
@@ -96,6 +116,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                 BusEvent::Progress { repo, progress } => WsMessage {
                     name: ev::PROGRESS_UPDATED.into(),
                     data: serde_json::json!({ "repo": repo, "progress": progress }),
+                },
+                BusEvent::SessionStatus(s) => WsMessage {
+                    name: ev::SESSION_STATUS_CHANGED.into(),
+                    data: serde_json::to_value(s).unwrap_or_default(),
                 },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
@@ -122,6 +146,7 @@ impl IntoResponse for AppError {
         let (status, code) = match &err {
             ApiError::BadRequest(_) => (axum::http::StatusCode::BAD_REQUEST, "BAD_REQUEST"),
             ApiError::NotFound(_) => (axum::http::StatusCode::NOT_FOUND, "NOT_FOUND"),
+            ApiError::Conflict(_) => (axum::http::StatusCode::CONFLICT, "CONFLICT"),
             ApiError::MapInvalid(_) => (axum::http::StatusCode::UNPROCESSABLE_ENTITY, "MAP_INVALID"),
             ApiError::Internal(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
         };
@@ -154,6 +179,29 @@ async fn main() {
     }
 
     let (event_bus, _) = broadcast::channel(256);
+
+    // session 管理：会话事件翻译进总线
+    let (session_tx, mut session_rx) = tokio::sync::mpsc::channel::<SessionStatusChanged>(64);
+    let bus = event_bus.clone();
+    tokio::spawn(async move {
+        while let Some(s) = session_rx.recv().await {
+            let _ = bus.send(BusEvent::SessionStatus(s));
+        }
+    });
+    let session_manager = SessionManager::new(session_tx);
+
+    // agent 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）
+    let agent_command = std::env::var("EASYVIBE_AGENT_CMD").unwrap_or_else(|_| "claude".into());
+    let agent_args: Vec<String> = std::env::var("EASYVIBE_AGENT_ARGS")
+        .unwrap_or_else(|_| "-p".into())
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let prompt_path = std::env::var("EASYVIBE_PROMPT_PATH")
+        .unwrap_or_else(|_| "easyvibe-map-prompt-v2.2.md".into());
+    let prompt_template = std::fs::read_to_string(&prompt_path)
+        .unwrap_or_else(|e| panic!("提示词模板不可读 {prompt_path}: {e}（用 EASYVIBE_PROMPT_PATH 指定）"));
+    info!("agent={} args={:?} prompt={}", agent_command, agent_args, prompt_path);
 
     // 每个仓库一个地图 watcher，变更翻译为总线事件
     for r in repos {
@@ -199,7 +247,14 @@ async fn main() {
         });
     }
 
-    let state = AppState { map_service, event_bus };
+    let state = AppState {
+        map_service,
+        session_manager,
+        prompt_template: Arc::new(prompt_template),
+        agent_command: Arc::new(agent_command),
+        agent_args: Arc::new(agent_args),
+        event_bus,
+    };
     let app = build_router(state);
     let addr = "127.0.0.1:7101";
     info!("EasyVibe backend listening on {addr}");
@@ -215,7 +270,15 @@ mod tests {
     fn test_state() -> AppState {
         let svc = MapService::new(vec![]);
         let (bus, _) = broadcast::channel(8);
-        AppState { map_service: svc, event_bus: bus }
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        AppState {
+            map_service: svc,
+            session_manager: SessionManager::new(tx),
+            prompt_template: Arc::new("test".into()),
+            agent_command: Arc::new("true".into()),
+            agent_args: Arc::new(vec![]),
+            event_bus: bus,
+        }
     }
 
     #[tokio::test]

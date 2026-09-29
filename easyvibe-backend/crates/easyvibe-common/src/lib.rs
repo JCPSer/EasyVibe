@@ -18,6 +18,8 @@ pub enum ApiError {
     BadRequest(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("map invalid: {0}")]
     MapInvalid(String),
     #[error("internal: {0}")]

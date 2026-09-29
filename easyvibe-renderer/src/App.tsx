@@ -24,7 +24,7 @@ import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/Ex
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitGrowthEvent, onGrowthEvent } from '@/lib/growthBus'
+import { emitGrowthEvent, emitSessionEvent, onGrowthEvent, onSessionEvent } from '@/lib/growthBus'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
@@ -354,17 +354,21 @@ function ArchHealthCard({ map }: { map: CodeMap }) {
 function ModuleToolbar({
   moduleName,
   expanded,
-  hasSubmap,
+  backendActive,
+  inducing,
   solo,
   onToggleExpand,
   onToggleSolo,
+  onReinduce,
 }: {
   moduleName: string
   expanded: boolean
-  hasSubmap: boolean
+  backendActive: boolean
+  inducing: boolean
   solo: boolean
   onToggleExpand: () => void
   onToggleSolo: () => void
+  onReinduce: () => void
 }) {
   return (
     <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
@@ -388,12 +392,25 @@ function ModuleToolbar({
         只看依赖
       </button>
       <button
-        disabled
-        title={hasSubmap ? '重新归纳需要 Supervisor（M2 提供）' : '子图归纳需要 Supervisor（M2 提供）'}
-        className="flex cursor-not-allowed items-center gap-1 rounded-full border border-transparent px-3 py-1 text-[11px] font-semibold text-slate-300"
+        onClick={onReinduce}
+        disabled={!backendActive || inducing}
+        title={
+          !backendActive
+            ? '需要本地后端服务（cargo run 启动后可用）'
+            : inducing
+              ? '归纳进行中，完成后自动恢复'
+              : '重新归纳该仓库：spawn agent 按 v2.2 协议执行，全程直播'
+        }
+        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+          inducing
+            ? 'cursor-wait border-amber-300 bg-amber-50 text-amber-700'
+            : backendActive
+              ? 'border-transparent text-slate-600 hover:bg-slate-100'
+              : 'cursor-not-allowed border-transparent text-slate-300'
+        }`}
       >
-        <RefreshCw size={12} />
-        重新归纳
+        <RefreshCw size={12} className={inducing ? 'animate-spin' : ''} />
+        {inducing ? '归纳中…' : '重新归纳'}
       </button>
     </div>
   )
@@ -468,10 +485,20 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading'>>({})
   const [growth, setGrowth] = useState<GrowthState | null>(null)
   const [liveActivity, setLiveActivity] = useState(false)
+  const [inducing, setInducing] = useState(false)
   const growthRef = useRef<GrowthState | null>(null)
   useEffect(() => {
     growthRef.current = growth
   }, [growth])
+
+  // 会话状态：终态（succeeded/failed）解除"归纳中"
+  useEffect(
+    () =>
+      onSessionEvent((evt) => {
+        if (evt.status === 'succeeded' || evt.status === 'failed') setInducing(false)
+      }),
+    [],
+  )
 
   // 直播订阅：WS 到达的 growth.event 追加进当前生长会话；未在生长模式则点亮"归纳活动"指示
   useEffect(
@@ -547,6 +574,18 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
     setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-MAX_EXPANDED)))
     setSubmaps((prev) => (prev[id] ? prev : { ...prev, [id]: 'loading' }))
   }, [])
+
+  // 写路径（M2-3）：触发重新归纳 → 后端 spawn agent 按 v2.2 执行；自动进入直播模式看生长
+  const startReinduce = useCallback(() => {
+    if (!backendRepo || inducing) return
+    setInducing(true)
+    fetch(`/api/repos/${backendRepo}/reinduce`, { method: 'POST' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        startGrowth()
+      })
+      .catch(() => setInducing(false))
+  }, [backendRepo, inducing, startGrowth])
 
   // 懒加载子图：任何 loading 状态触发取数（后端模式走 API，否则静态文件）
   useEffect(() => {
@@ -675,10 +714,12 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
               <ModuleToolbar
                 moduleName={selModule.name}
                 expanded={expandedIds.includes(selModule.id)}
-                hasSubmap={!!submaps[selModule.id] && submaps[selModule.id] !== 'loading'}
+                backendActive={!!backendRepo}
+                inducing={inducing}
                 solo={filters.solo}
                 onToggleExpand={() => toggleExpand(selModule.id)}
                 onToggleSolo={() => toggleFilter('solo')}
+                onReinduce={startReinduce}
               />
             </Panel>
           )}
@@ -748,6 +789,12 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                 <span>{mergedMap.layers.length} 层</span>
                 <span>{mergedMap.edges.length} 依赖</span>
                 <span className="text-red-500">{violations} 逆向</span>
+                {inducing && (
+                  <span className="flex items-center gap-1 font-semibold text-amber-600">
+                    <RefreshCw size={10} className="animate-spin" />
+                    归纳中…
+                  </span>
+                )}
                 <button
                   onClick={startGrowth}
                   disabled={!!growth}
@@ -828,6 +875,10 @@ export default function App() {
         const msg = JSON.parse(e.data)
         if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
         if (msg.name === 'growth.event' && msg.data?.repo === backendRepo) emitGrowthEvent(msg.data.event)
+        if (msg.name === 'session.statusChanged') {
+          const d = msg.data
+          if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+        }
       } catch {
         /* 忽略坏消息 */
       }

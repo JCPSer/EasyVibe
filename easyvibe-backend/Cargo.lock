@@ -163,6 +163,7 @@ dependencies = [
  "easyvibe-api-types",
  "easyvibe-common",
  "easyvibe-map",
+ "easyvibe-session",
  "futures-util",
  "serde",
  "serde_json",
@@ -203,7 +204,10 @@ dependencies = [
 name = "easyvibe-session"
 version = "0.1.0"
 dependencies = [
+ "easyvibe-api-types",
  "easyvibe-common",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ path = "src/main.rs"
 easyvibe-common.workspace = true
 easyvibe-api-types.workspace = true
 easyvibe-map.workspace = true
+easyvibe-session.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
