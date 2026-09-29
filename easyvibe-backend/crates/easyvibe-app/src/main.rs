@@ -419,10 +419,13 @@ async fn main() {
     });
     let session_manager = SessionManager::new(session_tx);
 
-    // agent 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）
+    // agent CLI 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）。
+    // 默认 -p --bare --dangerously-skip-permissions：bare 跳过宿主 hooks（防 grill-me 类
+    // 钩子把无人值守任务带偏成访谈模式）；skip-permissions 授予 Bash 等工具（实弹验证发现
+    // headless 下 Bash 默认被拒，agent 只能"分析后成功退出"什么都不写）。
     let agent_command = std::env::var("EASYVIBE_AGENT_CMD").unwrap_or_else(|_| "claude".into());
     let agent_args: Vec<String> = std::env::var("EASYVIBE_AGENT_ARGS")
-        .unwrap_or_else(|_| "-p".into())
+        .unwrap_or_else(|_| "-p --bare --dangerously-skip-permissions".into())
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
