@@ -1,0 +1,8 @@
+[package]
+name = "easyvibe-db"
+version = "0.1.0"
+edition = "2021"
+description = "占位 crate：详见 ../../backend-design.md 纵切路线"
+
+[dependencies]
+easyvibe-common.workspace = true

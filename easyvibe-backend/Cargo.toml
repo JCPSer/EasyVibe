@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/easyvibe-app",
+    "crates/easyvibe-map",
+    "crates/easyvibe-session",
+    "crates/easyvibe-ai-agent",
+    "crates/easyvibe-db",
+    "crates/easyvibe-api-types",
+    "crates/easyvibe-common",
+]
+
+[workspace.dependencies]
+# M2-1 所需
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower = "0.5"
+# 内部 crate
+easyvibe-common = { path = "crates/easyvibe-common" }
+easyvibe-api-types = { path = "crates/easyvibe-api-types" }
+easyvibe-map = { path = "crates/easyvibe-map" }
+easyvibe-session = { path = "crates/easyvibe-session" }
+easyvibe-ai-agent = { path = "crates/easyvibe-ai-agent" }
+easyvibe-db = { path = "crates/easyvibe-db" }
+
+[profile.release]
+lto = true

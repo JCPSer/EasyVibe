@@ -458,7 +458,7 @@ function GrowthPanel({
   )
 }
 
-function Canvas({ map }: { map: CodeMap }) {
+function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null }) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('issues')
@@ -522,11 +522,12 @@ function Canvas({ map }: { map: CodeMap }) {
     setSubmaps((prev) => (prev[id] ? prev : { ...prev, [id]: 'loading' }))
   }, [])
 
-  // 懒加载子图：任何 loading 状态触发取数
+  // 懒加载子图：任何 loading 状态触发取数（后端模式走 API，否则静态文件）
   useEffect(() => {
     for (const [id, v] of Object.entries(submaps)) {
       if (v !== 'loading') continue
-      fetch(`/data/modules/${id}.json`)
+      const url = backendRepo ? `/api/repos/${backendRepo}/modules/${id}` : `/data/modules/${id}.json`
+      fetch(url)
         .then((r) => {
           if (!r.ok) throw new Error(String(r.status))
           return r.json() as Promise<SubMap>
@@ -540,7 +541,7 @@ function Canvas({ map }: { map: CodeMap }) {
           setExpandedIds((prev) => prev.filter((x) => x !== id))
         })
     }
-  }, [submaps])
+  }, [submaps, backendRepo])
 
   const expanded = useMemo(() => {
     const m = new Map<string, SubMap | 'loading'>()
@@ -750,16 +751,52 @@ function Canvas({ map }: { map: CodeMap }) {
 export default function App() {
   const [map, setMap] = useState<CodeMap | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 后端模式：探测 /api/health 成功且仓库列表非空则启用；失败降级静态 demo 数据
+  const [backendRepo, setBackendRepo] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
 
   useEffect(() => {
-    fetch('/data/map.json')
+    let cancelled = false
+    fetch('/api/health')
+      .then((r) => (r.ok ? fetch('/api/repos') : Promise.reject(new Error('no backend'))))
+      .then((r) => r.json())
+      .then((d: { data?: { id: string }[] }) => {
+        if (!cancelled && d.data && d.data.length > 0) setBackendRepo(d.data[0].id)
+      })
+      .catch(() => {
+        if (!cancelled) setBackendRepo(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // WS 订阅 map.changed → 触发重取
+  useEffect(() => {
+    if (!backendRepo) return
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${location.host}/ws`)
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
+      } catch {
+        /* 忽略坏消息 */
+      }
+    }
+    return () => ws.close()
+  }, [backendRepo])
+
+  useEffect(() => {
+    const url = backendRepo ? `/api/repos/${backendRepo}/map` : '/data/map.json'
+    fetch(url)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json() as Promise<CodeMap>
       })
       .then(setMap)
       .catch((e) => setError(String(e)))
-  }, [])
+  }, [backendRepo, reloadTick])
 
   if (error) {
     return (
@@ -777,7 +814,7 @@ export default function App() {
   }
   return (
     <ReactFlowProvider>
-      <Canvas map={map} />
+      <Canvas map={map} backendRepo={backendRepo} />
     </ReactFlowProvider>
   )
 }

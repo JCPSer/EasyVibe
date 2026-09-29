@@ -1,3 +1,6 @@
 .DS_Store
 easyvibe-renderer/node_modules/
 easyvibe-renderer/dist/
+
+# Rust
+/easyvibe-backend/target
