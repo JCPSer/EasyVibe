@@ -894,25 +894,47 @@ export default function App() {
     }
   }, [])
 
-  // WS 订阅 map.changed → 触发重取
+  // WS 订阅：map.changed 触发重取 / growth 与 session 事件转发；指数退避重连 + 重连后全量重同步
   useEffect(() => {
     if (!backendRepo) return
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/ws`)
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
-        if (msg.name === 'growth.event' && msg.data?.repo === backendRepo) emitGrowthEvent(msg.data.event)
-        if (msg.name === 'session.statusChanged') {
-          const d = msg.data
-          if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+    let closed = false
+    let ws: WebSocket | null = null
+    let retry = 0
+    let timer: number | undefined
+
+    const connect = () => {
+      if (closed) return
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      ws = new WebSocket(`${proto}://${location.host}/ws`)
+      ws.onopen = () => {
+        retry = 0
+        setReloadTick((t) => t + 1) // 全量重同步（覆盖断线期间的变更）
+      }
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
+          if (msg.name === 'growth.event' && msg.data?.repo === backendRepo) emitGrowthEvent(msg.data.event)
+          if (msg.name === 'session.statusChanged') {
+            const d = msg.data
+            if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+          }
+        } catch {
+          /* 忽略坏消息 */
         }
-      } catch {
-        /* 忽略坏消息 */
+      }
+      ws.onclose = () => {
+        if (closed) return
+        retry += 1
+        timer = window.setTimeout(connect, Math.min(15000, 1000 * 2 ** retry))
       }
     }
-    return () => ws.close()
+    connect()
+    return () => {
+      closed = true
+      window.clearTimeout(timer)
+      ws?.close()
+    }
   }, [backendRepo])
 
   useEffect(() => {

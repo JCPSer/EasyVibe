@@ -35,6 +35,29 @@ impl SessionManager {
         self.active.read().await.get(repo_id).cloned()
     }
 
+    /// 注册一个外部活动会话（如巡检）；仓库已有活动会话（归纳/巡检任一）则拒绝。
+    /// 与 start_induction 共用同一纪律：地图写操作全局单飞。
+    pub async fn try_register(&self, s: SessionStatusChanged) -> Result<(), ApiError> {
+        {
+            let map = self.active.read().await;
+            if let Some(existing) = map.get(&s.repo) {
+                if matches!(existing.status, SessionStatus::Starting | SessionStatus::Running) {
+                    return Err(ApiError::Conflict(format!(
+                        "仓库 {} 有活动会话 {}，地图写操作需排队",
+                        s.repo, existing.session_id
+                    )));
+                }
+            }
+        }
+        self.publish(s).await;
+        Ok(())
+    }
+
+    /// 外部会话状态变更（不校验，直接发布）——巡检等自管生命周期的会话使用
+    pub async fn note_status(&self, s: SessionStatusChanged) {
+        self.publish(s).await;
+    }
+
     /// 启动一次归纳会话（v2.2 协议执行者 = 外部 agent CLI）。
     /// 单会话纪律：一个仓库同时只允许一个活动会话。
     pub async fn start_induction(
@@ -45,19 +68,14 @@ impl SessionManager {
         command: &str,
         args: &[String],
     ) -> Result<SessionStatusChanged, ApiError> {
-        if let Some(s) = self.active.read().await.get(repo_id) {
-            if matches!(s.status, SessionStatus::Starting | SessionStatus::Running) {
-                return Err(ApiError::Conflict(format!("仓库 {repo_id} 已有活动会话 {}", s.session_id)));
-            }
-        }
-
         let session_id = format!("ind-{}", self.counter.fetch_add(1, Ordering::SeqCst));
-        let status = SessionStatusChanged {
+        // 单会话纪律：与巡检等地图写操作共用（try_register 内含活动会话检查）
+        self.try_register(SessionStatusChanged {
             repo: repo_id.to_string(),
             session_id: session_id.clone(),
             status: SessionStatus::Starting,
-        };
-        self.publish(status.clone()).await;
+        })
+        .await?;
 
         let rendered = prompt_template.replace("<REPO_ROOT>", &repo_root.to_string_lossy());
         let mut cmd = Command::new(command);
@@ -81,7 +99,7 @@ impl SessionManager {
             });
         }
 
-        self.set_status(&status.repo, &status.session_id, SessionStatus::Running).await;
+        self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
         // 看门任务：收集输出（翻译层的最小形态，防大输出——只记行数与前 200 字节），等退出，报终态
         let stdout = child.stdout.take();
@@ -89,6 +107,7 @@ impl SessionManager {
         let events = self.events.clone();
         let active = self.active.clone();
         let repo = repo_id.to_string();
+        let session_id_task = session_id.clone();
         tokio::spawn(async move {
             let mut out_lines = 0u64;
             if let Some(mut s) = stdout {
@@ -102,12 +121,12 @@ impl SessionManager {
                             out_lines += 1;
                             if out_lines <= 3 || out_lines % 50 == 0 {
                                 let peek: String = line.chars().take(200).collect();
-                                info!("[session {session_id}] stdout#{out_lines}: {peek}");
+                                info!("[session {session_id_task}] stdout#{out_lines}: {peek}");
                             }
                             line.clear();
                         }
                         Err(e) => {
-                            warn!("[session {session_id}] stdout 读取失败: {e}");
+                            warn!("[session {session_id_task}] stdout 读取失败: {e}");
                             break;
                         }
                     }
@@ -117,18 +136,22 @@ impl SessionManager {
                 Ok(exit) if exit.success() => SessionStatus::Succeeded,
                 Ok(exit) => SessionStatus::Failed,
                 Err(e) => {
-                    warn!("[session {session_id}] wait 失败: {e}");
+                    warn!("[session {session_id_task}] wait 失败: {e}");
                     SessionStatus::Failed
                 }
             };
             let _ = stderr; // stderr 随进程关闭丢弃（详细排查看 agent 自身日志）
-            let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id.clone(), status };
+            let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
             active.write().await.insert(repo.clone(), final_status.clone());
             let _ = events.send(final_status).await;
-            info!("[session {session_id}] 终态: {:?}", status);
+            info!("[session {session_id_task}] 终态: {:?}", status);
         });
 
-        Ok(self.active.read().await.get(repo_id).cloned().unwrap_or(status))
+        Ok(SessionStatusChanged {
+            repo: repo_id.to_string(),
+            session_id,
+            status: SessionStatus::Running,
+        })
     }
 
     async fn set_status(&self, repo: &str, session_id: &str, status: SessionStatus) {
@@ -175,6 +198,33 @@ mod tests {
                 return evt;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn write_mutex_shared_between_kinds() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let mgr = SessionManager::new(tx);
+        let dir = std::env::temp_dir();
+        // 归纳会话占住仓库
+        let _s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        // 巡检注册必须被拒（跨类型的写互斥）
+        let err = mgr
+            .try_register(SessionStatusChanged {
+                repo: "repo1".into(),
+                session_id: "patrol-x".into(),
+                status: SessionStatus::Running,
+            })
+            .await;
+        assert!(matches!(err, Err(ApiError::Conflict(_))));
+        // 其他仓库的巡检不受影响
+        assert!(mgr
+            .try_register(SessionStatusChanged {
+                repo: "repo2".into(),
+                session_id: "patrol-y".into(),
+                status: SessionStatus::Running,
+            })
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

@@ -115,29 +115,45 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
-/// 触发巡检（M2-4）：Supervisor 直调 LLM，产出新地图原子写回 + 健康历史落库
+/// 触发巡检（M2-4）：Supervisor 直调 LLM，产出新地图原子写回 + 健康历史落库。
+/// 写互斥：与归纳共用 SessionManager 的单会话纪律（try_register 拒绝并发地图写）
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if *st.llm_mode == LlmMode::Anthropic && std::env::var("EASYVIBE_LLM_API_KEY").is_err() {
         return Err(ApiError::BadRequest("未配置 EASYVIBE_LLM_API_KEY".into()).into());
     }
-    let snap = st.map_service.load_map(&repo).await?;
+    let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    st.session_manager
+        .try_register(SessionStatusChanged {
+            repo: repo.id.clone(),
+            session_id: run_id.clone(),
+            status: easyvibe_api_types::SessionStatus::Running,
+        })
+        .await?;
+    let snap = match st.map_service.load_map(&repo).await {
+        Ok(s) => s,
+        Err(e) => {
+            st.session_manager
+                .note_status(SessionStatusChanged {
+                    repo: repo.id.clone(),
+                    session_id: run_id.clone(),
+                    status: easyvibe_api_types::SessionStatus::Failed,
+                })
+                .await;
+            return Err(e.into());
+        }
+    };
 
     // 异步执行；状态经 session.statusChanged 上报（session_id = patrol run id）
     let st2 = st.clone();
     let repo2 = repo.clone();
+    let run_id_task = run_id.clone();
     tokio::spawn(async move {
-        let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
-        let _ = st2.event_bus.send(BusEvent::SessionStatus(SessionStatusChanged {
-            repo: repo2.id.clone(),
-            session_id: run_id.clone(),
-            status: easyvibe_api_types::SessionStatus::Running,
-        }));
         let result: Result<easyvibe_ai_agent::PatrolSummary, ApiError> = match *st2.llm_mode {
             LlmMode::Stub => {
                 let llm = easyvibe_ai_agent::StubLlmClient::new();
                 st2.patrol_service
-                    .run(Some(run_id.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
+                    .run(Some(run_id_task.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
                     .await
             }
             LlmMode::Anthropic => {
@@ -147,25 +163,23 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                     &std::env::var("EASYVIBE_LLM_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".into()),
                 );
                 st2.patrol_service
-                    .run(Some(run_id.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
+                    .run(Some(run_id_task.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
                     .await
             }
         };
-        let (status, error) = match &result {
-            Ok(_) => (easyvibe_api_types::SessionStatus::Succeeded, None),
-            Err(e) => (easyvibe_api_types::SessionStatus::Failed, Some(e.to_string())),
+        let status = match &result {
+            Ok(_) => easyvibe_api_types::SessionStatus::Succeeded,
+            Err(_) => easyvibe_api_types::SessionStatus::Failed,
         };
-        let _ = st2.event_bus.send(BusEvent::SessionStatus(SessionStatusChanged {
-            repo: repo2.id,
-            session_id: run_id,
-            status,
-        }));
+        st2.session_manager
+            .note_status(SessionStatusChanged { repo: repo2.id, session_id: run_id_task, status })
+            .await;
         if let Err(e) = result {
             tracing::warn!("[patrol] 失败: {e}（错误已入 patrol_runs.error）");
         }
     });
 
-    Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true }))).into_response())
+    Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "runId": run_id }))).into_response())
 }
 
 /// 健康历史：巡检运行列表（域 2 的第一个读接口）

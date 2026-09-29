@@ -1,6 +1,7 @@
 # EasyVibe 架构分析提示词 v2.2
 
 > v2.2 变更：**恢复 concerns 问题提名**——v2 重写时从格式规范 5.1 丢失的回归（架构级与模块级 health 各提名 ≤3 条 {severity: critical/high, finding 现状, suggestion 建议}）；fixtures 增加 concerns 存在性检查（警告级，防再次回归）。
+> ⑦ init 增加 growth.log 归档重建（防无限增长；watcher 截断语义的唯一合法触发点，2026-09-29）。
 >
 > v2.1 变更（依据 hover-client 试点实证，见 pilot-report-v2.md）：
 > ① 已存在文件判定改三分类并记录 decision_reason；② 明确 arch_health 事件产出来源；
@@ -89,6 +90,7 @@ percent 按阶段权重：init 0% → scanning 10% → clustering 35% → module
 ### 1. init
 
 创建 `.easyvibe/map/` 与 `parts/`，读取旧 `map.json` 并按"已存在文件的处理"做出三分类决策（写 `decision_reason`），写初始 `progress.json`。
+**同时处理 `growth.log`**：将旧文件归档为 `growth.log.<yyyyMMdd-HHmmss>.bak`，然后重建为空的 `growth.log`——防止无限增长；watcher 依赖"截断重发全量"语义，init 是唯一合法的截断点。
 
 ### 2. scanning（串行，一次完成）
 
