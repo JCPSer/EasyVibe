@@ -115,10 +115,39 @@ async fn get_submap(
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
+    // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
+    let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
     let session = st
         .session_manager
         .start_induction(&repo.id, &repo.root, &st.prompt_template, &st.agent_command, &st.agent_args)
         .await?;
+
+    // 终态后产物核验
+    let st2 = st.clone();
+    let repo2 = repo.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            match st2.session_manager.status_of(&repo2.id).await {
+                Some(s) if !matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) => {
+                    if let Some(before) = hash_before {
+                        if let Ok(snap) = st2.map_service.load_map(&repo2).await {
+                            if snap.content_hash == before {
+                                tracing::warn!(
+                                    "[reinduce] 会话 {} 终态 {:?} 但 map.json 未变化——agent 可能未执行归纳（模型能力/提示词遵从？）",
+                                    s.session_id, s.status
+                                );
+                            }
+                        }
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
