@@ -81,3 +81,11 @@
 .growth-born {
   animation: ev-fade-in 0.7s ease;
 }
+
+/* 连线纯视觉：不捕获指针，拖动/点击一律穿透到画布（连线无交互场景） */
+.react-flow__edge {
+  pointer-events: none !important;
+}
+.react-flow__edge-textwrapper {
+  pointer-events: none !important;
+}

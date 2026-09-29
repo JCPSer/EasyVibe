@@ -466,6 +466,7 @@ function Canvas({ map }: { map: CodeMap }) {
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading'>>({})
   const [growth, setGrowth] = useState<GrowthState | null>(null)
+  const [headerExpanded, setHeaderExpanded] = useState(false)
   const { fitView } = useReactFlow()
 
   // 生长回放：消费 growth.log（v2.2 协议），已到达的层/模块集合
@@ -624,9 +625,9 @@ function Canvas({ map }: { map: CodeMap }) {
             <Legend violations={violations} />
           </Panel>
 
-          {/* 顶部中央：选中模块的横向工具栏（F1a） */}
+          {/* 顶部中央：选中模块的横向工具栏（F1a）；mt 让出头部卡片高度（展开简介时更高），窄屏不遮挡 */}
           {selModule && (
-            <Panel position="top-center" className="mt-1">
+            <Panel position="top-center" style={{ marginTop: headerExpanded ? 200 : 110 }}>
               <ModuleToolbar
                 moduleName={selModule.name}
                 expanded={expandedIds.includes(selModule.id)}
@@ -683,7 +684,18 @@ function Canvas({ map }: { map: CodeMap }) {
                 <span className="text-[10px] text-slate-300">|</span>
                 <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo} · 语义代码地图</h1>
               </div>
-              <p className="mt-0.5 max-w-[520px] truncate text-[11px] text-slate-500">{map.meta.description}</p>
+              <button
+                onClick={() => setHeaderExpanded((v) => !v)}
+                className="mt-0.5 block max-w-[520px] text-left"
+                title={headerExpanded ? '收起简介' : '展开简介'}
+              >
+                <p className={`text-[11px] text-slate-500 ${headerExpanded ? 'max-h-28 overflow-y-auto' : 'truncate'}`}>
+                  {map.meta.description}
+                  <span className="ml-1 text-[9.5px] font-medium text-blue-400">
+                    {headerExpanded ? '▲ 收起' : '▼ 展开'}
+                  </span>
+                </p>
+              </button>
               <div className="mt-1 flex items-center gap-3 text-[10.5px] text-slate-400">
                 <span className="flex items-center gap-1">
                   <GitBranch size={11} /> {map.meta.generator}
