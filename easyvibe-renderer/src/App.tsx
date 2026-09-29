@@ -486,16 +486,19 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [growth, setGrowth] = useState<GrowthState | null>(null)
   const [liveActivity, setLiveActivity] = useState(false)
   const [inducing, setInducing] = useState(false)
+  const [patrolling, setPatrolling] = useState(false)
   const growthRef = useRef<GrowthState | null>(null)
   useEffect(() => {
     growthRef.current = growth
   }, [growth])
 
-  // 会话状态：终态（succeeded/failed）解除"归纳中"
+  // 会话状态：终态（succeeded/failed）解除"归纳中"/"巡检中"（patrol 会话以 patrol- 前缀区分）
   useEffect(
     () =>
       onSessionEvent((evt) => {
-        if (evt.status === 'succeeded' || evt.status === 'failed') setInducing(false)
+        if (evt.status !== 'succeeded' && evt.status !== 'failed') return
+        setInducing(false)
+        if (evt.sessionId.startsWith('patrol-')) setPatrolling(false)
       }),
     [],
   )
@@ -586,6 +589,17 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
       })
       .catch(() => setInducing(false))
   }, [backendRepo, inducing, startGrowth])
+
+  // 巡检（M2-4）：Supervisor 直调 LLM，产出新地图原子写回 + 健康历史落库
+  const startPatrol = useCallback(() => {
+    if (!backendRepo || patrolling) return
+    setPatrolling(true)
+    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+      })
+      .catch(() => setPatrolling(false))
+  }, [backendRepo, patrolling])
 
   // 懒加载子图：任何 loading 状态触发取数（后端模式走 API，否则静态文件）
   useEffect(() => {
@@ -808,6 +822,21 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                   <Play size={10} />
                   {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
                 </button>
+                {backendRepo && (
+                  <button
+                    onClick={startPatrol}
+                    disabled={patrolling}
+                    className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-60 ${
+                      patrolling
+                        ? 'border-amber-300 bg-amber-50 text-amber-700'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    }`}
+                    title="巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史"
+                  >
+                    <Activity size={10} className={patrolling ? 'animate-pulse' : ''} />
+                    {patrolling ? '巡检中…' : '巡检'}
+                  </button>
+                )}
               </div>
             </div>
           </div>

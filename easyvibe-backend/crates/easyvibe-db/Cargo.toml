@@ -2,7 +2,10 @@
 name = "easyvibe-db"
 version = "0.1.0"
 edition = "2021"
-description = "占位 crate：详见 ../../backend-design.md 纵切路线"
 
 [dependencies]
 easyvibe-common.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

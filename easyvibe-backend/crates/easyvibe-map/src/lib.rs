@@ -10,6 +10,29 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+/// 独立轻量自检（不依赖 MapService 实例；PatrolService 等复用）
+pub fn validate_minimum(json: &Value) -> Result<(), ApiError> {
+    let obj = json.as_object().ok_or_else(|| ApiError::MapInvalid("根节点必须是对象".into()))?;
+    for key in ["version", "meta", "layers", "modules", "edges", "health"] {
+        if !obj.contains_key(key) {
+            return Err(ApiError::MapInvalid(format!("缺少必填字段 {key}")));
+        }
+    }
+    if obj["modules"].as_array().map(|a| a.is_empty()).unwrap_or(true) {
+        return Err(ApiError::MapInvalid("modules 不能为空".into()));
+    }
+    Ok(())
+}
+
+/// 原子写入 JSON 文件（临时文件 + rename，同目录保证原子性）
+pub async fn atomic_write_json(path: &Path, value: &Value) -> Result<(), ApiError> {
+    let tmp = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| ApiError::Internal(e.to_string()))?;
+    tokio::fs::write(&tmp, bytes).await.map_err(|e| ApiError::Internal(format!("写临时文件失败: {e}")))?;
+    tokio::fs::rename(&tmp, path).await.map_err(|e| ApiError::Internal(format!("原子替换失败: {e}")))?;
+    Ok(())
+}
+
 /// 一个已注册的代码仓库（域 1 数据的归属者）
 #[derive(Debug, Clone)]
 pub struct Repo {
@@ -71,16 +94,7 @@ impl MapService {
 
     /// 轻量自检：结构性最低要求（完整 JSON Schema 校验在测试/fixtures 层做）
     fn check_minimum(&self, json: &Value) -> Result<(), ApiError> {
-        let obj = json.as_object().ok_or_else(|| ApiError::MapInvalid("根节点必须是对象".into()))?;
-        for key in ["version", "meta", "layers", "modules", "edges", "health"] {
-            if !obj.contains_key(key) {
-                return Err(ApiError::MapInvalid(format!("缺少必填字段 {key}")));
-            }
-        }
-        if obj["modules"].as_array().map(|a| a.is_empty()).unwrap_or(true) {
-            return Err(ApiError::MapInvalid("modules 不能为空".into()));
-        }
-        Ok(())
+        validate_minimum(json)
     }
 
     pub async fn cached(&self, repo_id: &str) -> Option<MapSnapshot> {
