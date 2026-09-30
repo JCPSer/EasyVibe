@@ -32,6 +32,7 @@ impl TaskExecutor {
         harness: Arc<tokio::sync::RwLock<Harness>>,
         agent_command: Arc<String>,
         agent_args: Arc<Vec<String>>,
+        max_parallel: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
@@ -41,7 +42,8 @@ impl TaskExecutor {
             harness,
             agent_command,
             agent_args,
-            permits: Arc::new(Semaphore::new(4)),
+            // Y2 清债：并发上限可配（env/启动配置传入），默认 4 不再焊死
+            permits: Arc::new(Semaphore::new(max_parallel.max(1))),
         })
     }
 
@@ -747,6 +749,7 @@ mod tests {
             harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
+            4,
         );
         let mut task = sample_task("pending");
         task.repo = "ev-task-exec-test".into();
@@ -800,6 +803,7 @@ mod tests {
             harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
+            4,
         );
         let mut task = sample_task("pending");
         task.id = "task-auto".into();
@@ -885,6 +889,7 @@ mod tests {
             harness_stub("框架"),
             Arc::new("echo".into()),
             Arc::new(vec!["[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}".to_string()]),
+            4,
         );
         let mut task = sample_task("pending");
         task.id = "task-collect".into();
@@ -928,6 +933,7 @@ mod tests {
         let executor = TaskExecutor::new(
             task_repo.clone(), approvals.clone(), sessions, maps,
             harness_stub("框架"), Arc::new("true".into()), Arc::new(vec![]),
+            4,
         );
         // 低危：单模块、短描述、无高危词 → 直通 done
         let mut low = sample_task("pending");
@@ -978,6 +984,7 @@ mod tests {
             harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
+            4,
         );
         let mut task = sample_task("pending");
         task.trust = "manual".into();
@@ -1014,6 +1021,7 @@ mod tests {
             harness_stub("框架"),
             Arc::new("true".into()), // stub：立即成功
             Arc::new(vec![]),
+            4,
         );
         let mut task = sample_task("pending");
         task.trust = "auto".into(); // auto 直通 → spawn_and_watch → 仓库未注册 → failed

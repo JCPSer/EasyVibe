@@ -99,14 +99,31 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .route("/harness", get(get_harness))
+        .route("/diagnostics", get(export_diagnostics))
         .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
 
     Router::new()
         .nest("/api", api)
         .route("/ws", get(ws_handler))
+        // Y6 清债：跨站请求防护—— evil 页面可对 127.0.0.1 发 simple POST（无 CORS 拦截）。
+        // 现代浏览器带 Sec-Fetch-Site 头：cross-site 一律拒（health 放行供连通探测）
+        .layer(axum::middleware::from_fn(|req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+            let (parts, body) = req.into_parts();
+            let is_health = parts.uri.path() == "/api/health";
+            let cross_site = parts.headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) == Some("cross-site");
+            if cross_site && !is_health {
+                let mut resp = axum::http::Response::new(axum::body::Body::from("cross-site request blocked"));
+                *resp.status_mut() = axum::http::StatusCode::FORBIDDEN;
+                return Ok::<_, std::convert::Infallible>(resp);
+            }
+            Ok::<_, std::convert::Infallible>(next.run(axum::http::Request::from_parts(parts, body)).await)
+        }))
         .with_state(state)
 }
+
+/// Y7：/api/health 已有 version 字段——前端在 WS 重连（全量重同步点）时比对
+/// 首次记录的版本，变化即提示"后端已更新，刷新页面"。此处仅加注释锚点，比对在前端。
 
 async fn health() -> Json<ApiResponse<HealthResponse>> {
     Json(ApiResponse::ok(HealthResponse { status: "ok".into(), version: VERSION.into() }))
@@ -491,6 +508,40 @@ async fn put_setting(State(st): State<AppState>, Json(body): Json<PutSettingRequ
 async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(String, String)>) -> Result<Response, AppError> {
     st.settings_repo.delete(&scope, &key).await?;
     Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
+/// Y3：一键诊断导出——把"用户报障口头描述"变成"导出一个文件"
+/// 最近 200 行日志 + 后端版本 + 各表计数（settings 的加密值剔除）
+async fn export_diagnostics(State(st): State<AppState>) -> Result<Response, AppError> {
+    let dir = std::env::var("EASYVIBE_DATA_DIR").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        format!("{home}/.easyvibe")
+    });
+    let log_path = format!("{dir}/logs/easyvibe.log");
+    let logs = std::fs::read_to_string(&log_path)
+        .map(|t| t.lines().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+        .unwrap_or_else(|_| "（日志文件不可读）".into());
+    use easyvibe_db::{ApprovalRepository as _, HealthRepository as _, TaskRepository as _};
+    let tasks = st.task_repo.list(st.map_service.repos().first().map(|r| r.id.as_str()).unwrap_or(""), 100).await.unwrap_or_default();
+    let runs = st.health_repo.list_runs(st.map_service.repos().first().map(|r| r.id.as_str()).unwrap_or(""), 20).await.unwrap_or_default();
+    let aps = tasks.iter().take(10).map(|t| t.id.clone()).collect::<Vec<_>>();
+    let body = serde_json::json!({
+        "version": VERSION,
+        "llm_mode": format!("{:?}", *st.llm_mode),
+        "repos": st.map_service.repos().iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        "task_counts": {
+            "by_status": tasks.iter().fold(serde_json::json!({}), |mut acc, t| {
+                let k = t.status.clone();
+                let o = acc.as_object_mut().unwrap();
+                *o.entry(k).or_insert(serde_json::json!(0)) = serde_json::json!(o.get(&t.status).and_then(|v| v.as_i64()).unwrap_or(0) + 1);
+                acc
+            }),
+        },
+        "recent_runs": runs.iter().take(5).map(|r| serde_json::json!({"id": r.id, "status": r.status, "archScore": r.arch_score})).collect::<Vec<_>>(),
+        "recent_logs": logs,
+    });
+    let _ = aps;
+    Ok(Json(serde_json::json!({ "success": true, "data": body })).into_response())
 }
 
 /// S1-3：harness 状态（manifest + 文件清单）——S3 管理界面的数据面
@@ -1077,7 +1128,23 @@ mod freshness;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    // Y3 清债：日志落盘（排障不再只靠终端）——数据目录 logs/ 按天滚动，双写 stderr
+    let _log_guard = {
+        let dir = std::env::var("EASYVIBE_DATA_DIR").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            format!("{home}/.easyvibe")
+        });
+        let dir = format!("{dir}/logs");
+        std::fs::create_dir_all(&dir).unwrap_or_else(|e| eprintln!("日志目录创建失败 {dir}: {e}"));
+        let appender = tracing_appender::rolling::daily(&dir, "easyvibe.log");
+        let (nb, guard) = tracing_appender::non_blocking(appender);
+        tracing_subscriber::fmt()
+            .with_env_filter("info")
+            .with_writer(nb)
+            .with_ansi(false)
+            .init();
+        guard
+    };
 
     // 仓库注册：从 EASYVIBE_REPO 环境变量读取（逗号分隔的多工作区预留），M2-1 先支持一个
     let repo_roots: Vec<std::path::PathBuf> = std::env::var("EASYVIBE_REPO")
@@ -1260,6 +1327,7 @@ async fn main() {
         harness.clone(),
         Arc::new(agent_command.clone()),
         Arc::new(agent_args.clone()),
+        std::env::var("EASYVIBE_MAX_PARALLEL").ok().and_then(|v| v.parse().ok()).unwrap_or(4),
     );
     // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记
     // interrupted（awaiting_approval 等用户决策的任务不受影响）；pending 任务照常重新入队
@@ -1423,6 +1491,7 @@ mod tests {
             harness.clone(),
             Arc::new("true".into()),
             Arc::new(vec![]),
+            4,
         );
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {

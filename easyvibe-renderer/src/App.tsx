@@ -1,4 +1,4 @@
-import { ToastHost } from '@/lib/toast'
+import { ToastHost, toast } from '@/lib/toast'
 import { Component, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
@@ -1176,11 +1176,15 @@ export default function App() {
   const [backendRepo, setBackendRepo] = useState<string | null>(null)
   const [repos, setRepos] = useState<{ id: string; name: string }[]>([])
   const [reloadTick, setReloadTick] = useState(0)
+  // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
+  const [serverVersion, setServerVersion] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     fetch('/api/health')
-      .then((r) => (r.ok ? fetch('/api/repos') : Promise.reject(new Error('no backend'))))
+      .then((r) => (r.ok ? fetch('/api/health').then((h) => h.json()).then((h: { data?: { version?: string } }) => {
+        if (h.data?.version) setServerVersion(h.data.version)
+      }).then(() => r) : Promise.reject(new Error('no backend'))))
       .then((r) => r.json())
       .then((d: { data?: { id: string; name: string }[] }) => {
         if (!cancelled && d.data && d.data.length > 0) {
@@ -1211,6 +1215,17 @@ export default function App() {
       ws.onopen = () => {
         retry = 0
         setReloadTick((t) => t + 1) // 全量重同步（覆盖断线期间的变更）
+        // Y7：重连点比对后端版本——热重启/更新后前端是旧契约，提示刷新
+        fetch('/api/health')
+          .then((r) => r.json())
+          .then((h: { data?: { version?: string } }) => {
+            const v = h.data?.version
+            if (v && serverVersion && v !== serverVersion) {
+              toast(`后端已更新（${serverVersion} → ${v}），刷新页面以加载新界面`, 'error')
+            }
+            if (v) setServerVersion(v)
+          })
+          .catch(() => {})
       }
       ws.onmessage = (e) => {
         try {
