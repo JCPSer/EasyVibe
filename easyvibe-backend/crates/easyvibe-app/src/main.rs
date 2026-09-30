@@ -32,6 +32,7 @@ pub struct AppState {
     pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+    pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
     pub executor: Arc<task_exec::TaskExecutor>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
@@ -55,6 +56,7 @@ pub enum BusEvent {
     Growth { repo: String, event: Value },
     Progress { repo: String, progress: Value },
     SessionStatus(SessionStatusChanged),
+    TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -70,6 +72,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/chat", axum::routing::post(chat))
         .route("/repos/{id}/views", axum::routing::post(save_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
+        .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
+        .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
@@ -359,6 +363,32 @@ async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(St
 
 // ---------- M3-2：指哪打哪——任务创建（上下文已组织好随表单提交；执行引擎 M3-3 接入） ----------
 
+/// 审批决策（M3-4）：approved/rejected 按当前关卡推进或终止；发射 task.statusChanged
+#[derive(serde::Deserialize)]
+struct DecideRequest {
+    decision: String, // approved / rejected
+    #[serde(default)]
+    note: Option<String>,
+}
+
+async fn decide_task(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>, Json(body): Json<DecideRequest>) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let task = st.executor.decide(&tid, &body.decision, body.note.as_deref()).await?;
+    let _ = st.event_bus.send(BusEvent::TaskStatus {
+        repo: id,
+        task_id: tid,
+        status: task.status.clone(),
+        gate: task.gate.clone(),
+    });
+    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+}
+
+async fn list_task_approvals(State(st): State<AppState>, Path((_, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    use easyvibe_db::ApprovalRepository as _;
+    let aps = st.approval_repo.list_by_task(&tid).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": aps })).into_response())
+}
+
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
 /// 每条建议可一键转修复任务（前端组装 TaskDraft）
 async fn suggest(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
@@ -420,6 +450,7 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         trust: if body.trust == "auto" { "auto".into() } else { "manual".into() },
         error: None,
         session_id: None,
+        gate: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -439,6 +470,7 @@ async fn list_tasks(State(st): State<AppState>, Path(id): Path<String>) -> Resul
             "modules": serde_json::from_str::<serde_json::Value>(&t.modules).unwrap_or_default(),
             "acceptance": t.acceptance, "source": t.source,
             "status": t.status, "trust": t.trust, "error": t.error,
+            "gate": t.gate, "sessionId": t.session_id,
             "createdAt": t.created_at, "updatedAt": t.updated_at,
         }))
         .collect();
@@ -568,6 +600,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                 BusEvent::SessionStatus(s) => WsMessage {
                     name: ev::SESSION_STATUS_CHANGED.into(),
                     data: serde_json::to_value(s).unwrap_or_default(),
+                },
+                BusEvent::TaskStatus { repo, task_id, status, gate } => WsMessage {
+                    name: "task.statusChanged".into(),
+                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "status": status, "gate": gate }),
                 },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
@@ -725,6 +761,7 @@ async fn main() {
     let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
     let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(database.pool().clone()));
     let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(database.pool().clone()));
+    let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(database.pool().clone()));
 
     // 主密钥：EASYVIBE_MASTER_KEY（64 位十六进制）优先，否则数据目录 .master_key（0600，首次生成）
     let cipher = {
@@ -764,6 +801,7 @@ async fn main() {
     info!("harness: {}", _harness_dir.display());
     let executor = task_exec::TaskExecutor::new(
         task_repo.clone(),
+        approval_repo.clone(),
         session_manager.clone(),
         map_service.clone(),
         Arc::new(framework),
@@ -783,6 +821,7 @@ async fn main() {
         settings_repo,
         cipher: Arc::new(cipher),
         task_repo,
+        approval_repo,
         executor,
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
@@ -812,8 +851,10 @@ mod tests {
         let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
         let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
         let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
         let executor = task_exec::TaskExecutor::new(
             task_repo.clone(),
+            approval_repo.clone(),
             session_manager.clone(),
             svc.clone(),
             Arc::new("框架".into()),
@@ -832,6 +873,7 @@ mod tests {
             settings_repo,
             cipher: Arc::new(cipher),
             task_repo,
+            approval_repo,
             executor,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),

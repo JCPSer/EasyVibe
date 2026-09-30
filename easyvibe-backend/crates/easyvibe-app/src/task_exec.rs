@@ -11,6 +11,7 @@ use tracing::{info, warn};
 
 pub struct TaskExecutor {
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+    pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
     pub session_manager: Arc<SessionManager>,
     pub map_service: Arc<MapService>,
     /// inject-prompt 框架（路径已适配到本机 harness 目录）
@@ -24,6 +25,7 @@ pub struct TaskExecutor {
 impl TaskExecutor {
     pub fn new(
         task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+        approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
         session_manager: Arc<SessionManager>,
         map_service: Arc<MapService>,
         harness_framework: Arc<String>,
@@ -32,6 +34,7 @@ impl TaskExecutor {
     ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
+            approval_repo,
             session_manager,
             map_service,
             harness_framework,
@@ -57,11 +60,71 @@ impl TaskExecutor {
         }
     }
 
-    /// 执行单个任务：占用并发许可（移入看门任务，上限 4 才真实存在）→ 组装 prompt → spawn →
-    /// 按 session_id 归属终态（status_of_session，杜绝按仓库轮询的归属竞态）。
-    /// Conflict（写互斥）= 排队语义：保持 pending，延迟重试——绝不标失败（审查 🔴3）。
+    /// 执行单个任务（F5 两档分流）：manual 停在计划审批关（不 spawn）；
+    /// auto 直通（三道关记 skipped 留痕）后 spawn。Conflict/并发满载的排队语义在 spawn_and_watch。
     pub fn execute(self: Arc<Self>, task: TaskRow) -> impl std::future::Future<Output = ()> + Send {
         async move {
+            if task.trust == "manual" {
+                let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
+                let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
+                info!("[task-exec] 任务 {} 等待计划审批（manual）", task.id);
+                return;
+            }
+            for gate in ["plan", "diff", "report"] {
+                self.record_approval(&task.id, gate, "skipped", Some("自动模式直通，全程留痕")).await;
+            }
+            self.spawn_and_watch(task).await;
+        }
+    }
+
+    /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行
+    pub async fn decide(self: &Arc<Self>, task_id: &str, decision: &str, note: Option<&str>) -> Result<easyvibe_db::TaskRow, ApiError> {
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        let gate = task.gate.clone().unwrap_or_else(|| "plan".into());
+        self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
+        match (decision, gate.as_str()) {
+            ("rejected", _) => {
+                self.task_repo.update_status(&task.id, "rejected", note).await?;
+                self.task_repo.set_gate(&task.id, Some("rejected")).await?;
+            }
+            (_, "plan") => {
+                self.task_repo.update_status(&task.id, "running", None).await?;
+                self.task_repo.set_gate(&task.id, Some("diff")).await?;
+                self.clone().spawn_and_watch(task.clone()).await;
+                return Ok(task);
+            }
+            (_, "diff") => {
+                self.task_repo.set_gate(&task.id, Some("report")).await?;
+            }
+            (_, "report") => {
+                self.task_repo.update_status(&task.id, "done", None).await?;
+                self.task_repo.set_gate(&task.id, Some("done")).await?;
+            }
+            _ => return Err(ApiError::BadRequest(format!("未知关卡 {gate}"))),
+        }
+        self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
+    async fn record_approval(&self, task_id: &str, gate: &str, decision: &str, note: Option<&str>) {
+        use easyvibe_db::ApprovalRepository as _;
+        let id = format!("ap-{}-{}-{}", task_id, gate, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+        let _ = self
+            .approval_repo
+            .record(&easyvibe_db::ApprovalRow {
+                id,
+                task_id: task_id.to_string(),
+                gate: gate.into(),
+                decision: decision.into(),
+                note: note.map(Into::into),
+                decided_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
+            })
+            .await;
+    }
+
+    /// spawn agent 并看门：终态后 manual 任务回到审批流（diff 关），auto 直接 done
+    async fn spawn_and_watch(self: Arc<Self>, task: TaskRow) {
+        let trust_manual = task.trust == "manual";
         let repo = match self.map_service.find_repo(&task.repo) {
             Some(r) => r,
             None => {
@@ -93,6 +156,7 @@ impl TaskExecutor {
                 let task_id = task.id.clone();
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
+                    let trust_manual = trust_manual;
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         match this.session_manager.status_of_session(&session_id).await {
@@ -103,11 +167,19 @@ impl TaskExecutor {
                                 ) =>
                             {
                                 let failed = s.status == easyvibe_api_types::SessionStatus::Failed;
-                                let _ = this
-                                    .task_repo
-                                    .update_status(&task_id, if failed { "failed" } else { "succeeded" }, None)
-                                    .await;
-                                info!("[task-exec] 任务 {} 终态 {:?}", task_id, s.status);
+                                let (status, gate) = if failed {
+                                    ("failed", None)
+                                } else if trust_manual {
+                                    // manual：执行成功 → 回到审批流（当前 gate=diff）
+                                    ("awaiting_approval", None)
+                                } else {
+                                    ("done", Some("done"))
+                                };
+                                let _ = this.task_repo.update_status(&task_id, status, None).await;
+                                if let Some(g) = gate {
+                                    let _ = this.task_repo.set_gate(&task_id, Some(g)).await;
+                                }
+                                info!("[task-exec] 任务 {} 终态 {:?} → {}", task_id, s.status, status);
                                 break;
                             }
                             // None：会话状态被清理等异常——按失败收尸，防幽灵 running
@@ -133,7 +205,6 @@ impl TaskExecutor {
                 warn!("[task-exec] 任务 {} spawn 失败: {e}", task.id);
                 let _ = self.task_repo.update_status(&task.id, "failed", Some(&e.to_string())).await;
             }
-        }
         }
     }
 }
@@ -215,6 +286,7 @@ mod tests {
             trust: "manual".into(),
             error: None,
             session_id: None,
+            gate: None,
             created_at: "1".into(),
             updated_at: "1".into(),
         }
@@ -240,6 +312,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manual_task_waits_for_approval_then_full_flow() {
+        use easyvibe_db::{ApprovalRepository as _, Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-task-exec-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo_root = dir.clone();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&repo_root)]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            Arc::new("框架".into()),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+        );
+        let mut task = sample_task("pending");
+        task.repo = "ev-task-exec-test".into();
+        task.trust = "manual".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-task-exec-test")).await;
+        // manual：不 spawn，等待计划审批
+        let t = task_repo.get("task-t1").await.unwrap().unwrap();
+        assert_eq!(t.status, "awaiting_approval");
+        assert_eq!(t.gate.as_deref(), Some("plan"));
+        // 通过计划关 → 执行（true 立即成功）→ 回审批流（diff 关）
+        executor.decide("task-t1", "approved", None).await.unwrap();
+        // 等看门任务回写（2s 轮询）
+        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+        for _ in 0..10 {
+            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("diff") { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        }
+        assert_eq!(t.gate.as_deref(), Some("diff"), "执行成功后应停在 diff 关");
+        // diff → report → done
+        executor.decide("task-t1", "approved", None).await.unwrap();
+        let t = task_repo.get("task-t1").await.unwrap().unwrap();
+        assert_eq!(t.gate.as_deref(), Some("report"));
+        executor.decide("task-t1", "approved", None).await.unwrap();
+        let t = task_repo.get("task-t1").await.unwrap().unwrap();
+        assert_eq!(t.status, "done");
+        // 留痕：plan/diff/report 三条 approved
+        let aps = approvals.list_by_task("task-t1").await.unwrap();
+        assert_eq!(aps.len(), 3);
+        assert!(aps.iter().all(|a| a.decision == "approved"));
+    }
+
+    #[tokio::test]
+    async fn auto_task_runs_straight_with_skipped_trace() {
+        use easyvibe_db::{ApprovalRepository as _, Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-task-exec-test2");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            Arc::new("框架".into()),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+        );
+        let mut task = sample_task("pending");
+        task.id = "task-auto".into();
+        task.repo = "ev-task-exec-test2".into();
+        task.trust = "auto".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-task-exec-test2")).await;
+        let mut t = task_repo.get("task-auto").await.unwrap().unwrap();
+        for _ in 0..10 {
+            if t.status == "done" { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-auto").await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "done");
+        let aps = approvals.list_by_task("task-auto").await.unwrap();
+        assert_eq!(aps.iter().filter(|a| a.decision == "skipped").count(), 3);
+    }
+
+    #[tokio::test]
     async fn executes_to_terminal_with_stub() {
         use easyvibe_db::{Database, SqliteTaskRepository};
         let db = Database::connect_memory().await.unwrap();
@@ -247,17 +411,19 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let maps = MapService::new(vec![]);
+        let approvals = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
         let executor = TaskExecutor::new(
             task_repo.clone(),
+            approvals,
             sessions,
             maps,
             Arc::new("框架".into()),
             Arc::new("true".into()), // stub：立即成功
             Arc::new(vec![]),
         );
-        let task = sample_task("pending");
+        let mut task = sample_task("pending");
+        task.trust = "auto".into(); // auto 直通 → spawn_and_watch → 仓库未注册 → failed
         task_repo.create(&task).await.unwrap();
-        // 仓库未注册 → failed（路径校验）
         executor.clone().enqueue_pending(Some("demo")).await;
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "failed");

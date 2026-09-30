@@ -36,3 +36,15 @@ export function setWsCloseListener(fn: (() => void) | null) {
 export function notifyWsClosed() {
   wsCloseListener?.()
 }
+
+export type TaskEventListener = (event: { repo: string; taskId: string; status: string; gate?: string }) => void
+const taskListeners = new Set<TaskEventListener>()
+export function emitTaskEvent(e: { repo: string; taskId: string; status: string; gate?: string }) {
+  for (const l of taskListeners) l(e)
+}
+export function onTaskEvent(l: TaskEventListener): () => void {
+  taskListeners.add(l)
+  return () => {
+    taskListeners.delete(l)
+  }
+}

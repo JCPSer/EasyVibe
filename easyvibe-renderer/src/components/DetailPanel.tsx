@@ -7,12 +7,13 @@ import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
 import { ChatPanel } from '@/components/ChatPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
+import { TaskPanel } from '@/components/TaskPanel'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
   | { kind: 'submodule'; parentId: string; subId: string }
   | null
-export type PanelTab = 'issues' | 'detail' | 'chat' | 'suggest'
+export type PanelTab = 'issues' | 'detail' | 'chat' | 'suggest' | 'tasks'
 
 interface Props {
   map: CodeMap
@@ -347,6 +348,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
               ['detail', detailLabel],
               ['chat', '对话'],
               ['suggest', '建议'],
+              ['tasks', '任务'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -371,6 +373,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />
         </div>
         {tab === 'suggest' && <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />}
+        {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} />}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (

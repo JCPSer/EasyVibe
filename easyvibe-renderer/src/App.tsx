@@ -27,7 +27,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitGrowthEvent, emitSessionEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
+import { emitGrowthEvent, emitSessionEvent, emitTaskEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
@@ -965,6 +965,10 @@ export default function App() {
           if (msg.name === 'session.statusChanged') {
             const d = msg.data
             if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+          }
+          if (msg.name === 'task.statusChanged') {
+            const d = msg.data
+            if (d?.repo === backendRepo) emitTaskEvent({ repo: d.repo, taskId: d.taskId, status: d.status, gate: d.gate })
           }
         } catch {
           /* 忽略坏消息 */
