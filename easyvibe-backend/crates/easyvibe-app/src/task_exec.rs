@@ -90,6 +90,9 @@ impl TaskExecutor {
                         self.record_approval(&task.id, gate, "skipped", Some("监督模式低危直通")).await;
                     }
                     info!("[task-exec] 任务 {} 风险预评估低危，直通执行（supervised）", task.id);
+                    // 状态机缺口修复：直通执行先把状态推进 running（此前执行期间一直 pending，
+                    // 用户以为任务没被执行——试用截图实证）
+                    let _ = self.task_repo.update_status(&task.id, "running", None).await;
                     self.spawn_and_watch(task).await;
                     return;
                 }
@@ -98,6 +101,7 @@ impl TaskExecutor {
             for gate in ["plan", "diff", "report"] {
                 self.record_approval(&task.id, gate, "skipped", Some("自动模式直通，全程留痕")).await;
             }
+            let _ = self.task_repo.update_status(&task.id, "running", None).await;
             self.spawn_and_watch(task).await;
         }
     }

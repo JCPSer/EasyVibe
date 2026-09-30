@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw} from 'lucide-react'
-import { onTaskEvent } from '@/lib/growthBus'
+import { onTaskEvent, onSessionOutput } from '@/lib/growthBus'
 
 interface TaskResult {
   result?: { summary?: string; changed_modules?: string[] } | null
@@ -19,6 +19,7 @@ interface TaskItem {
   status: string // pending/awaiting_approval/running/succeeded/failed/rejected/done
   trust: string
   gate?: string
+  sessionId?: string
   acceptance?: string
   result?: TaskResult | null
   createdAt: string
@@ -49,6 +50,19 @@ export function TaskPanel({ backendRepo }: Props) {
   const [rejectReason, setRejectReason] = useState('')
   const [diffs, setDiffs] = useState<Record<string, string | null>>({})
   const [rechecking, setRechecking] = useState(false)
+  // 失败可诊断：任务会话的输出流（含 [err] 行）——失败时能看到 agent 的死亡原因
+  const [taskLines, setTaskLines] = useState<Record<string, string[]>>({})
+  useEffect(
+    () =>
+      onSessionOutput((e) => {
+        setTaskLines((prev) => {
+          const cur = prev[e.sessionId] ?? []
+          return { ...prev, [e.sessionId]: [...cur.slice(-3), e.line] }
+        })
+      }),
+    [],
+  )
+
   // 改进#7：plan 关的 flagged 风险理由（supervised 高危时由后端留痕）
   const [riskNotes, setRiskNotes] = useState<Record<string, string>>({})
   const [diffLoading, setDiffLoading] = useState<string | null>(null)
@@ -308,10 +322,15 @@ export function TaskPanel({ backendRepo }: Props) {
                 </div>
               </div>
             )}
-            {t.status === 'running' && (
-              <p className="mt-1.5 flex items-center gap-1 text-[10px] text-blue-500">
-                <Clock size={9} className="animate-pulse" /> agent 执行中，完成后进入下一关
-              </p>
+            {(t.status === 'running' || t.status === 'pending') && (
+              <div className="mt-1.5">
+                <p className="flex items-center gap-1 text-[10px] text-blue-500">
+                  <Clock size={9} className="animate-pulse" /> agent 执行中，完成后进入下一关
+                </p>
+                {t.sessionId && taskLines[t.sessionId]?.filter((l) => l.startsWith('[err]')).slice(-1).map((l, i) => (
+                  <p key={i} className="mt-0.5 truncate font-mono text-[9px] text-red-500">{l}</p>
+                ))}
+              </div>
             )}
           </div>
         )

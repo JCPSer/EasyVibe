@@ -144,7 +144,8 @@ impl SessionManager {
         // stdout 捕获缓冲（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料
         let stdout_buf = Arc::new(std::sync::Mutex::new(String::new()));
         self.outputs.write().await.insert(session_id.clone(), stdout_buf.clone());
-        let output_tx = self.output_tx.clone();
+        let out_output_tx = self.output_tx.clone();
+        let err_output_tx = self.output_tx.clone();
         let out_session_id = session_id.clone();
 
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
@@ -176,7 +177,7 @@ impl SessionManager {
                                     info!("[session {out_id}] stdout#{lines}: {peek}");
                                 }
                                 // 改进#2：过程直播——行截断 200 字符广播（行率不高，直接发）
-                                let _ = output_tx.send(SessionOutput {
+                                let _ = out_output_tx.send(SessionOutput {
                                     session_id: out_session_id.clone(),
                                     line: line.chars().take(200).collect(),
                                 });
@@ -210,6 +211,11 @@ impl SessionManager {
                                 lines += 1;
                                 let peek: String = line.chars().take(200).collect();
                                 warn!("[session {err_id}] stderr#{lines}: {peek}");
+                                // 失败可诊断：stderr 也进过程直播（[err] 前缀），任务卡可见死亡原因
+                                let _ = err_output_tx.send(crate::SessionOutput {
+                                    session_id: err_id.clone(),
+                                    line: format!("[err] {peek}"),
+                                });
                                 line.clear();
                             }
                             Err(_) => break,
