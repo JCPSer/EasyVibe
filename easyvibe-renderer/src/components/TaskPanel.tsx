@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
 
 interface TaskResult {
@@ -43,6 +43,10 @@ export function TaskPanel({ backendRepo }: Props) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [deciding, setDeciding] = useState<string | null>(null)
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [diffs, setDiffs] = useState<Record<string, string | null>>({})
+  const [diffLoading, setDiffLoading] = useState<string | null>(null)
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -61,21 +65,39 @@ export function TaskPanel({ backendRepo }: Props) {
   // WS 任务事件驱动刷新
   useEffect(() => onTaskEvent(() => load()), [load])
 
-  const decide = (id: string, decision: 'approved' | 'rejected') => {
+  const decide = (id: string, decision: 'approved' | 'rejected', note?: string) => {
     if (!backendRepo) return
     setDeciding(id + decision)
     fetch(`/api/repos/${backendRepo}/tasks/${id}/decide`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, note }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
+        setRejectingId(null)
+        setRejectReason('')
         setTimeout(load, 500) // 等看门任务回写后再刷一次
         load()
       })
-      .catch(() => alert('审批操作失败'))
+      .catch(() => alert(decision === 'rejected' ? '驳回失败（理由必填）' : '审批操作失败'))
       .finally(() => setDeciding(null))
+  }
+
+  // M4-3：完整 diff 按需懒加载（不随任务列表载荷；归档文件按任务读取）
+  const loadDiff = (id: string) => {
+    if (!backendRepo || id in diffs || diffLoading === id) return
+    setDiffLoading(id)
+    fetch(`/api/repos/${backendRepo}/tasks/${id}/diff`)
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        return r.json()
+      })
+      .then((d: { data: { diff: string | null } }) => {
+        setDiffs((prev) => ({ ...prev, [id]: d.data.diff ?? null }))
+      })
+      .catch(() => setDiffs((prev) => ({ ...prev, [id]: null })))
+      .finally(() => setDiffLoading(null))
   }
 
   return (
@@ -141,6 +163,33 @@ export function TaskPanel({ backendRepo }: Props) {
                     </pre>
                   </details>
                 )}
+                {/* M4-3：完整 diff 懒加载（按需读取归档，256KB 封顶在采集侧） */}
+                {t.result.archivedPath && (
+                  <details
+                    className="mt-1.5"
+                    onToggle={(e) => {
+                      if ((e.target as HTMLDetailsElement).open) loadDiff(t.id)
+                    }}
+                  >
+                    <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                      <FileDiff size={9} className="mr-0.5 inline" />
+                      完整 diff
+                    </summary>
+                    {diffLoading === t.id ? (
+                      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+                        <Loader2 size={10} className="animate-spin" /> 读取中…
+                      </p>
+                    ) : t.id in diffs ? (
+                      diffs[t.id] ? (
+                        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-slate-800 p-2 font-mono text-[9.5px] leading-4 text-emerald-200">
+                          {diffs[t.id]}
+                        </pre>
+                      ) : (
+                        <p className="mt-1 text-[10px] text-slate-400">（无变更或未采集到 diff）</p>
+                      )
+                    ) : null}
+                  </details>
+                )}
                 {t.result.archivedPath && (
                   <p className="mt-1 truncate text-[9px] text-slate-400" title={t.result.archivedPath}>
                     已归档：{t.result.archivedPath}
@@ -158,14 +207,53 @@ export function TaskPanel({ backendRepo }: Props) {
                   {deciding === t.id + 'approved' ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
                   通过
                 </button>
-                <button
-                  onClick={() => decide(t.id, 'rejected')}
-                  disabled={deciding !== null}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
-                >
-                  {deciding === t.id + 'rejected' ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
-                  驳回
-                </button>
+                {rejectingId === t.id ? (
+                  <button
+                    onClick={() => decide(t.id, 'rejected', rejectReason.trim())}
+                    disabled={deciding !== null || !rejectReason.trim()}
+                    className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-red-600 py-1.5 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                    title={rejectReason.trim() ? '' : '驳回必须填写理由'}
+                  >
+                    {deciding === t.id + 'rejected' ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
+                    确认驳回
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setRejectingId(t.id)
+                      setRejectReason('')
+                    }}
+                    disabled={deciding !== null}
+                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    <XCircle size={11} />
+                    驳回
+                  </button>
+                )}
+              </div>
+            )}
+            {/* M4-2：驳回理由输入（必填，后端 400 兜底） */}
+            {rejectingId === t.id && (
+              <div className="mt-2">
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={2}
+                  autoFocus
+                  placeholder="驳回理由（必填，留痕可追溯）…"
+                  className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[11px] leading-4 text-slate-700 outline-none focus:border-red-300"
+                />
+                <div className="mt-1 flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setRejectingId(null)
+                      setRejectReason('')
+                    }}
+                    className="rounded-full px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-600"
+                  >
+                    取消
+                  </button>
+                </div>
               </div>
             )}
             {t.status === 'running' && (

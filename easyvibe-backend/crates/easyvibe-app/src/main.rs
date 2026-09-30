@@ -80,6 +80,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
+        .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
@@ -392,6 +393,23 @@ async fn list_task_approvals(State(st): State<AppState>, Path((_, tid)): Path<(S
     use easyvibe_db::ApprovalRepository as _;
     let aps = st.approval_repo.list_by_task(&tid).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": aps })).into_response())
+}
+
+/// M4-3：任务完整 diff（按需读取，不随任务列表载荷）——development_docs 归档中的 diffFull；
+/// 无归档/无 diff 返回 diff=null（调用方展示"无变更"）
+async fn get_task_diff(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let path = repo.root.join(".easyvibe/development_docs").join(format!("{tid}.json"));
+    if !path.exists() {
+        return Ok(Json(serde_json::json!({ "success": true, "data": { "diff": null, "diffStat": null } })).into_response());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| ApiError::Internal(format!("归档读取失败: {e}")))?;
+    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("归档解析失败: {e}")))?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": { "diff": v["diffFull"], "diffStat": v["diffStat"] }
+    }))
+    .into_response())
 }
 
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
@@ -1199,6 +1217,34 @@ mod tests {
         // 摘要非空且 stub 诚实标注
         let summary = data["summary"].as_str().unwrap().to_string();
         assert!(summary.contains("stub"), "stub 模式压缩应诚实标注: {summary}");
+    }
+
+    #[tokio::test]
+    async fn task_diff_endpoint_reads_archive_on_demand() {
+        let (state, repo) = chat_state("diff-endpoint").await;
+        // 手工造归档（正常路径由终态采集写入）：diff 全文只进归档，tasks.result 不带
+        let dir = std::env::temp_dir().join("ev-chat-test-diff-endpoint/.easyvibe/development_docs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("task-x.json"),
+            r#"{"taskId":"task-x","diffFull":"+added line","diffStat":" a.txt | 1 +","archivedPath":null}"#,
+        )
+        .unwrap();
+        let app = build_router(state);
+        let get = |path: String| {
+            let app = app.clone();
+            async move {
+                let resp = app.oneshot(axum::http::Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+            }
+        };
+        let d = get(format!("/api/repos/{repo}/tasks/task-x/diff")).await;
+        assert_eq!(d["data"]["diff"], "+added line");
+        assert_eq!(d["data"]["diffStat"], " a.txt | 1 +");
+        // 无归档 → diff null（不 404：调用方区分"无变更"）
+        let d = get(format!("/api/repos/{repo}/tasks/task-nope/diff")).await;
+        assert!(d["data"]["diff"].is_null());
     }
 
     #[tokio::test]

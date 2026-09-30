@@ -77,8 +77,12 @@ impl TaskExecutor {
         }
     }
 
-    /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行
+    /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行。
+    /// M4-2：驳回必须给理由（审批中心定稿），空理由 400。
     pub async fn decide(self: &Arc<Self>, task_id: &str, decision: &str, note: Option<&str>) -> Result<easyvibe_db::TaskRow, ApiError> {
+        if decision == "rejected" && note.map(str::trim).unwrap_or_default().is_empty() {
+            return Err(ApiError::BadRequest("驳回必须填写理由（留痕可追溯）".into()));
+        }
         let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
         let gate = task.gate.clone().unwrap_or_else(|| "plan".into());
         self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
@@ -319,6 +323,31 @@ pub async fn git_change_summary(repo_root: &std::path::Path) -> Option<String> {
     if parts.is_empty() { None } else { Some(parts.join("\n")) }
 }
 
+/// 完整 diff（M4-3 diff 可视化）：`git diff HEAD`，256KB 封顶（超帽截断并标注）。
+/// 非 git 仓库返回 None。落归档文件供 GET task-diff 读取，tasks.result 只带 stat 摘要不带全文。
+pub async fn git_full_diff(repo_root: &std::path::Path) -> Option<String> {
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new("git").args(["diff", "HEAD"]).current_dir(repo_root).output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !out.status.success() {
+        return None; // 非 git 仓库
+    }
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.is_empty() {
+        return None;
+    }
+    const CAP: usize = 262_144;
+    if s.len() > CAP {
+        s.truncate(CAP);
+        s.push_str("\n…（diff 超 256KB 已截断）");
+    }
+    Some(s)
+}
+
 /// M4-1 终态采集：stdout 的 RESULT 行 + git 变更摘要 → `.easyvibe/development_docs/` 归档
 /// （§9 #2：git 可见、随 PR 评审）→ tasks.result JSON（diff 关审批的展示原料）。
 /// 两者皆无（agent 无输出且非 git 仓库）返回 None。
@@ -331,7 +360,8 @@ pub async fn collect_task_result(
     let output = session_manager.output_of(session_id).await.unwrap_or_default();
     let parsed = parse_result_line(&output);
     let diff_stat = git_change_summary(repo_root).await;
-    if parsed.is_none() && diff_stat.is_none() {
+    let diff_full = git_full_diff(repo_root).await;
+    if parsed.is_none() && diff_stat.is_none() && diff_full.is_none() {
         return None;
     }
     let mut archive = serde_json::json!({
@@ -340,6 +370,7 @@ pub async fn collect_task_result(
         "collectedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
         "result": parsed,
         "diffStat": diff_stat,
+        "diffFull": diff_full,
         "archivedPath": serde_json::Value::Null,
     });
     let dir = repo_root.join(".easyvibe/development_docs");
@@ -349,7 +380,11 @@ pub async fn collect_task_result(
             archive["archivedPath"] = serde_json::json!(path.to_string_lossy());
         }
     }
-    serde_json::to_string(&archive).ok()
+    // tasks.result 只带 stat 与归档路径（任务列表载荷可控）；diff 全文只进归档文件，
+    // 由 GET /repos/{id}/tasks/{tid}/diff 按需读取（M4-3）
+    let mut slim = archive;
+    slim.as_object_mut()?.remove("diffFull");
+    serde_json::to_string(&slim).ok()
 }
 
 #[cfg(test)]
@@ -529,6 +564,11 @@ mod tests {
         let summary = git_change_summary(&repo).await.expect("git 仓库应有摘要");
         assert!(summary.contains("a.txt"), "已跟踪改动应入摘要: {summary}");
         assert!(summary.contains("b_new.txt"), "未跟踪新文件应入摘要: {summary}");
+        // M4-3：完整 diff 含增行；非 git 目录返回 None
+        let full = git_full_diff(&repo).await.expect("应有完整 diff");
+        assert!(full.contains("+two"), "diff 应含新增行: {full}");
+        assert!(full.contains("diff --git"), "标准 diff 格式: {full}");
+        assert!(git_full_diff(&plain).await.is_none(), "非 git 仓库无完整 diff");
     }
 
     #[tokio::test]
@@ -570,12 +610,50 @@ mod tests {
             serde_json::from_str(&t.result.expect("终态采集应写入 tasks.result")).unwrap();
         assert_eq!(result["result"]["summary"], "修复完成");
         assert_eq!(result["result"]["changed_modules"][0], "m1");
-        // 归档文件落 development_docs/（§9 #2）
+        assert!(result.get("diffFull").is_none(), "tasks.result 不背 diff 全文（列表载荷可控，M4-3）");
+        // 归档文件落 development_docs/（§9 #2），且含 diffFull 键（按需端点读取）
         let archived = result["archivedPath"].as_str().expect("应返回归档路径");
         assert!(archived.contains("development_docs"), "归档须在 development_docs/: {archived}");
         let on_disk: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(archived).expect("归档文件应存在")).unwrap();
         assert_eq!(on_disk["taskId"], "task-collect");
+        assert!(on_disk.get("diffFull").is_some(), "归档文件应含 diffFull（按需读取）");
+    }
+
+    #[tokio::test]
+    async fn reject_requires_reason() {
+        use easyvibe_db::{ApprovalRepository as _, Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            Arc::new("框架".into()),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+        );
+        let mut task = sample_task("pending");
+        task.trust = "manual".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("demo")).await;
+        // M4-2：驳回无理由 → 400；有理由 → 终止且留痕
+        let err = executor.decide("task-t1", "rejected", None).await.unwrap_err();
+        assert!(matches!(err, ApiError::BadRequest(_)), "空理由驳回必须被拒: {err}");
+        let err = executor.decide("task-t1", "rejected", Some("  ")).await.unwrap_err();
+        assert!(matches!(err, ApiError::BadRequest(_)), "空白理由同样被拒");
+        executor.decide("task-t1", "rejected", Some("方案风险过大")).await.unwrap();
+        let t = task_repo.get("task-t1").await.unwrap().unwrap();
+        assert_eq!(t.status, "rejected");
+        let aps = approvals.list_by_task("task-t1").await.unwrap();
+        assert_eq!(aps.len(), 1);
+        assert_eq!(aps[0].decision, "rejected");
+        assert_eq!(aps[0].note.as_deref(), Some("方案风险过大"));
     }
 
     #[tokio::test]
