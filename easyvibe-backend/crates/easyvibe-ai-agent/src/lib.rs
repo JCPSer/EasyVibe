@@ -523,11 +523,17 @@ pub fn stub_answer(map: &Value, question: &str) -> QaAnswer {
 pub struct LlmQaClient<C: LlmClient> {
     llm: C,
     max_history: usize,
+    /// S1-3：system 前缀（user_entry 插槽 skill 注入通道——§9 #4 仅用户入口对话）
+    system_prefix: String,
 }
 
 impl<C: LlmClient> LlmQaClient<C> {
     pub fn new(llm: C) -> Self {
-        Self { llm, max_history: 10 }
+        Self { llm, max_history: 10, system_prefix: String::new() }
+    }
+
+    pub fn new_with_prefix(llm: C, system_prefix: &str) -> Self {
+        Self { llm, max_history: 10, system_prefix: system_prefix.to_string() }
     }
 }
 
@@ -540,14 +546,17 @@ impl<C: LlmClient> QaClient for LlmQaClient<C> {
             .rev()
             .map(|(q, a)| format!("Q: {q}\nA: {a}"))
             .collect();
-        let system = "你是 EasyVibe 入口对话 Agent。基于给定的语义代码地图回答用户关于代码库的问题：模块职责、依赖关系、健康问题、架构分层。规则：1) 只依据地图事实回答，不确定就说不知道；2) 回答末尾用 [refs: 模块id1, 模块id2] 标出引用到的模块（最多 3 个，没有则写 none）；3) 简明直接，先给结论。";
+        let system = format!(
+            "{prefix}你是 EasyVibe 入口对话 Agent。基于给定的语义代码地图回答用户关于代码库的问题：模块职责、依赖关系、健康问题、架构分层。规则：1) 只依据地图事实回答，不确定就说不知道；2) 回答末尾用 [refs: 模块id1, 模块id2] 标出引用到的模块（最多 3 个，没有则写 none）；3) 简明直接，先给结论；4) 若需求意图明显（用户想改代码/加功能），先用一到两个选择题澄清关键歧义（给出建议答案），确认后再建议用'发起修复'。",
+            prefix = self.system_prefix
+        );
         let user = format!(
             "## 语义代码地图\n```json\n{}\n```\n\n## 最近对话\n{}\n\n## 用户问题\n{}",
             serde_json::to_string(map).unwrap_or_default(),
             if hist.is_empty() { "（无）".into() } else { hist.join("\n\n") },
             question
         );
-        let raw = self.llm.chat(ChatRequest { system, user: &user }).await?;
+        let raw = self.llm.chat(ChatRequest { system: &system, user: &user }).await?;
         // 提取 [refs: ...]
         let (reply, refs) = match raw.text.rfind("[refs:") {
             Some(pos) => {

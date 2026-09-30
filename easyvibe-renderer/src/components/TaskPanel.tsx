@@ -19,6 +19,7 @@ interface TaskItem {
   status: string // pending/awaiting_approval/running/succeeded/failed/rejected/done
   trust: string
   gate?: string
+  acceptance?: string
   result?: TaskResult | null
   createdAt: string
 }
@@ -135,7 +136,16 @@ export function TaskPanel({ backendRepo }: Props) {
               </span>
             </div>
             <div className="mt-1.5 text-[12px] font-semibold leading-5 text-slate-800">{t.title}</div>
-            <p className="mt-0.5 line-clamp-2 text-[10.5px] leading-4 text-slate-500">{t.description}</p>
+            {/* S1-2 计划关不盲批：第一道关展示完整需求（不截断）+ 验收标准 */}
+            <p className={`mt-0.5 text-[10.5px] leading-4 text-slate-500 ${t.gate === 'plan' ? '' : 'line-clamp-2'}`}>
+              {t.description}
+            </p>
+            {t.gate === 'plan' && t.acceptance && (
+              <p className="mt-1 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] leading-4 text-slate-600">
+                <span className="font-semibold text-slate-500">验收标准：</span>
+                {t.acceptance}
+              </p>
+            )}
             {/* M4-1：终态采集产物——agent 总结 + 变更摘要（diff 关审批的"改了什么"） */}
             {t.result && (
               <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 p-2">

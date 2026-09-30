@@ -5,6 +5,7 @@ use easyvibe_common::ApiError;
 use easyvibe_db::{TaskRepository as _, TaskRow};
 use easyvibe_map::MapService;
 use easyvibe_session::SessionManager;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
@@ -14,8 +15,8 @@ pub struct TaskExecutor {
     pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
     pub session_manager: Arc<SessionManager>,
     pub map_service: Arc<MapService>,
-    /// inject-prompt 框架（路径已适配到本机 harness 目录）
-    pub harness_framework: Arc<String>,
+    /// harness（单一事实源，恢复默认后热换——spawn 时现读，不缓存快照）
+    pub harness: Arc<tokio::sync::RwLock<Harness>>,
     pub agent_command: Arc<String>,
     pub agent_args: Arc<Vec<String>>,
     /// 并行执行上限（§11 🟡7 = 4）
@@ -28,7 +29,7 @@ impl TaskExecutor {
         approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
         session_manager: Arc<SessionManager>,
         map_service: Arc<MapService>,
-        harness_framework: Arc<String>,
+        harness: Arc<tokio::sync::RwLock<Harness>>,
         agent_command: Arc<String>,
         agent_args: Arc<Vec<String>>,
     ) -> Arc<Self> {
@@ -37,7 +38,7 @@ impl TaskExecutor {
             approval_repo,
             session_manager,
             map_service,
-            harness_framework,
+            harness,
             agent_command,
             agent_args,
             permits: Arc::new(Semaphore::new(4)),
@@ -145,7 +146,10 @@ impl TaskExecutor {
             });
             return;
         };
-        let prompt = assemble_task_prompt(&self.harness_framework, &task);
+        let prompt = {
+            let h = self.harness.read().await;
+            assemble_task_prompt(&h.framework_transparent, &task)
+        };
         match self
             .session_manager
             .start_induction(&repo.id, &repo.root, &prompt, &self.agent_command, &self.agent_args)
@@ -259,42 +263,132 @@ pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
     )
 }
 
-/// harness 目录解析 + 框架装载（§9 适配动作：路径换姓 .claude → .easyvibe）。
-/// 优先 ~/.easyvibe/harness/（缺失时从 reference/ 拷贝建仓）；框架文本内的
-/// ~/.claude/hooks/ 路径替换为实际规则正文位置。
-pub fn load_harness(workspace_reference: &std::path::Path) -> Result<(std::path::PathBuf, String), ApiError> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let dir = std::env::var("EASYVIBE_HARNESS_DIR").map(Into::into).unwrap_or_else(|_| {
-        let d = format!("{home}/.easyvibe/harness");
-        if !std::path::Path::new(&d).join("inject-prompt.md").exists() && workspace_reference.join("inject-prompt.md").exists() {
-            let _ = std::fs::create_dir_all(&d);
-            for f in ["inject-prompt.md", "rule_development.md", "rule_bugfix.md"] {
-                let _ = std::fs::copy(workspace_reference.join(f), std::path::Path::new(&d).join(f));
-            }
+/// 出厂 harness 只读底账：编译期内嵌（§12c 决策——reference/ 只是构建源，运行时唯一
+/// 生效副本是数据目录的用户可编辑层；"改哪份才生效"的二义就此消灭）
+pub const BUILTIN_HARNESS: &[(&str, &str)] = &[
+    ("manifest.json", include_str!("../../../../reference/manifest.json")),
+    ("inject-prompt.md", include_str!("../../../../reference/inject-prompt.md")),
+    ("rule_development.md", include_str!("../../../../reference/rule_development.md")),
+    ("rule_bugfix.md", include_str!("../../../../reference/rule_bugfix.md")),
+    ("skills/grill-me/SKILL.md", include_str!("../../../../reference/grill-me/SKILL.md")),
+];
+
+const TRANSPARENT_MODE_LINE: &str = "（透明执行模式：禁止向用户提问或要求确认；需求有歧义时按最合理假设直接执行，并在 [EASYVIBE-RESULT] 的 summary 中说明你做出的假设。）";
+
+/// Harness manifest（§12c 边界定稿：控制面声明，装配层唯一需要解析的文件）
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessManifest {
+    pub id: String,
+    pub version: String,
+    #[serde(default)] pub builtin: bool,
+    #[serde(default)] pub route_rules: Vec<String>,
+    #[serde(default)] pub skills: HarnessSkills,
+    /// 透明装配时中和的指令模式（实弹#3 防线的配置化——从硬编码 grep 升级为 manifest 声明）
+    #[serde(default)] pub transparent_neutralize: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessSkills {
+    /// user_entry 插槽：仅用户入口对话注入（§9 #4）——grill-me 挂在这里
+    #[serde(default)] pub user_entry: Vec<String>,
+    /// transparent 插槽：透明 agent（任务/归纳/巡检）——缺省空，不是文本删除
+    #[serde(default)] pub transparent: Vec<String>,
+}
+
+/// 装载完成的 harness：三种装配产物同源不同形（同一个 manifest，两种装配产物）
+#[derive(Clone)]
+pub struct Harness {
+    pub dir: PathBuf,
+    pub manifest: HarnessManifest,
+    /// 透明执行装配框架：路径换姓 + 按 manifest 中和拷问类指令（供任务 prompt）
+    pub framework_transparent: String,
+    /// user_entry 插槽 skill 正文（供对话 prompt；透明 agent 永不注入）
+    pub user_entry_skills: Vec<String>,
+}
+
+pub fn harness_dir() -> PathBuf {
+    match std::env::var("EASYVIBE_HARNESS_DIR") {
+        Ok(v) => PathBuf::from(v),
+        Err(_) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            PathBuf::from(format!("{home}/.easyvibe/harness"))
         }
-        d
-    });
-    let framework_path = std::path::Path::new(&dir).join("inject-prompt.md");
-    let framework = std::fs::read_to_string(&framework_path)
-        .map_err(|e| ApiError::Internal(format!("harness 框架不可读 {}: {e}", framework_path.display())))?;
+    }
+}
+
+/// 出厂底账部署：缺失文件从内嵌底账补齐；**不覆盖**用户已编辑的文件（正常启动语义）。
+/// 恢复默认（reset）走 deploy_builtin_force。
+pub fn deploy_builtin(dir: &std::path::Path) -> Result<(), ApiError> {
+    for (rel, content) in BUILTIN_HARNESS {
+        let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
+        }
+        if !p.exists() {
+            std::fs::write(&p, content).map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
+        }
+    }
+    Ok(())
+}
+
+/// 恢复默认：全量覆盖用户层（与 deploy_builtin 的"缺失才补"语义相反）
+pub fn deploy_builtin_force(dir: &std::path::Path) -> Result<(), ApiError> {
+    for (rel, content) in BUILTIN_HARNESS {
+        let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
+        }
+        std::fs::write(&p, content).map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
+    }
+    Ok(())
+}
+
+/// harness 装载（§12c 插槽内核）：
+/// 1) 底账补齐（缺失才写）→ 2) 解析 manifest → 3) 透明框架=路径换姓+按 manifest 中和
+/// 4) user_entry 插槽正文读取。装配层唯一解析 manifest，正文如何演化与防线解耦
+/// （实弹#3 教训：grep 硬编码与框架文本演化会漂移）。
+pub fn load_harness() -> Result<Harness, ApiError> {
+    let dir = harness_dir();
+    load_harness_from(&dir)
+}
+
+/// 从指定目录装载（测试注入点——避免 env 变量在并行测试间的竞态）
+pub fn load_harness_from(dir: &std::path::Path) -> Result<Harness, ApiError> {
+    deploy_builtin(dir)?;
+    let manifest: HarnessManifest = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("manifest.json"))
+            .map_err(|e| ApiError::Internal(format!("harness manifest 不可读: {e}")))?,
+    )
+    .map_err(|e| ApiError::Internal(format!("harness manifest 解析失败: {e}")))?;
+    let framework = std::fs::read_to_string(dir.join("inject-prompt.md"))
+        .map_err(|e| ApiError::Internal(format!("harness 框架不可读: {e}")))?;
     // 路径换姓：框架内引用的规则正文位置指向本机 harness 目录
-    let adapted = framework.replace("~/.claude/hooks/", &format!("{}/", dir.trim_end_matches('/')));
-    // §9 #4 对齐（实弹#3 实证）：grill-me 只注入用户入口对话，透明 agent 不注入——
-    // 框架首行的"必须使用 grill-me 拷问用户"会把无人值守任务带偏成访谈模式
-    // （agent 只分析不执行、成功退出，实弹#1/#3 两次踩响）。装载时把拷问行替换为
-    // 透明执行模式指令（与 v2.2 归纳提示词"禁止提问"同款哲学）。
-    let adapted = adapted
-        .lines()
+    let adapted = framework.replace("~/.claude/hooks/", &format!("{}/", dir.to_string_lossy().trim_end_matches('/')));
+    let framework_transparent = neutralize_transparent(&adapted, &manifest.transparent_neutralize);
+    let mut user_entry_skills = vec![];
+    for rel in &manifest.skills.user_entry {
+        let p = dir.join(rel);
+        let content = std::fs::read_to_string(&p)
+            .map_err(|e| ApiError::Internal(format!("user_entry 插槽文件不可读 {}: {e}", p.display())))?;
+        user_entry_skills.push(content);
+    }
+    Ok(Harness { dir: dir.to_path_buf(), manifest, framework_transparent, user_entry_skills })
+}
+
+/// 透明执行中和：命中 manifest 声明模式的行替换为透明执行指令（§9 #4 对齐）
+fn neutralize_transparent(text: &str, patterns: &[String]) -> String {
+    text.lines()
         .map(|l| {
-            if l.to_lowercase().contains("grill-me") || l.contains("拷问") {
-                "（透明执行模式：禁止向用户提问或要求确认；需求有歧义时按最合理假设直接执行，并在 [EASYVIBE-RESULT] 的 summary 中说明你做出的假设。）"
+            if patterns.iter().any(|p| !p.is_empty() && l.to_lowercase().contains(&p.to_lowercase())) {
+                TRANSPARENT_MODE_LINE
             } else {
                 l
             }
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    Ok((dir.into(), adapted))
+        .join("\n")
 }
 
 /// 解析 agent stdout 的 `[EASYVIBE-RESULT] {json}` 归档行
@@ -436,17 +530,47 @@ mod tests {
         }
     }
 
+    /// 测试桩：最小 harness（只有框架正文，无 skill/中和）
+    fn harness_stub(framework: &str) -> Arc<tokio::sync::RwLock<Harness>> {
+        Arc::new(tokio::sync::RwLock::new(Harness {
+            dir: std::env::temp_dir(),
+            manifest: HarnessManifest {
+                id: "stub".into(),
+                version: "0".into(),
+                builtin: false,
+                route_rules: vec![],
+                skills: HarnessSkills::default(),
+                transparent_neutralize: vec![],
+            },
+            framework_transparent: framework.into(),
+            user_entry_skills: vec![],
+        }))
+    }
+
+    fn write_manifest(dir: &std::path::Path, neutralize: &[&str], user_entry: &[&str]) {
+        let m = serde_json::json!({
+            "id": "test-harness", "version": "1.0.0",
+            "routeRules": [], "resultProtocol": "[EASYVIBE-RESULT]",
+            "skills": { "userEntry": user_entry, "transparent": [] },
+            "transparentNeutralize": neutralize,
+        });
+        std::fs::write(dir.join("manifest.json"), serde_json::to_string(&m).unwrap()).unwrap();
+    }
+
     #[test]
     fn prompt_assembles_all_parts() {
-        let framework = "框架内容 cat ~/.claude/hooks/rule_development.md";
-        let dir = std::env::temp_dir().join("ev-harness-test");
+        let dir = std::env::temp_dir().join("ev-harness-test2");
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("inject-prompt.md"), framework).unwrap();
-        std::env::set_var("EASYVIBE_HARNESS_DIR", &dir);
-        let (_, adapted) = load_harness(&dir).unwrap();
-        assert!(adapted.contains(&format!("{}/rule_development.md", dir.display())), "路径换姓生效");
+        std::fs::write(dir.join("inject-prompt.md"), "框架内容 cat ~/.claude/hooks/rule_development.md").unwrap();
+        write_manifest(&dir, &[], &[]);
+        let harness = load_harness_from(&dir).unwrap();
+        assert!(
+            harness.framework_transparent.contains(&format!("{}/rule_development.md", dir.display())),
+            "路径换姓生效"
+        );
 
-        let prompt = assemble_task_prompt(&adapted, &sample_task("pending"));
+        let prompt = assemble_task_prompt(&harness.framework_transparent, &sample_task("pending"));
         assert!(prompt.contains("框架内容"));
         assert!(prompt.contains("把双向依赖改为单向"));
         assert!(prompt.contains("m1"));
@@ -456,22 +580,41 @@ mod tests {
     }
 
     #[test]
-    fn load_harness_strips_grill_me_for_transparent_agents() {
-        // 实弹#3 回归：§9 #4 拍板 grill-me 只注入用户入口——框架首行拷问指令必须在
-        // 装载时替换为透明执行模式，否则无人值守任务被带偏成访谈（只分析不执行）
-        let dir = std::env::temp_dir().join("ev-harness-grill-test");
-        std::fs::create_dir_all(&dir).unwrap();
+    fn harness_slots_assembly_and_neutralize_from_manifest() {
+        // §12c 插槽内核回归：①透明装配的中和模式来自 manifest 声明（退役硬编码 grep）
+        // ②user_entry 插槽正文装载（grill-me 以 skill 形态挂插槽，§9 #4）
+        let dir = std::env::temp_dir().join("ev-harness-grill-test2");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("skills/grill-me")).unwrap();
         std::fs::write(
             dir.join("inject-prompt.md"),
             "用户的表达一定是片面的，正式开始动手前，必须使用grill-me技能拷问用户。\ncat ~/.claude/hooks/rule_development.md",
         )
         .unwrap();
-        std::env::set_var("EASYVIBE_HARNESS_DIR", &dir);
-        let (_, adapted) = load_harness(&dir).unwrap();
-        assert!(!adapted.to_lowercase().contains("grill-me"), "透明 agent 不得收到 grill-me 指令");
-        assert!(!adapted.contains("拷问"), "拷问指令必须被替换: {adapted}");
-        assert!(adapted.contains("透明执行模式"), "应替换为透明执行指令");
-        assert!(adapted.contains(&format!("{}/rule_development.md", dir.display())), "路径换姓仍须生效");
+        std::fs::write(dir.join("skills/grill-me/SKILL.md"), "# grill-me\n访谈方法论正文").unwrap();
+
+        // 场景 1：manifest 声明中和模式 → 透明框架不含拷问指令
+        write_manifest(&dir, &["grill-me", "拷问"], &["skills/grill-me/SKILL.md"]);
+        let h = load_harness_from(&dir).unwrap();
+        assert!(!h.framework_transparent.to_lowercase().contains("grill-me"), "透明 agent 不得收到 grill-me 指令");
+        assert!(!h.framework_transparent.contains("拷问"), "拷问指令必须被替换");
+        assert!(h.framework_transparent.contains("透明执行模式"));
+        assert_eq!(h.user_entry_skills.len(), 1, "user_entry 插槽正文应装载");
+        assert!(h.user_entry_skills[0].contains("grill-me"), "插槽内容应是 skill 本体");
+
+        // 场景 2：manifest 不声明中和 → 不过滤（证明驱动者是 manifest 而非硬编码）
+        write_manifest(&dir, &[], &[]);
+        let h2 = load_harness_from(&dir).unwrap();
+        assert!(h2.framework_transparent.contains("grill-me"), "中和由 manifest 声明驱动");
+
+        // 场景 3：出厂底账部署——清空目录后 load_harness 从内嵌底账补齐全部文件
+        let dir3 = std::env::temp_dir().join("ev-harness-builtin-test");
+        let _ = std::fs::remove_dir_all(&dir3);
+        let h3 = load_harness_from(&dir3).unwrap();
+        assert_eq!(h3.manifest.id, "builtin-default", "底账 manifest 应就位");
+        assert!(!h3.framework_transparent.contains("拷问"), "出厂底账透明装配仍须中和");
+        assert_eq!(h3.user_entry_skills.len(), 1, "出厂底账 user_entry=grill-me");
+        assert!(dir3.join("rule_development.md").exists(), "规则正文应补齐");
     }
 
     #[tokio::test]
@@ -517,7 +660,7 @@ mod tests {
             approvals.clone(),
             sessions,
             maps,
-            Arc::new("框架".into()),
+            harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
         );
@@ -570,7 +713,7 @@ mod tests {
             approvals.clone(),
             sessions,
             maps,
-            Arc::new("框架".into()),
+            harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
         );
@@ -655,7 +798,7 @@ mod tests {
             approvals,
             sessions,
             maps,
-            Arc::new("框架".into()),
+            harness_stub("框架"),
             Arc::new("echo".into()),
             Arc::new(vec!["[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}".to_string()]),
         );
@@ -700,7 +843,7 @@ mod tests {
             approvals.clone(),
             sessions,
             maps,
-            Arc::new("框架".into()),
+            harness_stub("框架"),
             Arc::new("true".into()),
             Arc::new(vec![]),
         );
@@ -736,7 +879,7 @@ mod tests {
             approvals,
             sessions,
             maps,
-            Arc::new("框架".into()),
+            harness_stub("框架"),
             Arc::new("true".into()), // stub：立即成功
             Arc::new(vec![]),
         );

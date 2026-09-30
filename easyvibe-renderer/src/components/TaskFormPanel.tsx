@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench } from 'lucide-react'
+import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight} from 'lucide-react'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { Module } from '@/types/map'
 
@@ -8,10 +8,12 @@ interface Props {
   draft: TaskDraft
   map: { modules: Module[] }
   onClose: () => void
+  /** S1-5：创建成功后的引导（默认前往任务页签） */
+  onCreated?: () => void
 }
 
 // 任务表单（任务表单原型.png 的实现）：三字段极简 + 上下文注入预览 + 审批两档
-export function TaskFormPanel({ backendRepo, draft, map, onClose }: Props) {
+export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated }: Props) {
   const [description, setDescription] = useState(draft.description)
   const [acceptance, setAcceptance] = useState(draft.acceptance)
   const [selected, setSelected] = useState<string[]>(draft.modules)
@@ -48,7 +50,6 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose }: Props) {
       })
       .then((d: { data: { id: string } }) => {
         setCreated(d.data.id)
-        setTimeout(onClose, 1800)
       })
       .catch(() => alert('任务创建失败（需要本地后端在线）'))
       .finally(() => setSending(false))
@@ -144,15 +145,36 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose }: Props) {
       </div>
 
       <div className="border-t border-slate-100 p-3">
-        <button
-          onClick={submit}
-          disabled={sending || !backendRepo || !description.trim()}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-        >
-          {sending ? <Loader2 size={13} className="animate-spin" /> : created ? <Check size={13} /> : <Send size={13} />}
-          {sending ? '提交中…' : created ? `已创建 ${created.slice(0, 14)}…` : '提交任务'}
-        </button>
-        {!backendRepo && <p className="mt-1.5 text-center text-[10.5px] text-slate-400">需要本地后端在线</p>}
+        {created ? (
+          /* S1-5：创建成功不自动消失——引导用户去任务页签跟踪审批（此前链路断在面板静默关闭） */
+          <div className="space-y-2">
+            <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[11.5px] font-semibold text-emerald-700">
+              <Check size={13} /> 任务已创建{trust === 'manual' ? '，等待计划审批' : '，自动模式直通执行'}
+            </p>
+            <button
+              onClick={() => {
+                onClose()
+                onCreated?.()
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700"
+            >
+              <ArrowRight size={13} /> 前往任务页签跟踪
+            </button>
+            <button onClick={onClose} className="w-full py-0.5 text-[10.5px] text-slate-400 hover:text-slate-600">
+              留在画布
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={sending || !backendRepo || !description.trim()}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          >
+            {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+            {sending ? '提交中…' : '提交任务'}
+          </button>
+        )}
+        {!backendRepo && !created && <p className="mt-1.5 text-center text-[10.5px] text-slate-400">需要本地后端在线</p>}
       </div>
     </div>
   )

@@ -38,6 +38,8 @@ pub struct AppState {
     /// 不保证这段复合操作；发送中点"压缩上下文"是 UI 允许的真实并发
     pub chat_lock: Arc<tokio::sync::Mutex<()>>,
     pub executor: Arc<task_exec::TaskExecutor>,
+    /// S1-3：harness 单一事实源（插槽内核；恢复默认后热换，chat 与 executor 共用）
+    pub harness: Arc<tokio::sync::RwLock<task_exec::Harness>>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
     pub schema_path: Arc<String>,
@@ -86,6 +88,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
+        .route("/harness", get(get_harness))
+        .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
 
     Router::new()
@@ -369,6 +373,52 @@ async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(St
     Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
 
+/// S1-3：harness 状态（manifest + 文件清单）——S3 管理界面的数据面
+async fn get_harness(State(st): State<AppState>) -> Result<Response, AppError> {
+    let h = st.harness.read().await;
+    let mut files: Vec<String> = vec![];
+    if let Ok(entries) = std::fs::read_dir(&h.dir) {
+        for e in entries.flatten() {
+            if e.path().is_file() {
+                files.push(e.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    files.sort();
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "dir": h.dir.to_string_lossy(),
+            "manifest": {
+                "id": h.manifest.id, "version": h.manifest.version, "builtin": h.manifest.builtin,
+                "routeRules": h.manifest.route_rules,
+                "skills": { "userEntry": h.manifest.skills.user_entry, "transparent": h.manifest.skills.transparent },
+            },
+            "frameworkNeutralized": h.framework_transparent.contains("透明执行模式"),
+            "userEntrySkillCount": h.user_entry_skills.len(),
+            "files": files,
+        }
+    }))
+    .into_response())
+}
+
+/// S1-3：恢复默认——现有用户层整体改名备份（.backup-<ts>），出厂底账全量重铺，
+/// 装载后热换单一事实源（chat 与 executor 立即生效，无需重启）
+async fn reset_harness(State(st): State<AppState>) -> Result<Response, AppError> {
+    let dir = task_exec::harness_dir();
+    if dir.exists() {
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let backup = dir.with_file_name(format!("harness.backup-{ts}"));
+        std::fs::rename(&dir, &backup).map_err(|e| ApiError::Internal(format!("harness 备份失败: {e}")))?;
+    }
+    task_exec::deploy_builtin_force(&dir)?;
+    let fresh = task_exec::load_harness()?;
+    let version = fresh.manifest.version.clone();
+    *st.harness.write().await = fresh;
+    info!("[harness] 已恢复默认 v{}", version);
+    Ok(Json(serde_json::json!({ "success": true, "data": { "version": version } })).into_response())
+}
+
 // ---------- M3-2：指哪打哪——任务创建（上下文已组织好随表单提交；执行引擎 M3-3 接入） ----------
 
 /// 审批决策（M3-4）：approved/rejected 按当前关卡推进或终止；发射 task.statusChanged
@@ -640,7 +690,14 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
                 return Err(AppError(ApiError::BadRequest("未配置 LLM API key（设置面板或 EASYVIBE_LLM_API_KEY）".into())));
             }
             let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
-            easyvibe_ai_agent::LlmQaClient::new(llm).ask(&snap.json, &body.message, &pairs).await?
+            // S1-3：user_entry 插槽注入（§9 #4——仅用户入口对话；透明 agent 的空插槽装配永不注入）
+            let skills = st.harness.read().await.user_entry_skills.join("\n\n---\n\n");
+            let prefix = if skills.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\n\n## 对话技能（grill-me：需求有歧义时主动用选择题澄清）\n\n{skills}\n\n---\n")
+            };
+            easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &body.message, &pairs).await?
         }
     };
 
@@ -1012,16 +1069,20 @@ async fn main() {
     .expect("巡检提示词模板不可读（用 EASYVIBE_PATROL_PROMPT_PATH 指定）");
     let schema_path = std::env::var("EASYVIBE_SCHEMA_PATH").unwrap_or_else(|_| "easyvibe-map-schema-v1.json".into());
 
-    // M3-3：harness 装载（路径换姓）+ 任务执行引擎 + pending 恢复
-    let workspace_ref = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../reference");
-    let (_harness_dir, framework) = task_exec::load_harness(&workspace_ref).expect("harness 装载失败");
-    info!("harness: {}", _harness_dir.display());
+    // M3-3/S1-3：harness 插槽内核装载（manifest 驱动 + 出厂底账补齐）+ 任务执行引擎 + pending 恢复
+    let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
+    info!(
+        "harness: {} v{}（user_entry 技能 {} 个）",
+        harness.read().await.dir.display(),
+        harness.read().await.manifest.version,
+        harness.read().await.user_entry_skills.len()
+    );
     let executor = task_exec::TaskExecutor::new(
         task_repo.clone(),
         approval_repo.clone(),
         session_manager.clone(),
         map_service.clone(),
-        Arc::new(framework),
+        harness.clone(),
         Arc::new(agent_command.clone()),
         Arc::new(agent_args.clone()),
     );
@@ -1049,6 +1110,7 @@ async fn main() {
         conversation_repo,
         chat_lock: Arc::new(tokio::sync::Mutex::new(())),
         executor,
+        harness: harness.clone(),
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
         schema_path: Arc::new(schema_path),
@@ -1099,12 +1161,21 @@ mod tests {
         let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
         let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
         let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(db.pool().clone()));
+        let harness = Arc::new(tokio::sync::RwLock::new(task_exec::Harness {
+            dir: std::env::temp_dir(),
+            manifest: task_exec::HarnessManifest {
+                id: "stub".into(), version: "0".into(), builtin: false,
+                route_rules: vec![], skills: task_exec::HarnessSkills::default(), transparent_neutralize: vec![],
+            },
+            framework_transparent: "框架".into(),
+            user_entry_skills: vec![],
+        }));
         let executor = task_exec::TaskExecutor::new(
             task_repo.clone(),
             approval_repo.clone(),
             session_manager.clone(),
             svc.clone(),
-            Arc::new("框架".into()),
+            harness.clone(),
             Arc::new("true".into()),
             Arc::new(vec![]),
         );
@@ -1124,6 +1195,7 @@ mod tests {
             conversation_repo,
             chat_lock: Arc::new(tokio::sync::Mutex::new(())),
             executor,
+            harness,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),

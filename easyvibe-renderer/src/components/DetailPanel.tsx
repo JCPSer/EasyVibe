@@ -25,6 +25,8 @@ interface Props {
   backendRepo: string | null
   onCreateTask: (draft: TaskDraft) => void
   onLocateModule: (moduleId: string) => void
+  /** S1-1：打开视图（多模块时画布 solo 聚焦） */
+  onOpenView?: (ids: string[]) => void
   onClose: () => void
 }
 
@@ -327,7 +329,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, onOpenView }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -379,9 +381,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         {tab === 'views' && (
           <ViewsPanel
             backendRepo={backendRepo}
-            onOpenView={(ids) => {
-              if (ids.length > 0) onLocateModule(ids[0])
-            }}
+            onOpenView={(ids) => (onOpenView ? onOpenView(ids) : ids.length > 0 && onLocateModule(ids[0]))}
           />
         )}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} />}

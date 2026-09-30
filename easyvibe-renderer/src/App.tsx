@@ -14,7 +14,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb } from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -525,7 +525,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
     [],
   )
   const [headerExpanded, setHeaderExpanded] = useState(false)
-  const { fitView } = useReactFlow()
+  const { fitView, setCenter } = useReactFlow()
 
   // 生长回放：消费 growth.log（v2.2 协议），已到达的层/模块集合
   const arrived = useMemo(() => {
@@ -649,6 +649,31 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const { nodes, edges } = useMemo(
     () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible),
     [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible],
+  )
+
+  // S1-1 画布定位收口：pan/zoom 到目标模块 + 选中高亮。
+  // 对话 refs 芯片 / 问题清单定位 / 视图打开三处共用（此前只切右栏、画布毫无反馈）
+  const focusModule = useCallback(
+    (id: string) => {
+      const node = nodes.find((n) => n.id === id)
+      setSelection({ kind: 'module', id })
+      setTab('detail')
+      setPanelOpen(true)
+      if (!node) return
+      const w = node.measured?.width ?? node.width ?? 220
+      setCenter(node.position.x + w / 2, node.position.y + 70, { zoom: 1.15, duration: 450 })
+    },
+    [nodes],
+  )
+
+  // S1-1 视图打开：定位首模块 + 多模块视图自动 solo 聚焦（复用 dim 机制，兑现跨模块视图）
+  const openView = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return
+      focusModule(ids[0])
+      if (ids.length > 1) setFilters((f) => ({ ...f, solo: true }))
+    },
+    [focusModule],
   )
 
   useEffect(() => {
@@ -800,6 +825,14 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                 <span>{mergedMap.layers.length} 层</span>
                 <span>{mergedMap.edges.length} 依赖</span>
                 <span className="text-red-500">{violations} 逆向</span>
+                {!backendRepo && (
+                  <span
+                    className="flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-px font-semibold text-amber-700"
+                    title="后端不在线：当前为静态演示数据，重新归纳/巡检/任务不可用"
+                  >
+                    <WifiOff size={9} /> 演示数据 · 后端离线
+                  </span>
+                )}
                 {inducing && (
                   <span className="flex items-center gap-1 font-semibold text-amber-600">
                     <RefreshCw size={10} className="animate-spin" />
@@ -864,7 +897,15 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
       {settingsOpen && <SettingsPanel backendRepo={backendRepo} onClose={() => setSettingsOpen(false)} />}
 
       {/* 任务表单（指哪打哪：模块/问题/层入口预填） */}
-      {taskDraft && <TaskFormPanel backendRepo={backendRepo} draft={taskDraft} map={map} onClose={() => setTaskDraft(null)} />}
+      {taskDraft && (
+        <TaskFormPanel
+          backendRepo={backendRepo}
+          draft={taskDraft}
+          map={map}
+          onClose={() => setTaskDraft(null)}
+          onCreated={() => setTab('tasks')}
+        />
+      )}
 
       {/* 右侧详情面板 */}
       {panelOpen ? (
@@ -876,10 +917,8 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
           submaps={submaps}
           backendRepo={backendRepo}
           onCreateTask={(d) => setTaskDraft(d)}
-          onLocateModule={(id) => {
-            setSelection({ kind: 'module', id })
-            setTab('detail')
-          }}
+          onLocateModule={focusModule}
+          onOpenView={openView}
           onClose={() => setPanelOpen(false)}
         />
       ) : (
