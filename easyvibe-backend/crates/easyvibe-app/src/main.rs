@@ -151,71 +151,83 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
-/// 触发巡检（M2-4）：Supervisor 直调 LLM，产出新地图原子写回 + 健康历史落库。
-/// 写互斥：与归纳共用 SessionManager 的单会话纪律（try_register 拒绝并发地图写）
+/// 触发巡检（M2-4，实弹 #2 修订）：两条执行路径——
+/// - Stub 模式：ai-agent PatrolService 零成本确定性巡检（测试/demo）
+/// - 真实模式：**session spawn**（与归纳同路径）。实弹发现直调无 tools 声明的 API
+///   只会得到模型的 tool_call 幻觉（DSML 伪调用），真实巡检需要 Bash 核查
+///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
+/// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if *st.llm_mode == LlmMode::Anthropic && std::env::var("EASYVIBE_LLM_API_KEY").is_err() {
         return Err(ApiError::BadRequest("未配置 EASYVIBE_LLM_API_KEY".into()).into());
     }
     let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
-    st.session_manager
-        .try_register(SessionStatusChanged {
-            repo: repo.id.clone(),
-            session_id: run_id.clone(),
-            status: easyvibe_api_types::SessionStatus::Running,
-        })
-        .await?;
-    let snap = match st.map_service.load_map(&repo).await {
-        Ok(s) => s,
-        Err(e) => {
+
+    match *st.llm_mode {
+        LlmMode::Stub => {
             st.session_manager
-                .note_status(SessionStatusChanged {
-                    repo: repo.id.clone(),
-                    session_id: run_id.clone(),
-                    status: easyvibe_api_types::SessionStatus::Failed,
-                })
-                .await;
-            return Err(e.into());
-        }
-    };
-
-    // 异步执行；状态经 session.statusChanged 上报（session_id = patrol run id）
-    let st2 = st.clone();
-    let repo2 = repo.clone();
-    let run_id_task = run_id.clone();
-    tokio::spawn(async move {
-        let result: Result<easyvibe_ai_agent::PatrolSummary, ApiError> = match *st2.llm_mode {
-            LlmMode::Stub => {
+                .try_register(SessionStatusChanged { repo: repo.id.clone(), session_id: run_id.clone(), status: easyvibe_api_types::SessionStatus::Running })
+                .await?;
+            let snap = match st.map_service.load_map(&repo).await {
+                Ok(s) => s,
+                Err(e) => {
+                    st.session_manager.note_status(SessionStatusChanged { repo: repo.id.clone(), session_id: run_id.clone(), status: easyvibe_api_types::SessionStatus::Failed }).await;
+                    return Err(e.into());
+                }
+            };
+            let st2 = st.clone();
+            let repo2 = repo.clone();
+            let run_id_task = run_id.clone();
+            tokio::spawn(async move {
                 let llm = easyvibe_ai_agent::StubLlmClient::new();
-                st2.patrol_service
+                let result = st2
+                    .patrol_service
                     .run(Some(run_id_task.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
-                    .await
-            }
-            LlmMode::Anthropic => {
-                let llm = easyvibe_ai_agent::AnthropicClient::new(
-                    &std::env::var("EASYVIBE_LLM_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".into()),
-                    &std::env::var("EASYVIBE_LLM_API_KEY").unwrap_or_default(),
-                    &std::env::var("EASYVIBE_LLM_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".into()),
-                );
-                st2.patrol_service
-                    .run(Some(run_id_task.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
-                    .await
-            }
-        };
-        let status = match &result {
-            Ok(_) => easyvibe_api_types::SessionStatus::Succeeded,
-            Err(_) => easyvibe_api_types::SessionStatus::Failed,
-        };
-        st2.session_manager
-            .note_status(SessionStatusChanged { repo: repo2.id, session_id: run_id_task, status })
-            .await;
-        if let Err(e) = result {
-            tracing::warn!("[patrol] 失败: {e}（错误已入 patrol_runs.error）");
+                    .await;
+                let status = match &result {
+                    Ok(_) => easyvibe_api_types::SessionStatus::Succeeded,
+                    Err(_) => easyvibe_api_types::SessionStatus::Failed,
+                };
+                st2.session_manager.note_status(SessionStatusChanged { repo: repo2.id, session_id: run_id_task, status }).await;
+                if let Err(e) = result {
+                    tracing::warn!("[patrol] 失败: {e}");
+                }
+            });
+            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "runId": run_id, "mode": "stub" }))).into_response())
         }
-    });
-
-    Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "runId": run_id }))).into_response())
+        LlmMode::Anthropic => {
+            // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
+            let session = st
+                .session_manager
+                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &st.agent_command, &st.agent_args)
+                .await?;
+            // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
+            let st2 = st.clone();
+            let repo2 = repo.clone();
+            let session_id = session.session_id.clone();
+            let model = st.agent_command.to_string();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let Some(s) = st2.session_manager.status_of(&repo2.id).await else { continue };
+                    if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) { continue }
+                    let result = async {
+                        let snap = st2.map_service.load_map(&repo2).await?;
+                        st2.patrol_service
+                            .record_from_map(&session_id, &repo2.id, &model, &snap.json, s.status == easyvibe_api_types::SessionStatus::Succeeded, None)
+                            .await
+                    }
+                    .await;
+                    if let Err(e) = result {
+                        tracing::warn!("[patrol] 健康历史落库失败: {e}");
+                    }
+                    break;
+                }
+            });
+            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "sessionId": session.session_id, "mode": "agent" }))).into_response())
+        }
+    }
 }
 
 /// 健康历史：巡检运行列表（域 2 的第一个读接口）

@@ -29,15 +29,32 @@ pub struct AnthropicClient {
     api_key: String,
     model: String,
     max_tokens: u32,
+    /// 附加请求头（某些中转/代理需要自定义头，如 x-opencode-session），JSON map
+    extra_headers: Vec<(String, String)>,
 }
 
 impl AnthropicClient {
     pub fn new(base_url: &str, api_key: &str, model: &str) -> Self {
+        let max_tokens = std::env::var("EASYVIBE_LLM_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8192);
+        // EASYVIBE_LLM_HEADERS='{"x-opencode-session":"easyvibe"}'
+        let extra_headers = std::env::var("EASYVIBE_LLM_HEADERS")
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw).ok())
+            .map(|m| {
+                m.into_iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
-            max_tokens: 8192,
+            max_tokens,
+            extra_headers,
         }
     }
 }
@@ -62,12 +79,15 @@ impl LlmClient for AnthropicClient {
             .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| ApiError::Internal(format!("LLM client 构建失败: {e}")))?;
-        let resp = client
+        let mut http_req = client
             .post(format!("{}/v1/messages", self.base_url))
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&Body { model: &self.model, max_tokens: self.max_tokens, system: req.system, messages: [Msg { role: "user", content: req.user }] })
-            .send()
+            .header("anthropic-version", "2023-06-01");
+        for (k, v) in &self.extra_headers {
+            http_req = http_req.header(k, v);
+        }
+        let body = Body { model: &self.model, max_tokens: self.max_tokens, system: req.system, messages: [Msg { role: "user", content: req.user }] };
+        let resp = http_req.json(&body).send()
             .await
             .map_err(|e| ApiError::Internal(format!("LLM 请求失败: {e}")))?;
         if !resp.status().is_success() {
@@ -218,6 +238,34 @@ impl<R: HealthRepository> PatrolService<R> {
 
         let arch_score = new_map["health"]["score"].as_u64().unwrap_or(0) as u32;
         Ok(PatrolSummary { run_id: run_id.to_string(), modules: module_count(&new_map), arch_score })
+    }
+
+    /// 会话型巡检（session spawn）终态后的健康历史落库：建 run → 插模块行 → 收尾
+    pub async fn record_from_map(
+        &self,
+        run_id: &str,
+        repo_id: &str,
+        model: &str,
+        map: &Value,
+        succeeded: bool,
+        error: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.repo_health
+            .create_run(&NewPatrolRun { id: run_id.to_string(), repo: repo_id.to_string(), started_at: now_iso(), model: model.to_string() })
+            .await?;
+        if succeeded {
+            self.persist_module_health(run_id, map).await?;
+        }
+        self.repo_health
+            .finish_run(&FinishPatrolRun {
+                id: run_id.to_string(),
+                finished_at: now_iso(),
+                status: if succeeded { "succeeded".into() } else { "failed".into() },
+                arch_score: map["health"]["score"].as_i64(),
+                error,
+            })
+            .await?;
+        Ok(())
     }
 
     async fn persist_module_health(&self, run_id: &str, map: &Value) -> Result<(), ApiError> {
