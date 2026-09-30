@@ -117,7 +117,7 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
               <Bookmark size={11} className="shrink-0 text-emerald-500" />
               <span className="truncate text-[12px] font-semibold text-slate-800">{v.name}</span>
               <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-[9px] text-slate-400">
-                {v.nodes} 个模块
+                {v.nodes === 0 && v.view.annotations?.some((a) => a.type === 'mermaid') ? '纯图视图' : `${v.nodes} 个模块`}
               </span>
             </div>
             {note && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-400">{note}</p>}

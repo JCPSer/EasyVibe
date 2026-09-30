@@ -212,8 +212,14 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
         .as_array()
         .and_then(|ms| ms.iter().find(|m| m["id"].as_str() == Some(module_id.as_str())).cloned())
         .ok_or_else(|| ApiError::NotFound(format!("模块 {module_id} 不在主地图中")))?;
-    let prompt = st
-        .submap_prompt
+    // 子图提示词每次请求重读（产品内置协议迭代快——避免"改了提示词要重启后端"的叠加
+    // （本次实弹：路径修正后的提示词因后端未重启而仍用旧版，DeskWar 两次分析空跑）。
+    // 读取失败回退启动时装载的副本，绝不阻断
+    let template = std::fs::read_to_string(
+        std::env::var("EASYVIBE_SUBMAP_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-module-submap-prompt.md".into()),
+    )
+    .unwrap_or_else(|_| st.submap_prompt.to_string());
+    let prompt = template
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
         .replace("<MODULE_ID>", &module_id)
         .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());

@@ -506,9 +506,13 @@ function Canvas({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   const growthRef = useRef<GrowthState | null>(null)
+  const submapsRef = useRef<typeof submaps | null>(null)
   useEffect(() => {
     growthRef.current = growth
   }, [growth])
+  useEffect(() => {
+    submapsRef.current = submaps
+  }, [submaps])
 
   // R2：WS 断线 → 退出生长模式（重连后由用户重新进入，startGrowth 拉全量对齐）
   useEffect(() => setWsCloseListener(() => setGrowth(null)), [])
@@ -660,6 +664,31 @@ function Canvas({
     setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
   }, [])
 
+  // 子图深入分析：派透明 agent 扫描模块文件生成子图，落盘后即可加载。
+  // 启动后轮询重试（6s×20=2 分钟），产物就绪自动刷新展开态
+  const analyzeSubmap = useCallback(
+    (id: string) => {
+      if (!backendRepo) return
+      fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status))
+          setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
+          let n = 0
+          const t = window.setInterval(() => {
+            n += 1
+            const cur = submapsRef.current?.[id]
+            if ((cur && cur !== 'loading' && cur !== 'error') || n >= 20) {
+              window.clearInterval(t)
+              return
+            }
+            retrySubmap(id)
+          }, 6000)
+        })
+        .catch(() => setSubmaps((prev) => ({ ...prev, [id]: 'error' })))
+    },
+    [backendRepo, retrySubmap],
+  )
+
   const expanded = useMemo(() => {
     const m = new Map<string, SubMap | 'loading' | 'error'>()
     for (const id of expandedIds) if (submaps[id]) m.set(id, submaps[id])
@@ -678,8 +707,8 @@ function Canvas({
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible),
-    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap],
   )
 
   // S1-1 画布定位收口：pan/zoom 到目标模块 + 选中高亮。
@@ -701,8 +730,9 @@ function Canvas({
   const openView = useCallback(
     (ids: string[]) => {
       if (ids.length === 0) return
+      // 重置既有过滤（试用测试抓到：旧"只看依赖"会污染视图的 solo 聚焦）
+      setFilters({ violationsOnly: false, issuesOnly: false, solo: ids.length > 1 })
       focusModule(ids[0])
-      if (ids.length > 1) setFilters((f) => ({ ...f, solo: true }))
     },
     [focusModule],
   )
