@@ -108,7 +108,7 @@ export function TaskPanel({ backendRepo }: Props) {
         setTimeout(load, 500) // 等看门任务回写后再刷一次
         load()
       })
-      .catch(() => alert(decision === 'rejected' ? '驳回失败（理由必填）' : '审批操作失败'))
+      .catch(() => toast(decision === 'rejected' ? '驳回失败（理由必填）' : '审批操作失败', 'error'))
       .finally(() => setDeciding(null))
   }
 

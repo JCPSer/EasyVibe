@@ -1,3 +1,4 @@
+import { toast } from '@/lib/toast'
 import { useState } from 'react'
 import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight, Crosshair} from 'lucide-react'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -53,7 +54,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
       .then((d: { data: { id: string } }) => {
         setCreated(d.data.id)
       })
-      .catch(() => alert('任务创建失败（需要本地后端在线）'))
+      .catch(() => toast('任务创建失败（需要本地后端在线）', 'error'))
       .finally(() => setSending(false))
   }
 
