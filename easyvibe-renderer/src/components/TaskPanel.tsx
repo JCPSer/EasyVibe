@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { toast } from '@/lib/toast'
 import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw} from 'lucide-react'
 import { onTaskEvent, onSessionOutput } from '@/lib/growthBus'
 
@@ -44,6 +45,7 @@ const STATUS_STYLE: Record<string, { cls: string; label: string }> = {
 // 任务列表 + 审批操作（审批中心的数据面；Diff 可视化按审批中心原型是 M3-4 后续增强）
 export function TaskPanel({ backendRepo }: Props) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(false)
   const [deciding, setDeciding] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
@@ -72,8 +74,15 @@ export function TaskPanel({ backendRepo }: Props) {
     setLoading(true)
     fetch(`/api/repos/${backendRepo}/tasks`)
       .then((r) => r.json())
-      .then((d: { data: TaskItem[] }) => setTasks(d.data))
-      .catch(() => setTasks([]))
+      .then((d: { data: TaskItem[] }) => {
+        setTasks(d.data)
+        setLoadError(false)
+      })
+      // R4 清债：加载失败不再静默成"暂无任务"（四态齐全，§0 标准）
+      .catch(() => {
+        setTasks([])
+        setLoadError(true)
+      })
       .finally(() => setLoading(false))
   }, [backendRepo])
 
@@ -112,7 +121,7 @@ export function TaskPanel({ backendRepo }: Props) {
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
       })
-      .catch(() => alert('触发巡检失败（需要本地后端在线）'))
+      .catch(() => toast('触发巡检失败（需要本地后端在线）', 'error'))
       .finally(() => setTimeout(() => setRechecking(false), 3000))
   }
 
@@ -147,7 +156,15 @@ export function TaskPanel({ backendRepo }: Props) {
           <Loader2 size={14} className="animate-spin" /> 加载任务…
         </div>
       )}
-      {tasks?.length === 0 && <p className="py-6 text-center text-[11.5px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>}
+      {tasks?.length === 0 && !loadError && <p className="py-6 text-center text-[11.5px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>}
+      {tasks?.length === 0 && loadError && (
+        <div className="py-6 text-center">
+          <p className="text-[11.5px] text-red-500">任务列表加载失败（需要本地后端在线）</p>
+          <button onClick={load} className="mt-2 rounded-lg border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:bg-slate-50">
+            重试
+          </button>
+        </div>
+      )}
 
       {tasks?.map((t) => {
         const st = STATUS_STYLE[t.status] ?? STATUS_STYLE.pending

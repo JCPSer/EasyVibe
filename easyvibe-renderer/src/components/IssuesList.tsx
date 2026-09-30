@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { toast } from '@/lib/toast'
 import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Loader2, Wrench, Zap } from 'lucide-react'
 import { buildConcernTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Concern, Module } from '@/types/map'
@@ -108,14 +109,15 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo }: { map: 
     fetch(`/api/repos/${backendRepo}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...draft, trust: 'auto' }),
+      // R5 清债：架构级问题（影响面最大）默认走 supervised 风险预评估，不直通 auto
+      body: JSON.stringify({ ...draft, trust: issue.moduleId ? 'auto' : 'supervised' }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setQuickDone(issue.key)
         setTimeout(() => setQuickDone(null), 2500)
       })
-      .catch(() => alert('创建任务失败（需要本地后端在线）'))
+      .catch(() => toast('创建任务失败（需要本地后端在线）', 'error'))
       .finally(() => setQuickBusy(null))
   }
   const issues = collectIssues(map)

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from '@/lib/toast'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
 import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download} from 'lucide-react'
@@ -82,11 +83,11 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     for (const f of Array.from(files)) {
       if (f.type.startsWith('image/')) {
         if (images.length >= 2) {
-          alert('图片最多 2 张')
+          toast('图片最多 2 张', 'error')
           continue
         }
         if (f.size > 1.5 * 1024 * 1024) {
-          alert(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`)
+          toast(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`, 'error')
           continue
         }
         const reader = new FileReader()
@@ -94,11 +95,11 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         reader.readAsDataURL(f)
       } else {
         if (attachments.length >= 3) {
-          alert('文本附件最多 3 个')
+          toast('文本附件最多 3 个', 'error')
           continue
         }
         if (f.size > 50 * 1024) {
-          alert(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`)
+          toast(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`, 'error')
           continue
         }
         const reader = new FileReader()
@@ -186,7 +187,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         }
         setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
       })
-      .catch(() => alert('压缩失败（需要本地后端在线）'))
+      .catch(() => toast('压缩失败（需要本地后端在线）', 'error'))
       .finally(() => setCompacting(false))
   }
 
@@ -199,7 +200,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         setMessages([])
         setUsage({ promptTokens: 0, completionTokens: 0 })
       })
-      .catch(() => alert('重置失败（需要本地后端在线）'))
+      .catch(() => toast('重置失败（需要本地后端在线）', 'error'))
   }
 
   // 澄清卡点选：选择即回答（grill-me 选择题形态的产品化；选择带建议理由回传）
@@ -277,7 +278,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         setNamingIdx(null)
         setTimeout(() => setSavedIdx(null), 2500)
       })
-      .catch(() => alert('存视图失败（需要本地后端在线）'))
+      .catch(() => toast('存视图失败（需要本地后端在线）', 'error'))
   }
 
   return (

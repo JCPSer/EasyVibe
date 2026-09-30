@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { toast } from '@/lib/toast'
 import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download } from 'lucide-react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 
@@ -68,7 +69,7 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
         setConfirming(null)
         load()
       })
-      .catch(() => alert('删除视图失败'))
+      .catch(() => toast('删除视图失败', 'error'))
       .finally(() => setDeleting(null))
   }
 

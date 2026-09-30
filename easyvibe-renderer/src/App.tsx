@@ -1,3 +1,4 @@
+import { ToastHost } from '@/lib/toast'
 import { Component, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
@@ -664,6 +665,8 @@ function Canvas({
   // 写路径（M2-3）：触发重新归纳 → 后端 spawn agent 按 v2.2 执行；自动进入直播模式看生长
   const startReinduce = useCallback(() => {
     if (!backendRepo || inducing) return
+    // R7 清债：重新归纳 = spawn 全仓库 agent（数分钟 + LLM 成本），先确认
+    if (!window.confirm('重新归纳将 spawn agent 全量分析仓库（通常数分钟），期间地图数据会被刷新。继续？')) return
     setInducing(true)
     fetch(`/api/repos/${backendRepo}/reinduce`, { method: 'POST' })
       .then((r) => {
@@ -1292,10 +1295,13 @@ export default function App() {
     )
   }
   return (
+    <>
     <CanvasBoundary>
       <ReactFlowProvider>
         <Canvas map={map} backendRepo={backendRepo} repos={repos} onRepoChange={switchRepo} />
       </ReactFlowProvider>
     </CanvasBoundary>
+      <ToastHost />
+    </>
   )
 }
