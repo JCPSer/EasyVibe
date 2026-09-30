@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
 
+interface TaskResult {
+  result?: { summary?: string; changed_modules?: string[] }
+  diffStat?: string
+  archivedPath?: string | null
+  collectedAt?: string
+}
+
 interface TaskItem {
   id: string
   title: string
@@ -11,6 +18,7 @@ interface TaskItem {
   status: string // pending/awaiting_approval/running/succeeded/failed/rejected/done
   trust: string
   gate?: string
+  result?: TaskResult | null
   createdAt: string
 }
 
@@ -105,6 +113,41 @@ export function TaskPanel({ backendRepo }: Props) {
             </div>
             <div className="mt-1.5 text-[12px] font-semibold leading-5 text-slate-800">{t.title}</div>
             <p className="mt-0.5 line-clamp-2 text-[10.5px] leading-4 text-slate-500">{t.description}</p>
+            {/* M4-1：终态采集产物——agent 总结 + 变更摘要（diff 关审批的"改了什么"） */}
+            {t.result && (
+              <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 p-2">
+                {t.result.result?.summary && (
+                  <p className="text-[10.5px] leading-4 text-slate-700">
+                    <span className="font-semibold text-slate-500">agent 总结：</span>
+                    {t.result.result.summary}
+                  </p>
+                )}
+                {t.result.result?.changed_modules && t.result.result.changed_modules.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {t.result.result.changed_modules.map((m) => (
+                      <span key={m} className="rounded-full bg-white px-1.5 py-px font-mono text-[9px] text-blue-600 shadow-sm">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {t.result.diffStat && (
+                  <details className="mt-1.5">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                      变更摘要（git）
+                    </summary>
+                    <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-white p-1.5 font-mono text-[9.5px] leading-4 text-slate-600">
+                      {t.result.diffStat}
+                    </pre>
+                  </details>
+                )}
+                {t.result.archivedPath && (
+                  <p className="mt-1 truncate text-[9px] text-slate-400" title={t.result.archivedPath}>
+                    已归档：{t.result.archivedPath}
+                  </p>
+                )}
+              </div>
+            )}
             {needDecision && (
               <div className="mt-2 flex gap-2">
                 <button

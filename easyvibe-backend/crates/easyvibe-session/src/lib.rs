@@ -23,13 +23,27 @@ pub type SessionEventSender = tokio::sync::mpsc::Sender<SessionStatusChanged>;
 pub struct SessionManager {
     active: Arc<RwLock<HashMap<String, SessionStatusChanged>>>, // repo -> 最新会话状态（互斥判定用）
     by_id: Arc<RwLock<HashMap<String, SessionStatusChanged>>>,  // session_id -> 状态（终态归属用，审查 🔴1）
+    /// session_id -> stdout 捕获（M4-1 产物归档采集的原料；单会话 ≤1MB 封顶）
+    outputs: Arc<RwLock<HashMap<String, Arc<std::sync::Mutex<String>>>>>,
     counter: AtomicU64,
     events: SessionEventSender,
 }
 
 impl SessionManager {
     pub fn new(events: SessionEventSender) -> Arc<Self> {
-        Arc::new(Self { active: Default::default(), by_id: Default::default(), counter: AtomicU64::new(0), events })
+        Arc::new(Self {
+            active: Default::default(),
+            by_id: Default::default(),
+            outputs: Default::default(),
+            counter: AtomicU64::new(0),
+            events,
+        })
+    }
+
+    /// 会话 stdout（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料；无捕获返回 None
+    pub async fn output_of(&self, session_id: &str) -> Option<String> {
+        let buf = self.outputs.read().await.get(session_id)?.clone();
+        Some(buf.lock().map(|s| s.clone()).unwrap_or_default())
     }
 
     pub async fn status_of(&self, repo_id: &str) -> Option<SessionStatusChanged> {
@@ -111,6 +125,10 @@ impl SessionManager {
             });
         }
 
+        // stdout 捕获缓冲（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料
+        let stdout_buf = Arc::new(std::sync::Mutex::new(String::new()));
+        self.outputs.write().await.insert(session_id.clone(), stdout_buf.clone());
+
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
         // 看门任务：stdout/stderr 并发排空（审查 🔴2：串行"先 wait 后排 stderr"会让
@@ -138,6 +156,16 @@ impl SessionManager {
                                 if lines <= 3 || lines % 50 == 0 {
                                     let peek: String = line.chars().take(200).collect();
                                     info!("[session {out_id}] stdout#{lines}: {peek}");
+                                }
+                                // M4-1：捕获进缓冲（1MB 封顶，保头丢尾——RESULT 行在末尾）
+                                if let Ok(mut buf) = stdout_buf.lock() {
+                                    if buf.len() < 1_048_576 {
+                                        buf.push_str(&line);
+                                    } else if line.contains("[EASYVIBE-RESULT]") {
+                                        // 超帽时仍保留 RESULT 归档行（短行，替换式保底）
+                                        let trimmed: String = line.chars().take(4096).collect();
+                                        buf.push_str(&trimmed);
+                                    }
                                 }
                                 line.clear();
                             }
@@ -316,6 +344,21 @@ mod tests {
         let final_evt = recv_terminal(&mut rx).await;
         assert_eq!(final_evt.status, SessionStatus::Succeeded);
         assert_eq!(final_evt.repo, "repo1");
+    }
+
+    #[tokio::test]
+    async fn session_output_captured_for_result_parsing() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mgr = SessionManager::new(tx);
+        let dir = std::env::temp_dir();
+        // echo 忽略 stdin 直接打印——stdout 必须被捕获供 M4-1 解析 [EASYVIBE-RESULT]
+        let s = mgr.start_induction("repo1", &dir, "ignored", "echo", &["hello-easyvibe [EASYVIBE-RESULT] {\"summary\":\"x\"}".to_string()]).await.unwrap();
+        let _ = recv_terminal(&mut rx).await;
+        let out = mgr.output_of(&s.session_id).await.expect("stdout 应被捕获");
+        assert!(out.contains("hello-easyvibe"), "捕获内容: {out}");
+        assert!(out.contains("[EASYVIBE-RESULT]"), "归档行必须保留（即使超帽路径）");
+        // 未知会话返回 None
+        assert!(mgr.output_of("nope").await.is_none());
     }
 
     #[tokio::test]

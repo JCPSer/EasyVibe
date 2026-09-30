@@ -458,6 +458,7 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         gate: None,
         prompt_tokens: None,
         completion_tokens: None,
+        result: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -478,6 +479,7 @@ async fn list_tasks(State(st): State<AppState>, Path(id): Path<String>) -> Resul
             "acceptance": t.acceptance, "source": t.source,
             "status": t.status, "trust": t.trust, "error": t.error,
             "gate": t.gate, "sessionId": t.session_id,
+            "result": t.result.as_deref().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok()),
             "createdAt": t.created_at, "updatedAt": t.updated_at,
         }))
         .collect();

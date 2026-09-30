@@ -153,6 +153,7 @@ impl TaskExecutor {
                 info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);
                 let this = self.clone();
                 let task_id = task.id.clone();
+                let repo_root = repo.root.clone();
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     let trust_manual = trust_manual;
@@ -166,10 +167,20 @@ impl TaskExecutor {
                                 ) =>
                             {
                                 let failed = s.status == easyvibe_api_types::SessionStatus::Failed;
+                                // M4-1：执行成功 → 产物采集（RESULT 行 + git 摘要 + development_docs 归档），
+                                // 供 diff 关审批展示；采集失败不阻断终态回写
+                                if !failed {
+                                    if let Some(json) =
+                                        collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id).await
+                                    {
+                                        let _ = this.task_repo.set_result(&task_id, &json).await;
+                                        info!("[task-exec] 任务 {} 产物已归档（diff 关供料）", task_id);
+                                    }
+                                }
                                 let (status, gate) = if failed {
                                     ("failed", None)
                                 } else if trust_manual {
-                                    // manual：执行成功 → 回到审批流（当前 gate=diff）
+                                    // manual：执行成功 → 回到审批流（当前 gate=diff），审批可见采集产物
                                     ("awaiting_approval", None)
                                 } else {
                                     ("done", Some("done"))
@@ -267,6 +278,80 @@ pub fn load_harness(workspace_reference: &std::path::Path) -> Result<(std::path:
     Ok((dir.into(), adapted))
 }
 
+/// 解析 agent stdout 的 `[EASYVIBE-RESULT] {json}` 归档行
+/// （assemble_task_prompt 要求 agent 最后一行输出；从尾部找，容忍前后缀文字）
+pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
+    let line = output.lines().rev().find(|l| l.contains("[EASYVIBE-RESULT]"))?;
+    let start = line.find("[EASYVIBE-RESULT]")? + "[EASYVIBE-RESULT]".len();
+    let payload = line[start..].trim();
+    serde_json::from_str(payload)
+        .ok()
+        .or_else(|| easyvibe_ai_agent::extract_json(payload).ok())
+}
+
+/// git 变更摘要（diff 关供料）：`git diff --stat`（已跟踪改动）+ `git status --porcelain`
+/// （未跟踪新文件）。非 git 仓库返回 None——git 是增强项不是硬依赖（设计定稿）。
+pub async fn git_change_summary(repo_root: &std::path::Path) -> Option<String> {
+    let run = |args: &[&str]| {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::process::Command::new("git").args(args).current_dir(repo_root).output(),
+        )
+    };
+    let mut parts: Vec<String> = vec![];
+    match run(&["diff", "--stat", "HEAD"]).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                parts.push(s);
+            }
+        }
+        _ => return None, // 非 git 仓库或 git 不可用：无摘要可给
+    }
+    if let Ok(Ok(out)) = run(&["status", "--porcelain"]).await {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                parts.push(format!("工作区状态：\n{s}"));
+            }
+        }
+    }
+    if parts.is_empty() { None } else { Some(parts.join("\n")) }
+}
+
+/// M4-1 终态采集：stdout 的 RESULT 行 + git 变更摘要 → `.easyvibe/development_docs/` 归档
+/// （§9 #2：git 可见、随 PR 评审）→ tasks.result JSON（diff 关审批的展示原料）。
+/// 两者皆无（agent 无输出且非 git 仓库）返回 None。
+pub async fn collect_task_result(
+    session_manager: &SessionManager,
+    session_id: &str,
+    repo_root: &std::path::Path,
+    task_id: &str,
+) -> Option<String> {
+    let output = session_manager.output_of(session_id).await.unwrap_or_default();
+    let parsed = parse_result_line(&output);
+    let diff_stat = git_change_summary(repo_root).await;
+    if parsed.is_none() && diff_stat.is_none() {
+        return None;
+    }
+    let mut archive = serde_json::json!({
+        "taskId": task_id,
+        "sessionId": session_id,
+        "collectedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
+        "result": parsed,
+        "diffStat": diff_stat,
+        "archivedPath": serde_json::Value::Null,
+    });
+    let dir = repo_root.join(".easyvibe/development_docs");
+    if tokio::fs::create_dir_all(&dir).await.is_ok() {
+        let path = dir.join(format!("{task_id}.json"));
+        if easyvibe_map::atomic_write_json(&path, &archive).await.is_ok() {
+            archive["archivedPath"] = serde_json::json!(path.to_string_lossy());
+        }
+    }
+    serde_json::to_string(&archive).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +373,7 @@ mod tests {
             gate: None,
             prompt_tokens: None,
             completion_tokens: None,
+            result: None,
             created_at: "1".into(),
             updated_at: "1".into(),
         }
@@ -402,6 +488,94 @@ mod tests {
         assert_eq!(t.status, "done");
         let aps = approvals.list_by_task("task-auto").await.unwrap();
         assert_eq!(aps.iter().filter(|a| a.decision == "skipped").count(), 3);
+    }
+
+    #[test]
+    fn parse_result_line_tolerant() {
+        let good = "前置输出若干行\n[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}";
+        let v = parse_result_line(good).unwrap();
+        assert_eq!(v["summary"], "修复完成");
+        assert_eq!(v["changed_modules"][0], "m1");
+        // 取最后一行（agent 可能多次提及）
+        let multi = "[EASYVIBE-RESULT] {\"summary\":\"旧\"}\nnoise\n[EASYVIBE-RESULT] {\"summary\":\"新\"}";
+        assert_eq!(parse_result_line(multi).unwrap()["summary"], "新");
+        assert!(parse_result_line("没有任何归档行").is_none());
+        assert!(parse_result_line("[EASYVIBE-RESULT] 不是json").is_none());
+    }
+
+    #[tokio::test]
+    async fn git_change_summary_tracks_and_untracked() {
+        // 非 git 目录 → None
+        let plain = std::env::temp_dir().join("ev-not-a-repo");
+        let _ = std::fs::remove_dir_all(&plain);
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(git_change_summary(&plain).await.is_none(), "非 git 仓库无摘要");
+
+        // 真 git 仓库：提交后修改已跟踪文件 + 新增未跟踪文件
+        let repo = std::env::temp_dir().join("ev-git-repo-test");
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git").args(args).current_dir(&repo).output().expect("git 执行失败")
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+        std::fs::write(repo.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(repo.join("b_new.txt"), "new\n").unwrap();
+        let summary = git_change_summary(&repo).await.expect("git 仓库应有摘要");
+        assert!(summary.contains("a.txt"), "已跟踪改动应入摘要: {summary}");
+        assert!(summary.contains("b_new.txt"), "未跟踪新文件应入摘要: {summary}");
+    }
+
+    #[tokio::test]
+    async fn auto_task_collects_result_and_archives() {
+        use easyvibe_db::{Database, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-task-collect-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir.join(".easyvibe/map")).unwrap();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        // echo 打印 RESULT 行到 stdout（忽略 stdin prompt）——采集链路的零成本验证
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals,
+            sessions,
+            maps,
+            Arc::new("框架".into()),
+            Arc::new("echo".into()),
+            Arc::new(vec!["[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}".to_string()]),
+        );
+        let mut task = sample_task("pending");
+        task.id = "task-collect".into();
+        task.repo = "ev-task-collect-test".into();
+        task.trust = "auto".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-task-collect-test")).await;
+        let mut t = task_repo.get("task-collect").await.unwrap().unwrap();
+        for _ in 0..10 {
+            if t.status == "done" { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-collect").await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "done");
+        let result: serde_json::Value =
+            serde_json::from_str(&t.result.expect("终态采集应写入 tasks.result")).unwrap();
+        assert_eq!(result["result"]["summary"], "修复完成");
+        assert_eq!(result["result"]["changed_modules"][0], "m1");
+        // 归档文件落 development_docs/（§9 #2）
+        let archived = result["archivedPath"].as_str().expect("应返回归档路径");
+        assert!(archived.contains("development_docs"), "归档须在 development_docs/: {archived}");
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(archived).expect("归档文件应存在")).unwrap();
+        assert_eq!(on_disk["taskId"], "task-collect");
     }
 
     #[tokio::test]

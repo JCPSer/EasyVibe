@@ -393,6 +393,7 @@ pub struct TaskRow {
     pub gate: Option<String>,
     pub prompt_tokens: Option<i64>,     // M3-5：token 用量（CLI agent 无法回报时留 NULL）
     pub completion_tokens: Option<i64>,
+    pub result: Option<String>,         // M4-1：产物归档 JSON（summary/changedModules/archivedPath/diffStat）
     pub created_at: String,
     pub updated_at: String,
 }
@@ -404,6 +405,8 @@ pub trait TaskRepository: Send + Sync {
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
     fn set_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn set_gate(&self, id: &str, gate: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// M4-1：任务终态采集产物（[EASYVIBE-RESULT] 解析 + diff stat + 归档路径）
+    fn set_result(&self, id: &str, result_json: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// M3-5（§11 🟡4）：后端重启会杀掉 spawn 的 agent（kill_on_drop）——
     /// 启动时把 running 任务标记 interrupted（awaiting_approval 是等用户决策，不受影响）
     fn interrupt_running(&self) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
@@ -424,24 +427,24 @@ struct TaskRowSql {
     id: String, repo: String, title: String, description: String,
     modules: String, acceptance: String, source: String, context: String,
     status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>,
-    prompt_tokens: Option<i64>, completion_tokens: Option<i64>, created_at: String, updated_at: String,
+    prompt_tokens: Option<i64>, completion_tokens: Option<i64>, result: Option<String>, created_at: String, updated_at: String,
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, created_at: r.created_at, updated_at: r.updated_at }
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, created_at: r.created_at, updated_at: r.updated_at }
     }
 }
 
 impl TaskRepository for SqliteTaskRepository {
     async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, result, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
         .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
-        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.created_at).bind(&t.updated_at)
+        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -481,6 +484,13 @@ impl TaskRepository for SqliteTaskRepository {
     async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE tasks SET session_id = ? WHERE id = ?")
             .bind(session_id).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn set_result(&self, id: &str, result_json: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET result = ? WHERE id = ?")
+            .bind(result_json).bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -794,7 +804,7 @@ mod tests {
             description: "d".into(), modules: "[\"m1\"]".into(), acceptance: "a".into(),
             source: "concern".into(), context: "{}".into(), status: "pending".into(),
             trust: "manual".into(), error: None, session_id: None, gate: None,
-            prompt_tokens: None, completion_tokens: None,
+            prompt_tokens: None, completion_tokens: None, result: None,
             created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&t).await.unwrap();
@@ -850,7 +860,7 @@ mod tests {
             id: id.into(), repo: "demo".into(), title: "t".into(), description: "d".into(),
             modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
             status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
-            prompt_tokens: None, completion_tokens: None, created_at: "1".into(), updated_at: "1".into(),
+            prompt_tokens: None, completion_tokens: None, result: None, created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&mk("task-run", "running")).await.unwrap();
         repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();
