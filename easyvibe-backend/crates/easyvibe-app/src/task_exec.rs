@@ -279,6 +279,21 @@ pub fn load_harness(workspace_reference: &std::path::Path) -> Result<(std::path:
         .map_err(|e| ApiError::Internal(format!("harness 框架不可读 {}: {e}", framework_path.display())))?;
     // 路径换姓：框架内引用的规则正文位置指向本机 harness 目录
     let adapted = framework.replace("~/.claude/hooks/", &format!("{}/", dir.trim_end_matches('/')));
+    // §9 #4 对齐（实弹#3 实证）：grill-me 只注入用户入口对话，透明 agent 不注入——
+    // 框架首行的"必须使用 grill-me 拷问用户"会把无人值守任务带偏成访谈模式
+    // （agent 只分析不执行、成功退出，实弹#1/#3 两次踩响）。装载时把拷问行替换为
+    // 透明执行模式指令（与 v2.2 归纳提示词"禁止提问"同款哲学）。
+    let adapted = adapted
+        .lines()
+        .map(|l| {
+            if l.to_lowercase().contains("grill-me") || l.contains("拷问") {
+                "（透明执行模式：禁止向用户提问或要求确认；需求有歧义时按最合理假设直接执行，并在 [EASYVIBE-RESULT] 的 summary 中说明你做出的假设。）"
+            } else {
+                l
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     Ok((dir.into(), adapted))
 }
 
@@ -364,6 +379,12 @@ pub async fn collect_task_result(
     if parsed.is_none() && diff_stat.is_none() && diff_full.is_none() {
         return None;
     }
+    // 实弹#3 防线：会话判成功但 agent 未输出 [EASYVIBE-RESULT] 行（可能被带偏/模型未遵从）——
+    // 不阻断终态（与归纳产物核验同款哲学），但给审批人亮警告，diff 关须警惕"空执行"
+    let mut warnings: Vec<String> = vec![];
+    if parsed.is_none() {
+        warnings.push("agent 未输出 [EASYVIBE-RESULT] 归档行——执行可能未按协议完成，审批时请核对 diff 是否为本任务改动".into());
+    }
     let mut archive = serde_json::json!({
         "taskId": task_id,
         "sessionId": session_id,
@@ -371,6 +392,7 @@ pub async fn collect_task_result(
         "result": parsed,
         "diffStat": diff_stat,
         "diffFull": diff_full,
+        "warnings": warnings,
         "archivedPath": serde_json::Value::Null,
     });
     let dir = repo_root.join(".easyvibe/development_docs");
@@ -431,6 +453,50 @@ mod tests {
         assert!(prompt.contains("无新增逆向"));
         assert!(prompt.contains("[EASYVIBE-RESULT]"));
         assert!(prompt.contains("\"inject\""));
+    }
+
+    #[test]
+    fn load_harness_strips_grill_me_for_transparent_agents() {
+        // 实弹#3 回归：§9 #4 拍板 grill-me 只注入用户入口——框架首行拷问指令必须在
+        // 装载时替换为透明执行模式，否则无人值守任务被带偏成访谈（只分析不执行）
+        let dir = std::env::temp_dir().join("ev-harness-grill-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("inject-prompt.md"),
+            "用户的表达一定是片面的，正式开始动手前，必须使用grill-me技能拷问用户。\ncat ~/.claude/hooks/rule_development.md",
+        )
+        .unwrap();
+        std::env::set_var("EASYVIBE_HARNESS_DIR", &dir);
+        let (_, adapted) = load_harness(&dir).unwrap();
+        assert!(!adapted.to_lowercase().contains("grill-me"), "透明 agent 不得收到 grill-me 指令");
+        assert!(!adapted.contains("拷问"), "拷问指令必须被替换: {adapted}");
+        assert!(adapted.contains("透明执行模式"), "应替换为透明执行指令");
+        assert!(adapted.contains(&format!("{}/rule_development.md", dir.display())), "路径换姓仍须生效");
+    }
+
+    #[tokio::test]
+    async fn collect_warns_when_result_line_missing() {
+        // 实弹#3 防线：会话成功但无 RESULT 行 + 有 git 改动 → 采集带警告（审批人警惕空执行/归因错位）
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let sessions = SessionManager::new(tx); // 无此会话 → 无输出 → 解析不到 RESULT
+        let repo = std::env::temp_dir().join("ev-git-repo-warn-test");
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("x.txt"), "1\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+        std::fs::write(repo.join("x.txt"), "1\n2\n").unwrap();
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn").await.expect("有 diff 即应采集");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["result"].is_null());
+        assert!(
+            v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("EASYVIBE-RESULT")),
+            "缺 RESULT 行必须亮警告: {v}"
+        );
     }
 
     #[tokio::test]

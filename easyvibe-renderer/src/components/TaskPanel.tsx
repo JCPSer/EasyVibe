@@ -3,10 +3,11 @@ import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff } from 'lu
 import { onTaskEvent } from '@/lib/growthBus'
 
 interface TaskResult {
-  result?: { summary?: string; changed_modules?: string[] }
+  result?: { summary?: string; changed_modules?: string[] } | null
   diffStat?: string
   archivedPath?: string | null
   collectedAt?: string
+  warnings?: string[]
 }
 
 interface TaskItem {
@@ -138,6 +139,12 @@ export function TaskPanel({ backendRepo }: Props) {
             {/* M4-1：终态采集产物——agent 总结 + 变更摘要（diff 关审批的"改了什么"） */}
             {t.result && (
               <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 p-2">
+                {/* 实弹#3 防线：agent 未按协议产出 RESULT 行——审批人须警惕空执行/归因错位 */}
+                {t.result.warnings?.map((w, i) => (
+                  <p key={i} className="mb-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] leading-4 text-amber-700">
+                    ⚠ {w}
+                  </p>
+                ))}
                 {t.result.result?.summary && (
                   <p className="text-[10.5px] leading-4 text-slate-700">
                     <span className="font-semibold text-slate-500">agent 总结：</span>
