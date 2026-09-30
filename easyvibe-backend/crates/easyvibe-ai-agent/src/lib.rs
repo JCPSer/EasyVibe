@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tracing::{info, warn};
 
+pub mod compaction;
+
 // ---------- LLM 客户端（trait：Anthropic 兼容实现 + Stub 实现） ----------
 
 pub struct ChatRequest<'a> {
@@ -17,10 +19,24 @@ pub struct ChatRequest<'a> {
     pub user: &'a str,
 }
 
+/// LLM 调用结果：文本 + token 用量（§10 #4 成本护栏第一步的原始口径 §11 🟢10）
+#[derive(Debug, Clone, Default)]
+pub struct ChatOutcome {
+    pub text: String,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+/// 无分词器依赖的 token 估算：CJK 混合文本约 1 token / 2 字符（保守取整）。
+/// 用于压缩阈值判断与消息 token 记账；真实用量以 API 返回的 usage 为准。
+pub fn estimate_tokens(s: &str) -> i64 {
+    ((s.chars().count() as f64) / 2.0).ceil() as i64
+}
+
 /// LLM 服务客户端。真实实现走 Anthropic 兼容 API（/v1/messages）；
 /// OpenAI 兼容服务通过 base_url 适配（M2-4.x 按需补 messages 格式分叉）。
 pub trait LlmClient: Send + Sync {
-    async fn chat(&self, req: ChatRequest<'_>) -> Result<String, ApiError>;
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<ChatOutcome, ApiError>;
     fn model(&self) -> &str;
 }
 
@@ -60,7 +76,7 @@ impl AnthropicClient {
 }
 
 impl LlmClient for AnthropicClient {
-    async fn chat(&self, req: ChatRequest<'_>) -> Result<String, ApiError> {
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<ChatOutcome, ApiError> {
         #[derive(serde::Serialize)]
         struct Msg<'a> {
             role: &'a str,
@@ -101,7 +117,10 @@ impl LlmClient for AnthropicClient {
             .as_array()
             .and_then(|arr| arr.iter().find_map(|c| c["text"].as_str()))
             .ok_or_else(|| ApiError::Internal("LLM 响应缺少 content.text".into()))?;
-        Ok(text.to_string())
+        // usage: {input_tokens, output_tokens}（部分代理可能不返回——记 0，记账不阻断）
+        let prompt_tokens = json["usage"]["input_tokens"].as_u64().unwrap_or(0);
+        let completion_tokens = json["usage"]["output_tokens"].as_u64().unwrap_or(0);
+        Ok(ChatOutcome { text: text.to_string(), prompt_tokens, completion_tokens })
     }
 
     fn model(&self) -> &str {
@@ -122,7 +141,7 @@ impl StubLlmClient {
 }
 
 impl LlmClient for StubLlmClient {
-    async fn chat(&self, req: ChatRequest<'_>) -> Result<String, ApiError> {
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<ChatOutcome, ApiError> {
         let start_tag = "<CURRENT_MAP_EMBED>";
         let end_tag = "</CURRENT_MAP_EMBED>";
         let start = req.user.find(start_tag).ok_or_else(|| ApiError::Internal("stub: 找不到 CURRENT_MAP 起始标记".into()))?;
@@ -134,7 +153,11 @@ impl LlmClient for StubLlmClient {
             map["health"]["score"] = serde_json::json!((score + 1).min(100));
         }
         map["meta"]["last_patrol_at"] = serde_json::json!(now_iso());
-        Ok(serde_json::to_string(&map).unwrap())
+        Ok(ChatOutcome {
+            text: serde_json::to_string(&map).unwrap(),
+            prompt_tokens: estimate_tokens(req.system) as u64 + estimate_tokens(req.user) as u64,
+            completion_tokens: estimate_tokens(&serde_json::to_string(&map).unwrap()) as u64,
+        })
     }
 
     fn model(&self) -> &str {
@@ -181,7 +204,7 @@ impl<R: HealthRepository> PatrolService<R> {
             .await;
 
         match result {
-            Ok(summary) => {
+            Ok((summary, pt, ct)) => {
                 self.repo_health
                     .finish_run(&FinishPatrolRun {
                         id: run_id.clone(),
@@ -189,6 +212,8 @@ impl<R: HealthRepository> PatrolService<R> {
                         status: "succeeded".into(),
                         arch_score: Some(summary.arch_score as i64),
                         error: None,
+                        prompt_tokens: Some(pt as i64),
+                        completion_tokens: Some(ct as i64),
                     })
                     .await?;
                 Ok(summary)
@@ -201,6 +226,8 @@ impl<R: HealthRepository> PatrolService<R> {
                         status: "failed".into(),
                         arch_score: None,
                         error: Some(e.to_string()),
+                        prompt_tokens: None,
+                        completion_tokens: None,
                     })
                     .await?;
                 Err(e)
@@ -217,7 +244,7 @@ impl<R: HealthRepository> PatrolService<R> {
         prompt_template: &str,
         schema_path: &str,
         llm: &L,
-    ) -> Result<PatrolSummary, ApiError> {
+    ) -> Result<(PatrolSummary, u64, u64), ApiError> {
         let user = prompt_template
             .replace("<REPO_ROOT>", &repo_root.to_string_lossy())
             .replace("<SCHEMA_PATH>", schema_path)
@@ -225,7 +252,8 @@ impl<R: HealthRepository> PatrolService<R> {
                 "<CURRENT_MAP>",
                 &format!("<CURRENT_MAP_EMBED>\n{}\n</CURRENT_MAP_EMBED>", serde_json::to_string(current_map).unwrap_or_default()),
             );
-        let raw = llm.chat(ChatRequest { system: "你是 EasyVibe 巡检 Agent，只输出 JSON 本身。", user: &user }).await?;
+        let outcome = llm.chat(ChatRequest { system: "你是 EasyVibe 巡检 Agent，只输出 JSON 本身。", user: &user }).await?;
+        let raw = outcome.text;
 
         let new_map = extract_json(&raw)?;
         validate_strict(&new_map).map_err(|e| ApiError::MapInvalid(format!("巡检产物未通过严格验收: {e}")))?;
@@ -237,7 +265,7 @@ impl<R: HealthRepository> PatrolService<R> {
         info!("[patrol {run_id}] {repo_id} 地图已更新（watcher 将推送 map.changed）");
 
         let arch_score = new_map["health"]["score"].as_u64().unwrap_or(0) as u32;
-        Ok(PatrolSummary { run_id: run_id.to_string(), modules: module_count(&new_map), arch_score })
+        Ok((PatrolSummary { run_id: run_id.to_string(), modules: module_count(&new_map), arch_score }, outcome.prompt_tokens, outcome.completion_tokens))
     }
 
     /// 会话型巡检（session spawn）终态后的健康历史落库：建 run → 插模块行 → 收尾
@@ -263,6 +291,8 @@ impl<R: HealthRepository> PatrolService<R> {
                 status: if succeeded { "succeeded".into() } else { "failed".into() },
                 arch_score: map["health"]["score"].as_i64(),
                 error,
+                prompt_tokens: None,     // 会话型 CLI agent 无法回报 usage（M3-5 记档）
+                completion_tokens: None,
             })
             .await?;
         Ok(())
@@ -348,11 +378,19 @@ fn bracket_extract(s: &str) -> Option<Value> {
 
 // ---------- 对话问答槽位（F2，M2-5） ----------
 
-/// 问答结果：回复文本 + 引用到的模块 id（供"存为视图"与画布定位消费）
+/// 问答结果：回复文本 + 引用到的模块 id（供"存为视图"与画布定位消费）+ token 用量（M3-5）
 #[derive(Debug, Clone)]
 pub struct QaAnswer {
     pub reply: String,
     pub refs: Vec<String>,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+impl QaAnswer {
+    fn plain(reply: String, refs: Vec<String>) -> Self {
+        Self { reply, refs, prompt_tokens: 0, completion_tokens: 0 }
+    }
 }
 
 /// 对话槽位客户端。Stub = 确定性地图检索（零成本、回答真实基于地图）；
@@ -374,7 +412,11 @@ impl StubQaClient {
 
 impl QaClient for StubQaClient {
     async fn ask(&self, map: &Value, question: &str, _history: &[(String, String)]) -> Result<QaAnswer, ApiError> {
-        Ok(stub_answer(map, question))
+        let mut ans = stub_answer(map, question);
+        // stub 无真实 API usage，用估算值记账（让成本护栏链路在零成本模式下也可验证）
+        ans.prompt_tokens = (estimate_tokens(question) + estimate_tokens(&serde_json::to_string(map).unwrap_or_default())) as u64;
+        ans.completion_tokens = estimate_tokens(&ans.reply) as u64;
+        Ok(ans)
     }
 
     fn model(&self) -> &str {
@@ -387,7 +429,7 @@ impl QaClient for StubQaClient {
 pub fn stub_answer(map: &Value, question: &str) -> QaAnswer {
     let q = question.to_lowercase();
     let Some(mods) = map["modules"].as_array() else {
-        return QaAnswer { reply: "地图中没有模块信息。".into(), refs: vec![] };
+        return QaAnswer::plain("地图中没有模块信息。".into(), vec![]);
     };
 
     // 架构级意图
@@ -435,10 +477,10 @@ pub fn stub_answer(map: &Value, question: &str) -> QaAnswer {
     };
 
     if scored.is_empty() && !arch_intent {
-        return QaAnswer {
-            reply: "根据现有语义地图没有找到直接相关的模块。可以换个问法（提及模块名或职责关键词），或先对仓库重新归纳以获得更完整的地图。".into(),
-            refs: vec![],
-        };
+        return QaAnswer::plain(
+            "根据现有语义地图没有找到直接相关的模块。可以换个问法（提及模块名或职责关键词），或先对仓库重新归纳以获得更完整的地图。".into(),
+            vec![],
+        );
     }
 
     let mut parts: Vec<String> = vec![];
@@ -474,7 +516,7 @@ pub fn stub_answer(map: &Value, question: &str) -> QaAnswer {
         refs.clear();
     }
 
-    QaAnswer { reply: parts.join("\n\n"), refs }
+    QaAnswer::plain(parts.join("\n\n"), refs)
 }
 
 /// LLM 问答实现：地图上下文注入 + 引用模块 id 的要求（M2-5：基于地图回答）
@@ -507,20 +549,20 @@ impl<C: LlmClient> QaClient for LlmQaClient<C> {
         );
         let raw = self.llm.chat(ChatRequest { system, user: &user }).await?;
         // 提取 [refs: ...]
-        let (reply, refs) = match raw.rfind("[refs:") {
+        let (reply, refs) = match raw.text.rfind("[refs:") {
             Some(pos) => {
-                let end = raw[pos..].find(']').map(|e| pos + e).unwrap_or(raw.len());
-                let tag = &raw[pos + 6..end];
+                let end = raw.text[pos..].find(']').map(|e| pos + e).unwrap_or(raw.text.len());
+                let tag = &raw.text[pos + 6..end];
                 let refs: Vec<String> = tag
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty() && s != "none")
                     .collect();
-                (raw[..pos].trim().to_string(), refs)
+                (raw.text[..pos].trim().to_string(), refs)
             }
-            None => (raw.trim().to_string(), vec![]),
+            None => (raw.text.trim().to_string(), vec![]),
         };
-        Ok(QaAnswer { reply, refs })
+        Ok(QaAnswer { reply, refs, prompt_tokens: raw.prompt_tokens, completion_tokens: raw.completion_tokens })
     }
 
     fn model(&self) -> &str {
@@ -634,7 +676,7 @@ impl<C: LlmClient> SuggestClient for LlmSuggestClient<C> {
 
 给出你的优化建议列表。", serde_json::to_string(map).unwrap_or_default());
         let raw = self.llm.chat(ChatRequest { system, user: &user }).await?;
-        let arr = extract_json_array(&raw)?;
+        let arr = extract_json_array(&raw.text)?;
         let mut out = vec![];
         for it in arr.iter().filter_map(|x| x.as_object()) {
             out.push(Suggestion {

@@ -33,6 +33,7 @@ pub struct AppState {
     pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
     pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
+    pub conversation_repo: Arc<easyvibe_db::SqliteConversationRepository>,
     pub executor: Arc<task_exec::TaskExecutor>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
@@ -69,7 +70,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
-        .route("/repos/{id}/chat", axum::routing::post(chat))
+        .route("/repos/{id}/chat", get(get_chat).post(chat))
+        .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
+        .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
         .route("/repos/{id}/views", axum::routing::post(save_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
@@ -254,7 +257,7 @@ async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) ->
 
 // ---------- M3-1：配置体系（backend-design §10） ----------
 
-use easyvibe_db::{SettingRow, SettingsRepository as _};
+use easyvibe_db::{SettingRow, SettingsRepository as _, TaskRepository as _};
 
 /// 生效配置解析：仓库行覆盖全局行；无设置时回退环境变量（开发期手段）。
 pub struct ResolvedLlm {
@@ -372,7 +375,6 @@ struct DecideRequest {
 }
 
 async fn decide_task(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>, Json(body): Json<DecideRequest>) -> Result<Response, AppError> {
-    use easyvibe_db::TaskRepository as _;
     let task = st.executor.decide(&tid, &body.decision, body.note.as_deref()).await?;
     let _ = st.event_bus.send(BusEvent::TaskStatus {
         repo: id,
@@ -451,6 +453,8 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         error: None,
         session_id: None,
         gate: None,
+        prompt_tokens: None,
+        completion_tokens: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -477,41 +481,127 @@ async fn list_tasks(State(st): State<AppState>, Path(id): Path<String>) -> Resul
     Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
 }
 
-#[derive(serde::Deserialize)]
-struct ChatHttpRequest {
-    message: String,
-    #[serde(default)]
-    history: Vec<ChatTurn>,
+// ---------- M3-5：会话持久化 + auto-compact（backend-design §10a / §11 🟡4/5/6） ----------
+
+use easyvibe_ai_agent::compaction;
+use easyvibe_db::{ConversationMessageRow, ConversationRepository as _};
+
+/// 近期窗口原文保留的消息条数（3 轮问答不动，三层策略第 1 层）
+const KEEP_RECENT_MESSAGES: usize = 6;
+const DEFAULT_CONTEXT_BUDGET: i64 = 256_000; // §10 #2：默认 256K，高级设置可调
+const DEFAULT_COMPACT_THRESHOLD: i64 = 80;   // §10a：触发 80% → 压到 40%
+
+/// 高级设置解析：仓库行覆盖全局行（同 resolve_llm 的两级哲学）
+async fn resolve_adv_i64(st: &AppState, repo_id: &str, key: &str, default: i64) -> i64 {
+    for scope in [repo_id, "global"] {
+        if let Ok(Some(row)) = st.settings_repo.get(scope, key).await {
+            if let Ok(v) = serde_json::from_str::<i64>(&row.value) { return v; }
+            if let Ok(v) = serde_json::from_str::<f64>(&row.value) { return v as i64; }
+        }
+    }
+    default
 }
 
-#[derive(serde::Deserialize, Clone)]
-struct ChatTurn {
-    role: String, // user / assistant
-    content: String,
-}
-
-/// 入口对话：基于语义地图问答（M2-5 范围：地图级回答；代码级追问留待 M3 工具能力）
-async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<ChatHttpRequest>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
-    let snap = st.map_service.load_map(&repo).await?;
-    // 历史折叠为 (q, a) 对（容错奇数/乱序）
+/// 未压缩消息折叠为 (q, a) 对（容错奇数/乱序；系统消息不参与）
+fn fold_pairs(messages: &[ConversationMessageRow]) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = Vec::new();
     let mut pending_q: Option<String> = None;
-    for t in &body.history {
-        match t.role.as_str() {
-            "user" => pending_q = Some(t.content.clone()),
+    for m in messages {
+        match m.role.as_str() {
+            "user" => pending_q = Some(m.content.clone()),
             "assistant" => {
                 if let Some(q) = pending_q.take() {
-                    pairs.push((q, t.content.clone()));
+                    pairs.push((q, m.content.clone()));
                 }
             }
             _ => {}
         }
     }
+    pairs
+}
+
+/// 压缩执行（auto 与手动共用）：返回留痕消息（"上下文已压缩：82%→34%"）。
+/// 存储分离（§11 🟡5）：水位前消息标 compacted（原文保留可回放），运行态只剩摘要+窗口；
+/// 摘要必带会话状态（§11 🟡6）：compact_stub/compact_with_llm 的结构化段落保证。
+async fn maybe_compact(st: &AppState, repo_id: &str, budget: i64, threshold: i64, force: bool) -> Result<Option<String>, ApiError> {
+    let conv = st.conversation_repo.get_or_create(repo_id).await?;
+    let fresh = st.conversation_repo.list_uncompacted(&conv.id).await?;
+    let total: i64 = fresh.iter().map(|m| m.tokens).sum();
+    if !force && !compaction::needs_compaction(total, budget, threshold) {
+        return Ok(None);
+    }
+    let Some(wm) = compaction::compaction_watermark(&fresh, KEEP_RECENT_MESSAGES) else {
+        return Ok(None); // 不足一个窗口不压
+    };
+    let old: Vec<ConversationMessageRow> = fresh.iter().filter(|m| m.id <= wm).cloned().collect();
+    if old.is_empty() {
+        return Ok(None);
+    }
+    let result = match *st.llm_mode {
+        LlmMode::Stub => compaction::compact_stub(conv.summary.as_deref(), &old, budget, total),
+        LlmMode::Anthropic => {
+            let cfg = resolve_llm(st, repo_id, "chat").await;
+            if cfg.api_key.is_empty() {
+                // 无 key 退化 stub（诚实标注），压缩不可用不该打断对话
+                compaction::compact_stub(conv.summary.as_deref(), &old, budget, total)
+            } else {
+                let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
+                compaction::compact_with_llm(&llm, conv.summary.as_deref(), &old, budget, total).await?
+            }
+        }
+    };
+    st.conversation_repo
+        .apply_compaction(&conv.id, result.before_id, &result.summary, result.prompt_tokens, result.completion_tokens)
+        .await?;
+    let trace = format!("上下文已压缩：{}%→{}%", result.before_pct, result.after_pct);
+    st.conversation_repo
+        .append_message(&conv.id, "system", &trace, easyvibe_ai_agent::estimate_tokens(&trace))
+        .await?;
+    info!("[chat] {} 压缩 {}%→{}%（水位 {}）", repo_id, result.before_pct, result.after_pct, result.before_id);
+    Ok(Some(trace))
+}
+
+/// 恢复对话：完整原文从库读（留痕可回放）——切换页签/后端重启/刷新均恢复
+async fn get_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let conv = st.conversation_repo.get_or_create(&id).await?;
+    let messages = st.conversation_repo.list_messages(&conv.id).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "summary": conv.summary,
+            "messages": messages,
+            "usage": { "promptTokens": conv.prompt_tokens, "completionTokens": conv.completion_tokens },
+        }
+    }))
+    .into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct ChatHttpRequest {
+    message: String,
+}
+
+/// 入口对话（M2-5 + M3-5 持久化）：服务端是会话事实源——
+/// 用户消息落库 → 运行态上下文=摘要+未压缩窗口 → 问答 → 回答落库+token 记账 → auto-compact 检查
+async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<ChatHttpRequest>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let conv = st.conversation_repo.get_or_create(&id).await?;
+
+    // 1) 用户消息落库（会话持久化：历史不再只活在前端 state）
+    st.conversation_repo
+        .append_message(&conv.id, "user", &body.message, easyvibe_ai_agent::estimate_tokens(&body.message))
+        .await?;
+
+    // 2) 运行态上下文：未压缩消息（近期窗口原文 + 此前由摘要代表）
+    let fresh = st.conversation_repo.list_uncompacted(&conv.id).await?;
+    let pairs = fold_pairs(&fresh);
+
+    // 3) 问答（槽位配置 M3-1）
     let answer: easyvibe_ai_agent::QaAnswer = match *st.llm_mode {
         LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs).await?,
         LlmMode::Anthropic => {
-            // M3-1：槽位配置解析（settings 库优先，env 兜底）
             let cfg = resolve_llm(&st, &id, "chat").await;
             if cfg.api_key.is_empty() {
                 return Err(AppError(ApiError::BadRequest("未配置 LLM API key（设置面板或 EASYVIBE_LLM_API_KEY）".into())));
@@ -520,11 +610,46 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
             easyvibe_ai_agent::LlmQaClient::new(llm).ask(&snap.json, &body.message, &pairs).await?
         }
     };
+
+    // 4) 回答落库 + token 用量累计（§10 #4）
+    st.conversation_repo
+        .append_message(&conv.id, "assistant", &answer.reply, easyvibe_ai_agent::estimate_tokens(&answer.reply))
+        .await?;
+    st.conversation_repo
+        .add_tokens(&conv.id, answer.prompt_tokens as i64, answer.completion_tokens as i64)
+        .await?;
+
+    // 5) auto-compact（§10a：80% 触发，全自动不打断）
+    let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
+    let threshold = resolve_adv_i64(&st, &id, "adv.compactThreshold", DEFAULT_COMPACT_THRESHOLD).await;
+    let compaction_trace = maybe_compact(&st, &id, budget, threshold, false).await?;
+
     Ok(Json(serde_json::json!({
         "success": true,
-        "data": { "reply": answer.reply, "refs": answer.refs }
+        "data": {
+            "reply": answer.reply,
+            "refs": answer.refs,
+            "compaction": compaction_trace,
+            "usage": { "promptTokens": answer.prompt_tokens, "completionTokens": answer.completion_tokens },
+        }
     }))
     .into_response())
+}
+
+/// 手动压缩（§10a：对话界面"压缩上下文"按钮；自动阈值兜底之外的主动手段）
+async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
+    let trace = maybe_compact(&st, &id, budget, 0, true).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "compacted": trace.is_some(), "trace": trace } })).into_response())
+}
+
+/// 新对话：清空消息与摘要（会话行保留，token 计数归零）
+async fn reset_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let conv = st.conversation_repo.get_or_create(&id).await?;
+    st.conversation_repo.reset(&conv.id).await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -762,6 +887,7 @@ async fn main() {
     let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(database.pool().clone()));
     let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(database.pool().clone()));
     let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(database.pool().clone()));
+    let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(database.pool().clone()));
 
     // 主密钥：EASYVIBE_MASTER_KEY（64 位十六进制）优先，否则数据目录 .master_key（0600，首次生成）
     let cipher = {
@@ -808,6 +934,13 @@ async fn main() {
         Arc::new(agent_command.clone()),
         Arc::new(agent_args.clone()),
     );
+    // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记
+    // interrupted（awaiting_approval 等用户决策的任务不受影响）；pending 任务照常重新入队
+    match task_repo.interrupt_running().await {
+        Ok(n) if n > 0 => tracing::warn!("[startup] {} 个 running 任务标记 interrupted（后端重启）", n),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("[startup] interrupted 标记失败: {e}"),
+    }
     executor.enqueue_pending(None).await;
 
     let state = AppState {
@@ -822,6 +955,7 @@ async fn main() {
         cipher: Arc::new(cipher),
         task_repo,
         approval_repo,
+        conversation_repo,
         executor,
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
@@ -840,8 +974,28 @@ mod tests {
     use super::*;
     use tower::ServiceExt;
 
+    /// 样例地图（与 ai-agent 测试同构：validate_minimum 可通过，stub 问答可命中）
+    const SAMPLE_MAP: &str = r#"{
+      "version": "1.0",
+      "meta": {"repo": "demo", "generated_at": "t", "generator": "g/test"},
+      "layers": [{"id": "application", "name": "应用服务层", "order": 0, "description": "d"}],
+      "modules": [{
+        "id": "exam-core", "name": "考试与评测核心", "layer": "application",
+        "responsibility": "考试会话编排、答题流程与评测提交管线",
+        "files": ["lib/**"], "key_entries": [], "dependencies": [],
+        "health": {"score": 64, "coupling": "high", "complexity": "high", "churn": "medium",
+                   "decay_flags": [], "review_note": "n", "concerns": []}
+      }],
+      "edges": [],
+      "health": {"score": 58, "coupling": "high", "complexity": "high", "churn": "high",
+                 "decay_flags": [], "review_note": "r", "concerns": []}
+    }"#;
+
     async fn test_state() -> AppState {
-        let svc = MapService::new(vec![]);
+        test_state_with(MapService::new(vec![])).await
+    }
+
+    async fn test_state_with(svc: std::sync::Arc<MapService>) -> AppState {
         let (bus, _) = broadcast::channel(8);
         let (tx, _rx) = tokio::sync::mpsc::channel(8);
         let session_manager = SessionManager::new(tx);
@@ -852,6 +1006,7 @@ mod tests {
         let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
         let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
         let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
+        let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(db.pool().clone()));
         let executor = task_exec::TaskExecutor::new(
             task_repo.clone(),
             approval_repo.clone(),
@@ -874,6 +1029,7 @@ mod tests {
             cipher: Arc::new(cipher),
             task_repo,
             approval_repo,
+            conversation_repo,
             executor,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
@@ -894,5 +1050,118 @@ mod tests {
         let app = build_router(test_state().await);
         let resp = app.oneshot(axum::http::Request::get("/api/repos/nope/map").body(axum::body::Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    /// 带样例地图的测试仓库（chat E2E 用）
+    async fn chat_state(tag: &str) -> (AppState, String) {
+        let dir = std::env::temp_dir().join(format!("ev-chat-test-{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".easyvibe/map")).unwrap();
+        std::fs::write(dir.join(".easyvibe/map/map.json"), SAMPLE_MAP).unwrap();
+        let repo = repo_from_root(&dir);
+        let repo_id = repo.id.clone();
+        (test_state_with(MapService::new(vec![repo])).await, repo_id)
+    }
+
+    async fn post_chat(app: &axum::Router, repo: &str, message: &str) -> serde_json::Value {
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/chat"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::json!({ "message": message }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "chat POST 应成功");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn chat_persists_and_restores_from_db() {
+        let (state, repo) = chat_state("persist").await;
+        let app = build_router(state);
+        let r = post_chat(&app, &repo, "谁负责评测提交？").await;
+        let reply = r["data"]["reply"].as_str().unwrap_or_default();
+        assert!(reply.contains("考试与评测核心"), "stub 应答应基于地图, reply={reply}");
+        assert!(r["data"]["refs"].as_array().unwrap().iter().any(|x| x == "exam-core"));
+
+        // 第二轮后再恢复：完整历史从库读（M3-5：不再只活在前端 state）
+        post_chat(&app, &repo, "健康度多少分？").await;
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/chat")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        let messages = data["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 4, "两轮对话 = user+assistant × 2");
+        assert_eq!(messages[0]["role"], "user");
+        assert!(messages[0]["content"].as_str().unwrap().contains("评测提交"));
+        // token 用量已记账（stub 估算 > 0）
+        assert!(data["usage"]["promptTokens"].as_i64().unwrap() >= 0);
+    }
+
+    #[tokio::test]
+    async fn chat_manual_compact_leaves_trace_and_keeps_window() {
+        let (state, repo) = chat_state("compact").await;
+        // 让会话超过近期窗口（8 轮 = 16 条 > KEEP_RECENT 6）
+        let app = build_router(state);
+        for i in 0..8 {
+            post_chat(&app, &repo, &format!("第 {i} 个问题：模块职责是什么？")).await;
+        }
+        // 手动压缩（force，绕过阈值）
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::post(format!("/api/repos/{repo}/chat/compact")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        assert_eq!(data["compacted"], true);
+        let trace = data["trace"].as_str().unwrap().to_string();
+        assert!(trace.contains("上下文已压缩"), "留痕消息: {trace}");
+
+        // 恢复：系统留痕消息在列；水位前消息标 compacted（原文保留可回放）；近期窗口未压缩
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/chat")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        let messages = data["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 17, "16 条对话 + 1 条系统留痕");
+        assert_eq!(messages[16]["role"], "system");
+        assert!(messages[16]["content"].as_str().unwrap().contains("上下文已压缩"));
+        assert!(messages.iter().take(10).all(|m| m["compacted"] == true), "水位前 10 条已折叠进摘要");
+        assert!(messages[10..16].iter().all(|m| m["compacted"] == false), "近期窗口原文保留");
+        // 摘要非空且 stub 诚实标注
+        let summary = data["summary"].as_str().unwrap().to_string();
+        assert!(summary.contains("stub"), "stub 模式压缩应诚实标注: {summary}");
+    }
+
+    #[tokio::test]
+    async fn chat_reset_starts_fresh_conversation() {
+        let (state, repo) = chat_state("reset").await;
+        let app = build_router(state);
+        post_chat(&app, &repo, "一个问题").await;
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::post(format!("/api/repos/{repo}/chat/reset")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let resp = app
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/chat")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        assert!(data["messages"].as_array().unwrap().is_empty());
+        assert!(data["summary"].is_null());
     }
 }

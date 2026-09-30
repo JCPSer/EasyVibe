@@ -19,6 +19,8 @@ pub struct PatrolRunRow {
     pub model: Option<String>,
     pub arch_score: Option<i64>,
     pub error: Option<String>,
+    pub prompt_tokens: Option<i64>,     // M3-5：token 用量记录（§10 #4 第一步）
+    pub completion_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +97,8 @@ pub struct FinishPatrolRun {
     pub status: String, // succeeded / failed
     pub arch_score: Option<i64>,
     pub error: Option<String>,
+    pub prompt_tokens: Option<i64>,
+    pub completion_tokens: Option<i64>,
 }
 
 pub trait HealthRepository: Send + Sync {
@@ -144,12 +148,14 @@ impl HealthRepository for SqliteHealthRepository {
 
     async fn finish_run(&self, fin: &FinishPatrolRun) -> Result<(), ApiError> {
         sqlx::query(
-            "UPDATE patrol_runs SET finished_at = ?, status = ?, arch_score = ?, error = ? WHERE id = ?",
+            "UPDATE patrol_runs SET finished_at = ?, status = ?, arch_score = ?, error = ?, prompt_tokens = ?, completion_tokens = ? WHERE id = ?",
         )
         .bind(&fin.finished_at)
         .bind(&fin.status)
         .bind(fin.arch_score)
         .bind(&fin.error)
+        .bind(fin.prompt_tokens)
+        .bind(fin.completion_tokens)
         .bind(&fin.id)
         .execute(&self.pool)
         .await
@@ -181,7 +187,7 @@ impl HealthRepository for SqliteHealthRepository {
 
     async fn list_runs(&self, repo: &str, limit: i64) -> Result<Vec<PatrolRunRow>, ApiError> {
         let rows = sqlx::query_as::<_, PatrolRunRowSql>(
-            "SELECT id, repo, started_at, finished_at, status, model, arch_score, error
+            "SELECT id, repo, started_at, finished_at, status, model, arch_score, error, prompt_tokens, completion_tokens
              FROM patrol_runs WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
         )
         .bind(repo)
@@ -220,6 +226,8 @@ struct PatrolRunRowSql {
     model: Option<String>,
     arch_score: Option<i64>,
     error: Option<String>,
+    prompt_tokens: Option<i64>,
+    completion_tokens: Option<i64>,
 }
 
 impl From<PatrolRunRowSql> for PatrolRunRow {
@@ -233,6 +241,8 @@ impl From<PatrolRunRowSql> for PatrolRunRow {
             model: r.model,
             arch_score: r.arch_score,
             error: r.error,
+            prompt_tokens: r.prompt_tokens,
+            completion_tokens: r.completion_tokens,
         }
     }
 }
@@ -381,6 +391,8 @@ pub struct TaskRow {
     pub error: Option<String>,
     pub session_id: Option<String>,
     pub gate: Option<String>,
+    pub prompt_tokens: Option<i64>,     // M3-5：token 用量（CLI agent 无法回报时留 NULL）
+    pub completion_tokens: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -392,6 +404,9 @@ pub trait TaskRepository: Send + Sync {
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
     fn set_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn set_gate(&self, id: &str, gate: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// M3-5（§11 🟡4）：后端重启会杀掉 spawn 的 agent（kill_on_drop）——
+    /// 启动时把 running 任务标记 interrupted（awaiting_approval 是等用户决策，不受影响）
+    fn interrupt_running(&self) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
 }
 
 pub struct SqliteTaskRepository {
@@ -408,24 +423,25 @@ impl SqliteTaskRepository {
 struct TaskRowSql {
     id: String, repo: String, title: String, description: String,
     modules: String, acceptance: String, source: String, context: String,
-    status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>, created_at: String, updated_at: String,
+    status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>,
+    prompt_tokens: Option<i64>, completion_tokens: Option<i64>, created_at: String, updated_at: String,
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, created_at: r.created_at, updated_at: r.updated_at }
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, created_at: r.created_at, updated_at: r.updated_at }
     }
 }
 
 impl TaskRepository for SqliteTaskRepository {
     async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
         .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
-        .bind(&t.session_id).bind(&t.gate).bind(&t.created_at).bind(&t.updated_at)
+        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.created_at).bind(&t.updated_at)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -467,6 +483,15 @@ impl TaskRepository for SqliteTaskRepository {
             .bind(session_id).bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
+    }
+
+    async fn interrupt_running(&self) -> Result<u64, ApiError> {
+        let res = sqlx::query(
+            "UPDATE tasks SET status = 'interrupted', error = '后端重启，agent 会话已终止（kill_on_drop）；请重新发起任务', updated_at = ? WHERE status = 'running'",
+        )
+        .bind(now_secs())
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(res.rows_affected())
     }
 }
 
@@ -527,6 +552,199 @@ impl ApprovalRepository for SqliteApprovalRepository {
     }
 }
 
+// ---------- 会话持久化（M3-5：对话历史落域 2，留痕与压缩的存储分离 §11 🟡5） ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRow {
+    pub id: String,
+    pub repo: String,
+    pub summary: Option<String>,
+    pub compacted_before: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationMessageRow {
+    pub id: i64,
+    pub conversation_id: String,
+    pub role: String, // user / assistant / system
+    pub content: String,
+    pub compacted: bool,
+    pub tokens: i64,
+    pub created_at: String,
+}
+
+pub trait ConversationRepository: Send + Sync {
+    /// 每仓库一个会话（入口对话），不存在则创建
+    fn get_or_create(&self, repo: &str) -> impl std::future::Future<Output = Result<ConversationRow, ApiError>> + Send;
+    /// 追加一条消息，返回 rowid（用于压缩水位）
+    fn append_message(
+        &self,
+        conversation_id: &str,
+        role: &str,
+        content: &str,
+        tokens: i64,
+    ) -> impl std::future::Future<Output = Result<i64, ApiError>> + Send;
+    /// 回放从库读：完整原文（含已压缩消息，留痕）
+    fn list_messages(
+        &self,
+        conversation_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ConversationMessageRow>, ApiError>> + Send;
+    /// 运行态上下文：仅未压缩消息（近期窗口原文保留）
+    fn list_uncompacted(
+        &self,
+        conversation_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ConversationMessageRow>, ApiError>> + Send;
+    /// 压缩执行：水位之前的消息标 compacted（原文保留），摘要与累计 token 更新
+    fn apply_compaction(
+        &self,
+        conversation_id: &str,
+        before_id: i64,
+        summary: &str,
+        prompt_tokens_add: i64,
+        completion_tokens_add: i64,
+    ) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// token 用量累计（§10 #4 成本护栏第一步）
+    fn add_tokens(
+        &self,
+        conversation_id: &str,
+        prompt_tokens: i64,
+        completion_tokens: i64,
+    ) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 清空会话（保留会话行，消息与摘要重置——"新对话"按钮的原料）
+    fn reset(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+}
+
+pub struct SqliteConversationRepository {
+    pool: SqlitePool,
+}
+
+impl SqliteConversationRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ConversationRowSql {
+    id: String, repo: String, summary: Option<String>, compacted_before: i64,
+    prompt_tokens: i64, completion_tokens: i64, created_at: String, updated_at: String,
+}
+
+impl From<ConversationRowSql> for ConversationRow {
+    fn from(r: ConversationRowSql) -> Self {
+        Self {
+            id: r.id, repo: r.repo, summary: r.summary, compacted_before: r.compacted_before,
+            prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens,
+            created_at: r.created_at, updated_at: r.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ConversationMessageRowSql {
+    id: i64, conversation_id: String, role: String, content: String,
+    compacted: i64, tokens: i64, created_at: String,
+}
+
+impl From<ConversationMessageRowSql> for ConversationMessageRow {
+    fn from(r: ConversationMessageRowSql) -> Self {
+        Self {
+            id: r.id, conversation_id: r.conversation_id, role: r.role, content: r.content,
+            compacted: r.compacted != 0, tokens: r.tokens, created_at: r.created_at,
+        }
+    }
+}
+
+fn now_secs() -> String {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
+}
+
+impl ConversationRepository for SqliteConversationRepository {
+    async fn get_or_create(&self, repo: &str) -> Result<ConversationRow, ApiError> {
+        let id = format!("chat:{repo}");
+        if let Some(row) = sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(&self.pool).await.map_err(db_err)?
+        {
+            return Ok(row.into());
+        }
+        let now = now_secs();
+        sqlx::query("INSERT INTO conversations (id, repo, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind(&id).bind(repo).bind(&now).bind(&now)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&self.pool).await.map_err(db_err)?.into())
+    }
+
+    async fn append_message(&self, conversation_id: &str, role: &str, content: &str, tokens: i64) -> Result<i64, ApiError> {
+        let res = sqlx::query(
+            "INSERT INTO conversation_messages (conversation_id, role, content, tokens, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(conversation_id).bind(role).bind(content).bind(tokens).bind(now_secs())
+        .execute(&self.pool).await.map_err(db_err)?;
+        sqlx::query("UPDATE conversations SET updated_at = ? WHERE id = ?")
+            .bind(now_secs()).bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(res.last_insert_rowid())
+    }
+
+    async fn list_messages(&self, conversation_id: &str) -> Result<Vec<ConversationMessageRow>, ApiError> {
+        let rows = sqlx::query_as::<_, ConversationMessageRowSql>(
+            "SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY id",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool).await.map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_uncompacted(&self, conversation_id: &str) -> Result<Vec<ConversationMessageRow>, ApiError> {
+        let rows = sqlx::query_as::<_, ConversationMessageRowSql>(
+            "SELECT * FROM conversation_messages WHERE conversation_id = ? AND compacted = 0 ORDER BY id",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool).await.map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn apply_compaction(&self, conversation_id: &str, before_id: i64, summary: &str, pt_add: i64, ct_add: i64) -> Result<(), ApiError> {
+        sqlx::query("UPDATE conversation_messages SET compacted = 1 WHERE conversation_id = ? AND id <= ?")
+            .bind(conversation_id).bind(before_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        sqlx::query(
+            "UPDATE conversations SET summary = ?, compacted_before = ?, prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(summary).bind(before_id).bind(pt_add).bind(ct_add).bind(now_secs()).bind(conversation_id)
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn add_tokens(&self, conversation_id: &str, prompt_tokens: i64, completion_tokens: i64) -> Result<(), ApiError> {
+        sqlx::query(
+            "UPDATE conversations SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(prompt_tokens).bind(completion_tokens).bind(now_secs()).bind(conversation_id)
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn reset(&self, conversation_id: &str) -> Result<(), ApiError> {
+        sqlx::query("DELETE FROM conversation_messages WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        sqlx::query("UPDATE conversations SET summary = NULL, compacted_before = 0, prompt_tokens = 0, completion_tokens = 0, updated_at = ? WHERE id = ?")
+            .bind(now_secs()).bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,7 +793,9 @@ mod tests {
             id: "task-1".into(), repo: "demo".into(), title: "修复耦合".into(),
             description: "d".into(), modules: "[\"m1\"]".into(), acceptance: "a".into(),
             source: "concern".into(), context: "{}".into(), status: "pending".into(),
-            trust: "manual".into(), error: None, session_id: None, gate: None, created_at: "1".into(), updated_at: "1".into(),
+            trust: "manual".into(), error: None, session_id: None, gate: None,
+            prompt_tokens: None, completion_tokens: None,
+            created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&t).await.unwrap();
         repo.update_status("task-1", "running", None).await.unwrap();
@@ -584,6 +804,63 @@ mod tests {
         assert_eq!(list[0].status, "running");
         assert_eq!(list[0].source, "concern");
         assert!(repo.get("task-1").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn conversation_roundtrip_and_compaction() {
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteConversationRepository::new(db.pool().clone());
+        let conv = repo.get_or_create("demo").await.unwrap();
+        assert_eq!(conv.id, "chat:demo");
+
+        let m1 = repo.append_message(&conv.id, "user", "问题一", 10).await.unwrap();
+        let _m2 = repo.append_message(&conv.id, "assistant", "回答一", 20).await.unwrap();
+        let m3 = repo.append_message(&conv.id, "user", "问题二", 10).await.unwrap();
+        let _m4 = repo.append_message(&conv.id, "assistant", "回答二", 20).await.unwrap();
+
+        // 未压缩水位前：运行态仅见未压缩消息
+        repo.apply_compaction(&conv.id, m3 - 1, "摘要：决策 X；未决问题 Y", 100, 50).await.unwrap();
+        let all = repo.list_messages(&conv.id).await.unwrap();
+        assert_eq!(all.len(), 4, "原文全部保留（留痕可回放）");
+        assert!(all.iter().take(2).all(|m| m.compacted));
+        assert!(!all[2].compacted, "近期窗口原文保留");
+        let fresh = repo.list_uncompacted(&conv.id).await.unwrap();
+        assert_eq!(fresh.len(), 2);
+
+        // token 累计
+        repo.add_tokens(&conv.id, 30, 15).await.unwrap();
+        let after = repo.get_or_create("demo").await.unwrap();
+        assert_eq!(after.prompt_tokens, 130);
+        assert_eq!(after.completion_tokens, 65);
+        assert!(after.summary.as_deref().unwrap().contains("未决问题 Y"), "摘要须携带会话状态（§11 🟡6）");
+
+        // 重置（新对话）
+        repo.reset(&conv.id).await.unwrap();
+        assert!(repo.list_messages(&conv.id).await.unwrap().is_empty());
+        let clean = repo.get_or_create("demo").await.unwrap();
+        assert_eq!(clean.prompt_tokens, 0);
+        assert!(clean.summary.is_none());
+    }
+
+    #[tokio::test]
+    async fn running_tasks_interrupted_on_restart() {
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteTaskRepository::new(db.pool().clone());
+        let mk = |id: &str, status: &str| TaskRow {
+            id: id.into(), repo: "demo".into(), title: "t".into(), description: "d".into(),
+            modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
+            status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
+            prompt_tokens: None, completion_tokens: None, created_at: "1".into(), updated_at: "1".into(),
+        };
+        repo.create(&mk("task-run", "running")).await.unwrap();
+        repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();
+        repo.create(&mk("task-pend", "pending")).await.unwrap();
+        let n = repo.interrupt_running().await.unwrap();
+        assert_eq!(n, 1, "只有 running 被标记（§11 🟡4）");
+        assert_eq!(repo.get("task-run").await.unwrap().unwrap().status, "interrupted");
+        assert!(repo.get("task-run").await.unwrap().unwrap().error.unwrap().contains("重启"));
+        assert_eq!(repo.get("task-wait").await.unwrap().unwrap().status, "awaiting_approval", "等用户决策的任务不受影响");
+        assert_eq!(repo.get("task-pend").await.unwrap().unwrap().status, "pending", "排队任务重新入队语义不受影响");
     }
 
     #[tokio::test]
@@ -621,6 +898,8 @@ mod tests {
             status: "succeeded".into(),
             arch_score: Some(58),
             error: None,
+            prompt_tokens: Some(100),
+            completion_tokens: Some(50),
         })
         .await
         .unwrap();
@@ -629,6 +908,7 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "succeeded");
         assert_eq!(runs[0].arch_score, Some(58));
+        assert_eq!(runs[0].prompt_tokens, Some(100), "token 用量随 run 落库（§10 #4）");
 
         let history = repo.list_module_history("demo", "order-service", 10).await.unwrap();
         assert_eq!(history.len(), 1);

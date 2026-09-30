@@ -79,7 +79,6 @@ impl TaskExecutor {
 
     /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行
     pub async fn decide(self: &Arc<Self>, task_id: &str, decision: &str, note: Option<&str>) -> Result<easyvibe_db::TaskRow, ApiError> {
-        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
         let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
         let gate = task.gate.clone().unwrap_or_else(|| "plan".into());
         self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
@@ -287,6 +286,8 @@ mod tests {
             error: None,
             session_id: None,
             gate: None,
+            prompt_tokens: None,
+            completion_tokens: None,
             created_at: "1".into(),
             updated_at: "1".into(),
         }
