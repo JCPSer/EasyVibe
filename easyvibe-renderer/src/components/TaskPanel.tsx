@@ -49,6 +49,8 @@ export function TaskPanel({ backendRepo }: Props) {
   const [rejectReason, setRejectReason] = useState('')
   const [diffs, setDiffs] = useState<Record<string, string | null>>({})
   const [rechecking, setRechecking] = useState(false)
+  // 改进#7：plan 关的 flagged 风险理由（supervised 高危时由后端留痕）
+  const [riskNotes, setRiskNotes] = useState<Record<string, string>>({})
   const [diffLoading, setDiffLoading] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -154,6 +156,14 @@ export function TaskPanel({ backendRepo }: Props) {
             <p className={`mt-0.5 text-[10.5px] leading-4 text-slate-500 ${t.gate === 'plan' ? '' : 'line-clamp-2'}`}>
               {t.description}
             </p>
+            {t.gate === 'plan' && t.status === 'awaiting_approval' && !riskNotes[t.id] && (
+              <RiskNoteLoader taskId={t.id} backendRepo={backendRepo} onLoaded={(note) => setRiskNotes((p) => ({ ...p, [t.id]: note }))} />
+            )}
+            {t.gate === 'plan' && riskNotes[t.id] && (
+              <p className="mt-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] leading-4 text-amber-700">
+                ⚠ {riskNotes[t.id]}
+              </p>
+            )}
             {t.gate === 'plan' && t.acceptance && (
               <p className="mt-1 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] leading-4 text-slate-600">
                 <span className="font-semibold text-slate-500">验收标准：</span>
@@ -308,4 +318,20 @@ export function TaskPanel({ backendRepo }: Props) {
       })}
     </div>
   )
+}
+
+// 改进#7：拉取 plan 关 flagged 留痕（supervised 风险预评估理由），无则静默
+function RiskNoteLoader({ taskId, backendRepo, onLoaded }: { taskId: string; backendRepo: string | null; onLoaded: (note: string) => void }) {
+  useEffect(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${backendRepo}/tasks/${taskId}/approvals`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: { decision: string; note?: string }[] }) => {
+        const flagged = d.data.find((a) => a.decision === 'flagged' && a.note)
+        if (flagged?.note) onLoaded(flagged.note)
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, backendRepo])
+  return null
 }

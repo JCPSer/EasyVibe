@@ -641,7 +641,11 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         source: if body.source.is_empty() { "manual".into() } else { body.source },
         context: serde_json::to_string(&body.context).unwrap_or_else(|_| "{}".into()),
         status: "pending".into(), // M3-3：harness 执行引擎接走
-        trust: if body.trust == "auto" { "auto".into() } else { "manual".into() },
+        trust: match body.trust.as_str() {
+            "auto" => "auto".into(),
+            "supervised" => "supervised".into(),
+            _ => "manual".into(),
+        },
         error: None,
         session_id: None,
         gate: None,

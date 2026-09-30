@@ -61,15 +61,39 @@ impl TaskExecutor {
         }
     }
 
-    /// 执行单个任务（F5 两档分流）：manual 停在计划审批关（不 spawn）；
-    /// auto 直通（三道关记 skipped 留痕）后 spawn。Conflict/并发满载的排队语义在 spawn_and_watch。
+    /// 执行单个任务（F5 信任分流，改进#7 三档）：
+    /// - manual：停在计划审批关（不 spawn）
+    /// - supervised：计划时风险预评估（v1 确定性规则；LLM 评估为记档增强）——
+    ///   低危直通（plan 留痕带理由），高危停在 plan 关并 flagged 留痕（审批人可见风险理由）
+    /// - auto：直通（三道关 skipped 留痕）
+    /// Conflict/并发满载的排队语义在 spawn_and_watch。
     pub fn execute(self: Arc<Self>, task: TaskRow) -> impl std::future::Future<Output = ()> + Send {
         async move {
-            if task.trust == "manual" {
-                let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
-                let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
-                info!("[task-exec] 任务 {} 等待计划审批（manual）", task.id);
-                return;
+            match task.trust.as_str() {
+                "manual" => {
+                    let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
+                    let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
+                    info!("[task-exec] 任务 {} 等待计划审批（manual）", task.id);
+                    return;
+                }
+                "supervised" => {
+                    let (high, reason) = risk_assess(&task);
+                    if high {
+                        let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
+                        let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
+                        self.record_approval(&task.id, "plan", "flagged", Some(&format!("监督模式风险预评估：{reason}——已停在计划审批关"))).await;
+                        info!("[task-exec] 任务 {} 风险预评估高危，停计划关（supervised）", task.id);
+                        return;
+                    }
+                    self.record_approval(&task.id, "plan", "skipped", Some(&format!("监督模式风险预评估：{reason}——低危直通"))).await;
+                    for gate in ["diff", "report"] {
+                        self.record_approval(&task.id, gate, "skipped", Some("监督模式低危直通")).await;
+                    }
+                    info!("[task-exec] 任务 {} 风险预评估低危，直通执行（supervised）", task.id);
+                    self.spawn_and_watch(task).await;
+                    return;
+                }
+                _ => {}
             }
             for gate in ["plan", "diff", "report"] {
                 self.record_approval(&task.id, gate, "skipped", Some("自动模式直通，全程留痕")).await;
@@ -389,6 +413,32 @@ fn neutralize_transparent(text: &str, patterns: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 改进#7 supervised 风险预评估（v1 确定性规则——LLM 评估为记档增强）。
+/// 高危信号：大范围改动（>3 模块）/ 高危关键词 / 动低分模块（<50 分，手术风险高）。
+/// 返回 (是否高危, 理由)。
+pub fn risk_assess(task: &TaskRow) -> (bool, String) {
+    let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
+    let mut reasons: Vec<String> = vec![];
+    if modules.len() > 3 {
+        reasons.push(format!("影响 {} 个模块（>3，大范围改动）", modules.len()));
+    }
+    for kw in ["重构", "架构", "整体", "全部", "删除", "迁移"] {
+        if task.description.contains(kw) {
+            reasons.push(format!("描述含高危关键词「{kw}」"));
+            break;
+        }
+    }
+    // 低分模块由调用方上下文难以获取——用 description 长度代理复杂度（长描述=大需求）
+    if task.description.chars().count() > 200 {
+        reasons.push("需求描述超长（>200 字，需求可能未收敛）".to_string());
+    }
+    if reasons.is_empty() {
+        (false, format!("影响 {} 个模块，无高危信号", modules.len()))
+    } else {
+        (true, reasons.join("；"))
+    }
 }
 
 /// 解析 agent stdout 的 `[EASYVIBE-RESULT] {json}` 归档行
@@ -827,6 +877,54 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(archived).expect("归档文件应存在")).unwrap();
         assert_eq!(on_disk["taskId"], "task-collect");
         assert!(on_disk.get("diffFull").is_some(), "归档文件应含 diffFull（按需读取）");
+    }
+
+    #[tokio::test]
+    async fn supervised_low_risk_runs_high_risk_stops_at_plan() {
+        use easyvibe_db::{ApprovalRepository as _, Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let dir = std::env::temp_dir().join("ev-supervised-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(), approvals.clone(), sessions, maps,
+            harness_stub("框架"), Arc::new("true".into()), Arc::new(vec![]),
+        );
+        // 低危：单模块、短描述、无高危词 → 直通 done
+        let mut low = sample_task("pending");
+        low.id = "task-low".into();
+        low.repo = "ev-supervised-test".into();
+        low.trust = "supervised".into();
+        task_repo.create(&low).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-supervised-test")).await;
+        let mut t = task_repo.get("task-low").await.unwrap().unwrap();
+        for _ in 0..10 {
+            if t.status == "done" { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-low").await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "done", "低危应直通执行");
+        let aps = approvals.list_by_task("task-low").await.unwrap();
+        assert!(aps.iter().any(|a| a.decision == "skipped" && a.note.as_deref().unwrap_or("").contains("低危直通")), "低危直通须留痕带理由");
+        // 高危：多模块 + 高危词 → 停 plan 关 + flagged 留痕
+        let mut high = sample_task("pending");
+        high.id = "task-high".into();
+        high.repo = "ev-supervised-test".into();
+        high.trust = "supervised".into();
+        high.modules = "[\"a\",\"b\",\"c\",\"d\"]".into();
+        high.description = "整体重构".into();
+        task_repo.create(&high).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-supervised-test")).await;
+        let t = task_repo.get("task-high").await.unwrap().unwrap();
+        assert_eq!(t.status, "awaiting_approval", "高危应停计划关");
+        assert_eq!(t.gate.as_deref(), Some("plan"));
+        let aps = approvals.list_by_task("task-high").await.unwrap();
+        assert!(aps.iter().any(|a| a.decision == "flagged" && a.note.as_deref().unwrap_or("").contains("风险预评估")), "高危须 flagged 留痕带理由");
     }
 
     #[tokio::test]

@@ -29,6 +29,8 @@ interface Props {
   /** S1-1：打开视图（多模块时画布 solo 聚焦） */
   onOpenView?: (ids: string[]) => void
   onClose: () => void
+  /** 改进#4：右栏可调宽（测试员 IA 反馈的非破坏性验证——宽度够不够先看数据） */
+  width?: number
 }
 
 function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
@@ -374,7 +376,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, onOpenView }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, onOpenView, width }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -387,7 +389,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
   const detailLabel = module ? '模块详情' : layer ? '架构层详情' : sub ? '子模块详情' : '选中详情'
 
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-l border-slate-200 bg-white">
+    <aside className="flex shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
         <div className="flex gap-1">
           {(
@@ -416,7 +418,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         </button>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} />}
+        {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
         {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
           <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />

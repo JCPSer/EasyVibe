@@ -495,6 +495,20 @@ function Canvas({
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
+  // 改进#4：右栏可调宽（340–560）
+  const [panelWidth, setPanelWidth] = useState(340)
+  const startPanelDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = panelWidth
+    const onMove = (ev: MouseEvent) => setPanelWidth(Math.min(560, Math.max(340, startW + (startX - ev.clientX))))
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [panelWidth])
   const [tab, setTab] = useState<PanelTab>('issues')
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
@@ -1042,6 +1056,13 @@ function Canvas({
 
       {/* 右侧详情面板 */}
       {panelOpen ? (
+        <>
+        {/* 改进#4：右栏宽度拖拽手柄 */}
+        <div
+          onMouseDown={startPanelDrag}
+          className="w-1 shrink-0 cursor-col-resize bg-slate-100 transition-colors hover:bg-blue-300"
+          title="拖拽调整面板宽度"
+        />
         <DetailPanel
           map={map}
           selection={selection}
@@ -1053,7 +1074,9 @@ function Canvas({
           onLocateModule={focusModule}
           onOpenView={openView}
           onClose={() => setPanelOpen(false)}
+          width={panelWidth}
         />
+        </>
       ) : (
         <button
           onClick={() => panelOpen === false && setPanelOpen(true)}

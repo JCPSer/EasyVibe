@@ -41,10 +41,21 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
         }}
         title="点击选中该层"
       >
+        {/* 改进#5：层序徽标 L0/L1…——分层"可数可辨"，远看知道几层、谁在上谁在下 */}
         <div className="flex items-center gap-1.5 text-slate-700">
+          <span
+            className="rounded px-1 py-px font-mono text-[9px] font-bold"
+            style={{ background: `${color}22`, color }}
+          >
+            L{index}
+          </span>
           <Boxes size={15} strokeWidth={1.8} />
           <span className="text-[12.5px] font-bold tracking-wide">{layer.name}</span>
           <ChevronRight size={13} className="ml-auto text-slate-300" />
+        </div>
+        {/* 层健康色条：整层体温一眼可见 */}
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full" style={{ width: `${stats.avgScore}%`, background: color }} />
         </div>
         <div className="mt-1 text-[10px] leading-4 text-slate-400">{layer.description}</div>
 

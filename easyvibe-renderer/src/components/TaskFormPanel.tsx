@@ -19,7 +19,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
   const [description, setDescription] = useState(draft.description)
   const [acceptance, setAcceptance] = useState(draft.acceptance)
   const [selected, setSelected] = useState<string[]>(draft.modules)
-  const [trust, setTrust] = useState<'manual' | 'auto'>('manual')
+  const [trust, setTrust] = useState<'manual' | 'auto' | 'supervised'>('supervised')
   const [showContext, setShowContext] = useState(true)
   const [sending, setSending] = useState(false)
   const [created, setCreated] = useState<string | null>(null)
@@ -139,17 +139,19 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">审批模式（F5 两档）</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500">审批模式（改进#7 三档）</label>
+          {/* 改进#7：监督档——计划时风险预评估，低危直通、高危才停审批关 */}
           <div className="flex rounded-lg border border-slate-200 p-0.5">
-            {(['manual', 'auto'] as const).map((t) => (
+            {(['supervised', 'auto', 'manual'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTrust(t)}
-                className={`flex-1 rounded-md py-1.5 text-[11.5px] font-semibold transition-colors ${
+                className={`flex-1 rounded-md py-1.5 text-[11px] font-semibold transition-colors ${
                   trust === t ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'
                 }`}
+                title={t === 'supervised' ? '风险预评估：低危直通执行，高危停在计划审批关（推荐）' : t === 'auto' ? '三道关全跳过，全程留痕' : '计划/Diff/报告三道关逐个人审'}
               >
-                {t === 'manual' ? '手动（三道关）' : '自动（全程留痕）'}
+                {t === 'supervised' ? '监督' : t === 'auto' ? '自动' : '手动'}
               </button>
             ))}
           </div>

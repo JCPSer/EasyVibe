@@ -1,4 +1,5 @@
-import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Wrench } from 'lucide-react'
+import { useState } from 'react'
+import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Loader2, Wrench, Zap } from 'lucide-react'
 import { buildConcernTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Concern, Module } from '@/types/map'
 import { healthColor, dependentsOf } from '@/lib/layout'
@@ -73,7 +74,50 @@ function SeverityChip({ severity }: { severity: 'critical' | 'high' }) {
   )
 }
 
-export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLocate: (moduleId: string) => void; onCreateTask: (d: TaskDraft) => void }) {
+export function IssuesList({ map, onLocate, onCreateTask, backendRepo }: { map: CodeMap; onLocate: (moduleId: string) => void; onCreateTask: (d: TaskDraft) => void; backendRepo?: string | null }) {
+  // 改进#6：问题卡"自动修复"一键直达（测试员路径优化：5 点击→2 点击）
+  const [quickBusy, setQuickBusy] = useState<string | null>(null)
+  const [quickDone, setQuickDone] = useState<string | null>(null)
+
+  const quickFix = (e: React.MouseEvent, issue: Issue) => {
+    e.stopPropagation()
+    if (!backendRepo || quickBusy) return
+    let draft: TaskDraft
+    if (issue.moduleId) {
+      const mod = map.modules.find((x) => x.id === issue.moduleId)
+      const concern = mod?.health.concerns?.find((c) => c.finding === issue.finding)
+      if (mod) {
+        draft = concern
+          ? buildConcernTask(map, mod.id, concern, 0)
+          : buildConcernTask(map, mod.id, { severity: issue.severity, finding: issue.finding, suggestion: issue.suggestion }, 0)
+      } else {
+        return
+      }
+    } else {
+      const worst = [...map.modules].sort((a, b) => a.health.score - b.health.score).slice(0, 3)
+      draft = {
+        title: `架构治理：${issue.finding.slice(0, 24)}`,
+        description: `【架构级问题】${issue.finding}\n建议：${issue.suggestion}`,
+        modules: worst.map((x) => x.id),
+        acceptance: '按建议完成后，架构级问题不再复现（复检可验证趋势）',
+        source: 'concern',
+        context: { inject: { archConcern: { severity: issue.severity, finding: issue.finding, suggestion: issue.suggestion }, modules: worst.map((m) => ({ id: m.id, name: m.name, score: m.health.score })) } },
+      }
+    }
+    setQuickBusy(issue.key)
+    fetch(`/api/repos/${backendRepo}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...draft, trust: 'auto' }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        setQuickDone(issue.key)
+        setTimeout(() => setQuickDone(null), 2500)
+      })
+      .catch(() => alert('创建任务失败（需要本地后端在线）'))
+      .finally(() => setQuickBusy(null))
+  }
   const issues = collectIssues(map)
 
   return (
@@ -131,6 +175,15 @@ export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLo
                 </span>
               )}
               <button
+                onClick={(e) => quickFix(e, issue)}
+                disabled={quickBusy !== null || !backendRepo}
+                className="flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
+                title="跳过表单直接自动修复（自动模式直通执行，全程留痕）——90% 的场景不需要调整范围"
+              >
+                {quickBusy === issue.key ? <Loader2 size={9} className="animate-spin" /> : <Zap size={9} />}
+                {quickDone === issue.key ? '已创建 ✓' : '自动修复'}
+              </button>
+              <button
                 onClick={(e) => {
                   e.stopPropagation()
                   if (issue.moduleId) {
@@ -150,7 +203,7 @@ export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLo
                     })
                   }
                 }}
-                className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700"
+                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600 hover:bg-blue-100"
                 title="指哪打哪：以该问题为上下文发起修复任务"
               >
                 <Wrench size={9} /> 修复
