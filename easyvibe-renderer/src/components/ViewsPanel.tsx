@@ -18,11 +18,13 @@ interface Props {
   backendRepo: string | null
   /** 打开视图：定位到首个模块（画布选中 + 详情展示） */
   onOpenView: (moduleIds: string[]) => void
+  /** R6：当前地图模块 id 集合——打开视图时校验引用有效性（漂移提醒） */
+  validModuleIds?: Set<string>
 }
 
 // 视图列表（F1b 读侧）：对话中"存为视图"的引用式资产可回读、可打开、可删除。
 // 四态齐全（§0 标准）：加载 / 空 / 错误 / 成功；删除二次确认。
-export function ViewsPanel({ backendRepo, onOpenView }: Props) {
+export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   const [views, setViews] = useState<ViewItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -76,7 +78,21 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
   const open = (v: ViewItem) => {
     const ids = (v.view.nodes ?? []).map((n) => n.ref.replace(/^module:/, '')).filter(Boolean)
     if (ids.length === 0) return
-    onOpenView(ids)
+    // R6 清债：视图与主地图漂移——失效引用不静默跳过，提醒用户图已失真
+    if (validModuleIds) {
+      const stale = ids.filter((id) => !validModuleIds.has(id))
+      if (stale.length > 0) {
+        toast(`视图有 ${stale.length} 个模块引用已失效（地图已更新）：${stale.slice(0, 3).join('、')}${stale.length > 3 ? '…' : ''}——已按现存模块打开`, 'error')
+      }
+      const alive = ids.filter((id) => validModuleIds.has(id))
+      if (alive.length === 0) {
+        toast('视图引用的模块已全部失效（建议删除重建）', 'error')
+        return
+      }
+      onOpenView(alive)
+    } else {
+      onOpenView(ids)
+    }
     setOpenedSlug(v.slug)
     setTimeout(() => setOpenedSlug(null), 2000)
   }

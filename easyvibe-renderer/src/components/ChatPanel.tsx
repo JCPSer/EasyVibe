@@ -8,6 +8,8 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   refs: string[]
+  /** 库消息 id（R1 分页游标） */
+  id?: number
   /** 图片附件（dataURL；仅当前会话内存，刷新后不还原） */
   images?: { name: string; dataUrl: string }[]
 }
@@ -28,6 +30,7 @@ interface Props {
 interface ChatRestore {
   summary: string | null
   messages: { id: number; role: string; content: string }[]
+  hasMore: boolean
   usage: { promptTokens: number; completionTokens: number }
 }
 
@@ -43,6 +46,9 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [viewName, setViewName] = useState('')
   const [compacting, setCompacting] = useState(false)
   const [clarify, setClarify] = useState<Clarify | null>(null)
+  // R1 清债：回放分页——首屏最近 50 条，"加载更早"再翻页（不再全表读）
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   // 附件：文本类内容随消息注入（50KB×3）；图片走 images 通道（1.5MB×2，视觉模型消费）
   const [attachments, setAttachments] = useState<{ name: string; size: number; content: string }[]>([])
@@ -50,19 +56,38 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const fileRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // 恢复会话（M3-5：历史从域 2 读，完整原文含压缩留痕）
+  // R1 清债：加载更早一页（prepend 到消息头部）
+  const loadEarlier = () => {
+    if (!backendRepo || !messages.length || loadingMore) return
+    setLoadingMore(true)
+    fetch(`/api/repos/${backendRepo}/chat?before=${messages[0].id}&limit=50`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ChatRestore }) => {
+        setHasMore(d.data.hasMore)
+        setMessages((prev) => [
+          ...d.data.messages.map((m) => ({ id: m.id, role: m.role as ChatMessage['role'], content: m.content, refs: [] })),
+          ...prev,
+        ])
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false))
+  }
+
+  // 恢复会话（M3-5：历史从域 2 读；R1 起分页——首屏最近一页）
   // stale 保护：快速切换仓库时，旧 fetch 返回不得覆盖新会话（审查 🟡2）
   useEffect(() => {
     if (!backendRepo) return
     let stale = false
     setMessages([])
-    fetch(`/api/repos/${backendRepo}/chat`)
+    fetch(`/api/repos/${backendRepo}/chat?limit=50`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ChatRestore }) => {
         if (stale) return
         setUsage(d.data.usage)
+        setHasMore(d.data.hasMore)
         setMessages(
           d.data.messages.map((m) => ({
+            id: m.id,
             role: m.role as ChatMessage['role'],
             content: m.content,
             refs: [],
@@ -328,6 +353,17 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
       </div>
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto">
+        {hasMore && (
+          <div className="flex justify-center">
+            <button
+              onClick={loadEarlier}
+              disabled={loadingMore}
+              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+            >
+              {loadingMore ? '加载中…' : '↑ 加载更早的消息'}
+            </button>
+          </div>
+        )}
         {messages.length === 0 && (
           <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
             基于语义代码地图提问：

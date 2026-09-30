@@ -610,10 +610,12 @@ pub trait ConversationRepository: Send + Sync {
         content: &str,
         tokens: i64,
     ) -> impl std::future::Future<Output = Result<i64, ApiError>> + Send;
-    /// 回放从库读：完整原文（含已压缩消息，留痕）
+    /// 回放从库读（R1 分页：before_id 之前的一页，升序返回；None=最新一页）
     fn list_messages(
         &self,
         conversation_id: &str,
+        before_id: Option<i64>,
+        limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<ConversationMessageRow>, ApiError>> + Send;
     /// 运行态上下文：仅未压缩消息（近期窗口原文保留）
     fn list_uncompacted(
@@ -715,13 +717,24 @@ impl ConversationRepository for SqliteConversationRepository {
         Ok(res.last_insert_rowid())
     }
 
-    async fn list_messages(&self, conversation_id: &str) -> Result<Vec<ConversationMessageRow>, ApiError> {
-        let rows = sqlx::query_as::<_, ConversationMessageRowSql>(
-            "SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY id",
-        )
-        .bind(conversation_id)
-        .fetch_all(&self.pool).await.map_err(db_err)?;
-        Ok(rows.into_iter().map(Into::into).collect())
+    async fn list_messages(&self, conversation_id: &str, before_id: Option<i64>, limit: i64) -> Result<Vec<ConversationMessageRow>, ApiError> {
+        // R1 清债：倒序取一页再翻回升序（before_id=None 取最新一页）
+        let rows = match before_id {
+            Some(b) => sqlx::query_as::<_, ConversationMessageRowSql>(
+                "SELECT * FROM conversation_messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+            )
+            .bind(conversation_id).bind(b).bind(limit)
+            .fetch_all(&self.pool).await.map_err(db_err)?,
+            None => sqlx::query_as::<_, ConversationMessageRowSql>(
+                "SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
+            )
+            .bind(conversation_id).bind(limit)
+            .fetch_all(&self.pool).await.map_err(db_err)?,
+        };
+        let mut rows: Vec<ConversationMessageRow> = rows.into_iter().map(Into::into).collect();
+        rows.reverse();
+        let _ = limit;
+        Ok(rows)
     }
 
     async fn list_uncompacted(&self, conversation_id: &str) -> Result<Vec<ConversationMessageRow>, ApiError> {
@@ -827,6 +840,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversation_messages_paginate() {
+        // R1 清债：回放分页（先爆热区第一名的回归网）
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteConversationRepository::new(db.pool().clone());
+        let conv = repo.get_or_create("demo").await.unwrap();
+        for i in 0..60 {
+            repo.append_message(&conv.id, "user", &format!("msg-{i}"), 1).await.unwrap();
+        }
+        let page1 = repo.list_messages(&conv.id, None, 50).await.unwrap();
+        assert_eq!(page1.len(), 50);
+        assert_eq!(page1[0].content, "msg-10", "最旧的在 60-50=10");
+        let page2 = repo.list_messages(&conv.id, Some(page1[0].id), 50).await.unwrap();
+        assert_eq!(page2.len(), 10, "第二页应 10 条");
+        assert_eq!(page2[0].content, "msg-0");
+        // 衔接：page2 最后一条 id < page1 第一条 id
+        assert!(page2.last().unwrap().id < page1.first().unwrap().id);
+    }
+
+    #[tokio::test]
     async fn conversation_roundtrip_and_compaction() {
         let db = Database::connect_memory().await.unwrap();
         let repo = SqliteConversationRepository::new(db.pool().clone());
@@ -840,7 +872,7 @@ mod tests {
 
         // 未压缩水位前：运行态仅见未压缩消息
         repo.apply_compaction(&conv.id, m3 - 1, "摘要：决策 X；未决问题 Y", 100, 50).await.unwrap();
-        let all = repo.list_messages(&conv.id).await.unwrap();
+        let all = repo.list_messages(&conv.id, None, 50).await.unwrap();
         assert_eq!(all.len(), 4, "原文全部保留（留痕可回放）");
         assert!(all.iter().take(2).all(|m| m.compacted));
         assert!(!all[2].compacted, "近期窗口原文保留");
@@ -856,7 +888,7 @@ mod tests {
 
         // 重置（新对话）
         repo.reset(&conv.id).await.unwrap();
-        assert!(repo.list_messages(&conv.id).await.unwrap().is_empty());
+        assert!(repo.list_messages(&conv.id, None, 50).await.unwrap().is_empty());
         let clean = repo.get_or_create("demo").await.unwrap();
         assert_eq!(clean.prompt_tokens, 0);
         assert!(clean.summary.is_none());

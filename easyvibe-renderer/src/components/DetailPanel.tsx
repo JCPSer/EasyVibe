@@ -432,6 +432,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           <ViewsPanel
             backendRepo={backendRepo}
             onOpenView={(ids) => (onOpenView ? onOpenView(ids) : ids.length > 0 && onLocateModule(ids[0]))}
+            validModuleIds={new Set(map.modules.map((m) => m.id))}
           />
         )}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} />}

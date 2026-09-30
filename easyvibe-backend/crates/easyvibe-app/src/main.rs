@@ -764,16 +764,25 @@ async fn maybe_compact(st: &AppState, repo_id: &str, budget: i64, threshold: i64
     Ok(Some(trace))
 }
 
-/// 恢复对话：完整原文从库读（留痕可回放）——切换页签/后端重启/刷新均恢复
-async fn get_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+/// 恢复对话（R1 分页：?before=<id>&limit=50——切换页签/重启/刷新均恢复；
+/// hasMore 为真时前端给"加载更早"入口，不再全表读）
+async fn get_chat(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let conv = st.conversation_repo.get_or_create(&id).await?;
-    let messages = st.conversation_repo.list_messages(&conv.id).await?;
+    let before = q.get("before").and_then(|v| v.parse::<i64>().ok());
+    let limit: i64 = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 200);
+    let messages = st.conversation_repo.list_messages(&conv.id, before, limit).await?;
+    let has_more = messages.len() as i64 == limit;
     Ok(Json(serde_json::json!({
         "success": true,
         "data": {
             "summary": conv.summary,
             "messages": messages,
+            "hasMore": has_more,
             "usage": { "promptTokens": conv.prompt_tokens, "completionTokens": conv.completion_tokens },
         }
     }))
