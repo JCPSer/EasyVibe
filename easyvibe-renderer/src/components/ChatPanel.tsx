@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { MarkdownMessage } from '@/components/MarkdownMessage'
 import { Send, Loader2, BookmarkPlus, Check, Crosshair } from 'lucide-react'
 
 interface ChatMessage {
@@ -91,7 +92,7 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
                 m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
               }`}
             >
-              <div className="whitespace-pre-wrap">{m.content}</div>
+              <MarkdownMessage content={m.content} />
               {m.role === 'assistant' && m.refs.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
                   {m.refs.map((id) => (
