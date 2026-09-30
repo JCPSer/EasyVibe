@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
+aes-gcm.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true

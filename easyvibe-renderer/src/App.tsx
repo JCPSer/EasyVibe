@@ -14,7 +14,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles } from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings } from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -23,6 +23,7 @@ import { BandNode, type BandNodeType } from '@/components/BandNode'
 import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/ExpandedModuleNode'
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
+import { SettingsPanel } from '@/components/SettingsPanel'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitGrowthEvent, emitSessionEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
@@ -486,6 +487,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [liveActivity, setLiveActivity] = useState(false)
   const [inducing, setInducing] = useState(false)
   const [patrolling, setPatrolling] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const growthRef = useRef<GrowthState | null>(null)
   useEffect(() => {
     growthRef.current = growth
@@ -814,6 +816,13 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                   <Play size={10} />
                   {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
                 </button>
+                <button
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className="ml-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-500 transition-colors hover:bg-slate-50"
+                  title="设置（LLM 服务 / 槽位绑定 / 高级）"
+                >
+                  <Settings size={10} />
+                </button>
                 {backendRepo && (
                   <button
                     onClick={startPatrol}
@@ -834,6 +843,9 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
           </div>
         </div>
       </div>
+
+      {/* 设置面板（滑出） */}
+      {settingsOpen && <SettingsPanel backendRepo={backendRepo} onClose={() => setSettingsOpen(false)} />}
 
       {/* 右侧详情面板 */}
       {panelOpen ? (

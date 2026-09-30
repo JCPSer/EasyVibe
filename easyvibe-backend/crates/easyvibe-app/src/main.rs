@@ -29,6 +29,8 @@ pub struct AppState {
     // M2-4：巡检槽位 + 域 2 健康历史
     pub patrol_service: Arc<easyvibe_ai_agent::PatrolService<easyvibe_db::SqliteHealthRepository>>,
     pub health_repo: Arc<easyvibe_db::SqliteHealthRepository>,
+    pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
+    pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
     pub schema_path: Arc<String>,
@@ -65,6 +67,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
         .route("/repos/{id}/chat", axum::routing::post(chat))
         .route("/repos/{id}/views", axum::routing::post(save_view))
+        .route("/settings", get(list_settings))
+        .route("/settings/set", axum::routing::put(put_setting))
+        .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .with_state(state.clone());
 
     Router::new()
@@ -239,6 +244,115 @@ async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) ->
 
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
 
+// ---------- M3-1：配置体系（backend-design §10） ----------
+
+use easyvibe_db::{SettingRow, SettingsRepository as _};
+
+/// 生效配置解析：仓库行覆盖全局行；无设置时回退环境变量（开发期手段）。
+pub struct ResolvedLlm {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+async fn service_of(st: &AppState, scope: &str, slot: &str) -> (String, Option<serde_json::Value>, Option<String>) {
+    let binding = st.settings_repo.get(scope, &format!("slot.{slot}")).await.ok().flatten()
+        .and_then(|r| serde_json::from_str::<String>(&r.value).ok())
+        .unwrap_or_else(|| "default".into());
+    let base = st.settings_repo.get(scope, &format!("llm.service.{binding}")).await.ok().flatten()
+        .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.value).ok());
+    let key = st.settings_repo.get(scope, &format!("llm.service.{binding}.apiKey")).await.ok().flatten()
+        .and_then(|r| if r.encrypted { st.cipher.decrypt(&r.value).ok() } else { Some(r.value) })
+        .and_then(|v| serde_json::from_str::<String>(&v).ok());
+    (binding, base, key)
+}
+
+/// 生效配置解析：仓库行覆盖全局行；无设置时回退环境变量（开发期手段）。
+pub async fn resolve_llm(st: &AppState, repo_id: &str, slot: &str) -> ResolvedLlm {
+    // 仓库级优先，全局兜底；key 在仓库级没有时回落全局
+    let (mut binding, mut base, mut key) = service_of(st, repo_id, slot).await;
+    if base.is_none() {
+        let g = service_of(st, "global", slot).await;
+        binding = g.0;
+        base = g.1;
+        if key.is_none() { key = g.2; }
+    }
+    let _ = binding;
+    let obj = base.unwrap_or_default();
+    ResolvedLlm {
+        base_url: obj.get("baseUrl").and_then(|v| v.as_str()).map(Into::into)
+            .or_else(|| std::env::var("EASYVIBE_LLM_BASE_URL").ok())
+            .unwrap_or_else(|| "https://api.anthropic.com".into()),
+        api_key: key.or_else(|| std::env::var("EASYVIBE_LLM_API_KEY").ok()).unwrap_or_default(),
+        model: obj.get("model").and_then(|v| v.as_str()).map(Into::into)
+            .or_else(|| std::env::var("EASYVIBE_LLM_MODEL").ok())
+            .unwrap_or_else(|| "claude-sonnet-4-5".into()),
+    }
+}
+
+/// 敏感 key 规则：以 .apiKey / apiKey 结尾自动加密 at rest
+fn is_sensitive_key(key: &str) -> bool {
+    key.ends_with(".apiKey") || key.ends_with("apiKey")
+}
+
+async fn list_settings(State(st): State<AppState>, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Result<Response, AppError> {
+    let scope = q.get("scope").cloned().unwrap_or_else(|| "global".into());
+    let rows = st.settings_repo.list(&scope).await?;
+    let items: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            let value = if r.encrypted {
+                // 本地单机：解密返回供 UI 编辑（网络传输仅限 127.0.0.1）
+                st.cipher.decrypt(&r.value).unwrap_or_default()
+            } else {
+                r.value
+            };
+            serde_json::json!({
+                "key": r.key,
+                "value": serde_json::from_str::<serde_json::Value>(&value).unwrap_or(serde_json::Value::String(value)),
+                "encrypted": r.encrypted,
+                "updatedAt": r.updated_at,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct PutSettingRequest {
+    scope: String,
+    key: String,
+    value: serde_json::Value,
+}
+
+async fn put_setting(State(st): State<AppState>, Json(body): Json<PutSettingRequest>) -> Result<Response, AppError> {
+    if body.scope.is_empty() || body.key.is_empty() || body.key.contains('/') || body.key.contains("..") {
+        return Err(AppError(ApiError::BadRequest("非法 scope/key".into())));
+    }
+    let sensitive = is_sensitive_key(&body.key);
+    let raw = serde_json::to_string(&body.value).map_err(|e| AppError(ApiError::Internal(e.to_string())))?;
+    let (value, encrypted) = if sensitive {
+        (st.cipher.encrypt(&raw)?, true)
+    } else {
+        (raw, false)
+    };
+    st.settings_repo
+        .set(&SettingRow {
+            scope: body.scope,
+            key: body.key,
+            value,
+            encrypted,
+            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
+        })
+        .await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
+async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(String, String)>) -> Result<Response, AppError> {
+    st.settings_repo.delete(&scope, &key).await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
 #[derive(serde::Deserialize)]
 struct ChatHttpRequest {
     message: String,
@@ -273,11 +387,12 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
     let answer: easyvibe_ai_agent::QaAnswer = match *st.llm_mode {
         LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs).await?,
         LlmMode::Anthropic => {
-            let llm = easyvibe_ai_agent::AnthropicClient::new(
-                &std::env::var("EASYVIBE_LLM_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".into()),
-                &std::env::var("EASYVIBE_LLM_API_KEY").unwrap_or_default(),
-                &std::env::var("EASYVIBE_LLM_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".into()),
-            );
+            // M3-1：槽位配置解析（settings 库优先，env 兜底）
+            let cfg = resolve_llm(&st, &id, "chat").await;
+            if cfg.api_key.is_empty() {
+                return Err(AppError(ApiError::BadRequest("未配置 LLM API key（设置面板或 EASYVIBE_LLM_API_KEY）".into())));
+            }
+            let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
             easyvibe_ai_agent::LlmQaClient::new(llm).ask(&snap.json, &body.message, &pairs).await?
         }
     };
@@ -503,6 +618,28 @@ async fn main() {
     info!("域 2 状态库: {data_dir}/easyvibe.db");
     let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(database.pool().clone()));
     let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
+    let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(database.pool().clone()));
+
+    // 主密钥：EASYVIBE_MASTER_KEY（64 位十六进制）优先，否则数据目录 .master_key（0600，首次生成）
+    let cipher = {
+        let from_env = std::env::var("EASYVIBE_MASTER_KEY").ok().and_then(|hex| easyvibe_common::SecretCipher::from_hex_key(&hex).ok());
+        from_env.unwrap_or_else(|| {
+            let path = format!("{data_dir}/.master_key");
+            let hex = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+                let mut bytes = [0u8; 32];
+                getrandom::getrandom(&mut bytes).expect("主密钥生成失败");
+                let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                std::fs::write(&path, &hex).expect("写主密钥文件失败");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt as _;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+                hex
+            });
+            easyvibe_common::SecretCipher::from_hex_key(hex.trim()).expect("主密钥文件损坏")
+        })
+    };
 
     let llm_mode = if std::env::var("EASYVIBE_LLM_MODE").map(|v| v == "stub").unwrap_or(false) {
         LlmMode::Stub
@@ -523,6 +660,8 @@ async fn main() {
         agent_args: Arc::new(agent_args),
         patrol_service,
         health_repo,
+        settings_repo,
+        cipher: Arc::new(cipher),
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
         schema_path: Arc::new(schema_path),
@@ -548,6 +687,8 @@ mod tests {
         let db = easyvibe_db::Database::connect_memory().await.unwrap();
         let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(db.pool().clone()));
         let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
+        let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
+        let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {
             map_service: svc,
             session_manager: SessionManager::new(tx),
@@ -556,6 +697,8 @@ mod tests {
             agent_args: Arc::new(vec![]),
             patrol_service,
             health_repo,
+            settings_repo,
+            cipher: Arc::new(cipher),
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),

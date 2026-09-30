@@ -20,6 +20,8 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = "0.5"
+aes-gcm = "0.10"
+getrandom = "0.2"
 # 内部 crate
 easyvibe-common = { path = "crates/easyvibe-common" }
 easyvibe-api-types = { path = "crates/easyvibe-api-types" }
