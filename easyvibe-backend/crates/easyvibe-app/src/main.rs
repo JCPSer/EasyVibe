@@ -75,6 +75,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/freshness", get(get_freshness))
         .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
         .route("/repos/{id}/growth", get(get_growth))
+        .route("/repos/{id}/progress", get(get_progress))
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
@@ -180,6 +181,19 @@ fn progress_done_ago_secs(repo_root: &std::path::Path) -> Option<u64> {
     }
     let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
     Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
+}
+
+/// S2.5：归纳进度（progress.json 透传——首归纳等待页显示真实阶段/百分比，
+/// 不再只转圈；文件缺失（如巡检场景无 progress）返回 done 形状，前端不渲染进度）
+async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let path = repo.root.join(".easyvibe/map/progress.json");
+    if !path.exists() {
+        return Ok(Json(serde_json::json!({ "success": true, "data": null })).into_response());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| ApiError::Internal(format!("progress 读取失败: {e}")))?;
+    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("progress 解析失败: {e}")))?;
+    Ok(Json(serde_json::json!({ "success": true, "data": v })).into_response())
 }
 
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，

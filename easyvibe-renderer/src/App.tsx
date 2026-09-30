@@ -992,6 +992,59 @@ class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Err
   }
 }
 
+// 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
+function InductionWaiting({ repo }: { repo: string }) {
+  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
+  useEffect(() => {
+    let stale = false
+    const tick = () => {
+      fetch(`/api/repos/${repo}/progress`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d: { data: { phase: string; percent: number; modules_done: number; modules_total: number } | null }) => {
+          if (stale || !d.data) return
+          setProg({ phase: d.data.phase, percent: d.data.percent, modulesDone: d.data.modules_done, modulesTotal: d.data.modules_total })
+        })
+        .catch(() => {})
+    }
+    tick()
+    const t = window.setInterval(tick, 2000)
+    return () => {
+      stale = true
+      window.clearInterval(t)
+    }
+  }, [repo])
+
+  const PHASE_LABEL: Record<string, string> = {
+    init: '准备中',
+    layering: '分层分析',
+    module_scan: '模块扫描',
+    emit: '模块归纳',
+    edging: '依赖边推导',
+    consistency: '一致性校验',
+    finalize: '收尾写盘',
+    done: '完成',
+  }
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-3 text-[13px] text-slate-500">
+      <Loader2 size={18} className="animate-spin text-blue-500" />
+      <span className="font-semibold text-slate-700">
+        正在归纳代码地图{prog ? `：${PHASE_LABEL[prog.phase] ?? prog.phase} ${prog.percent}%` : '…'}
+      </span>
+      {prog && (
+        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-blue-500 transition-all duration-700" style={{ width: `${prog.percent}%` }} />
+        </div>
+      )}
+      <span className="max-w-[420px] text-center text-[11px] leading-4 text-slate-400">
+        {prog && prog.modulesTotal > 0
+          ? `已归纳 ${prog.modulesDone}/${prog.modulesTotal} 个模块`
+          : '后台 agent 执行中（通常数分钟，取决于仓库规模）'}
+        ，完成后地图会自动出现
+      </span>
+    </div>
+  )
+}
+
 export default function App() {
   const [map, setMap] = useState<CodeMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1094,13 +1147,7 @@ export default function App() {
   }
   if ((error && backendRepo) || (!map && backendRepo)) {
     // 后端在线但地图尚未生成：归纳进行中，map.changed 会触发自动重试
-    return (
-      <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
-        <Loader2 size={16} className="animate-spin text-blue-500" />
-        <span className="font-semibold text-slate-700">正在归纳代码地图…</span>
-        <span className="text-[11px] text-slate-400">后台 agent 执行中（通常数分钟，取决于仓库规模）——完成后地图会自动出现；之后可点头部"生长演示"回放生成过程</span>
-      </div>
-    )
+    return <InductionWaiting repo={backendRepo} />
   }
   if (!map) {
     return (
