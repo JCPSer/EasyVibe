@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { ChevronDown, Loader2, RotateCcw, UnfoldVertical, AlertTriangle } from 'lucide-react'
+import { ChevronDown, Loader2, RotateCcw, UnfoldVertical, AlertTriangle, Search} from 'lucide-react'
 import type { Module } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 
@@ -13,6 +13,7 @@ export type ExpandedModuleNodeType = Node<
     error: boolean
     subCount: number
     onRetry?: () => void
+  onAnalyze?: () => void
   },
   'moduleExpanded'
 >
@@ -67,7 +68,20 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
           </span>
         ) : data.error ? (
           <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-red-500">
-            <AlertTriangle size={11} /> 子图加载失败
+            <AlertTriangle size={11} />
+            {data.onAnalyze ? '暂无内部结构分析' : '子图加载失败'}
+            {data.onAnalyze && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  data.onAnalyze!()
+                }}
+                className="flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-600 hover:bg-blue-100"
+                title="派 agent 深入扫描该模块的文件，生成内部结构子图（约 1-3 分钟）"
+              >
+                <Search size={9} /> 深入分析
+              </button>
+            )}
             {data.onRetry && (
               <button
                 onClick={(e) => {

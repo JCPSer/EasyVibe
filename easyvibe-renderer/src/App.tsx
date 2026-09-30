@@ -55,6 +55,7 @@ function buildFlow(
   onSelectLayer: (id: string) => void,
   retrySubmap?: (id: string) => void,
   growth?: { layers: Set<string>; modules: Set<string> } | null,
+  analyzeSubmap?: (id: string) => void,
 ) {
   // 展开元信息：加载中给 4 个骨架位
   const expandedMeta = new Map<string, { ids: string[]; loading: boolean }>()
@@ -134,6 +135,7 @@ function buildFlow(
             error: sm === 'error',
             subCount: sm === 'loading' || sm === 'error' ? 0 : sm.sub_modules.length,
             onRetry: retrySubmap ? () => retrySubmap(mod.id) : undefined,
+            onAnalyze: analyzeSubmap ? () => analyzeSubmap(mod.id) : undefined,
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,

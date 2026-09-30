@@ -17,6 +17,7 @@ EASYVIBE_REPO="$REPO" \
 EASYVIBE_PROMPT_PATH=$ROOT/easyvibe-map-prompt-v2.2.md \
 EASYVIBE_PATROL_PROMPT_PATH=$ROOT/easyvibe-map-patrol-prompt.md \
 EASYVIBE_SCHEMA_PATH=$ROOT/easyvibe-map-schema-v1.json \
+EASYVIBE_SUBMAP_PROMPT_PATH=$ROOT/easyvibe-module-submap-prompt.md \
 cargo run &
 
 sleep 3

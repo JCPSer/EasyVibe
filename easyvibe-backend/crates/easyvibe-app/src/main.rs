@@ -42,6 +42,8 @@ pub struct AppState {
     pub harness: Arc<tokio::sync::RwLock<task_exec::Harness>>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
+    /// 子图分析提示词模板（含 <REPO_ROOT>/<MODULE_ID>/<MODULE_JSON> 占位）
+    pub submap_prompt: Arc<String>,
     pub schema_path: Arc<String>,
     /// 后端 → 前端事件总线（broadcast；WS handler 订阅）
     pub event_bus: broadcast::Sender<BusEvent>,
@@ -74,6 +76,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/map", get(get_map))
         .route("/repos/{id}/freshness", get(get_freshness))
         .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
+        .route("/repos/{id}/modules/{module_id}/analyze-submap", axum::routing::post(analyze_submap))
         .route("/repos/{id}/growth", get(get_growth))
         .route("/repos/{id}/progress", get(get_progress))
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
@@ -194,6 +197,32 @@ async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Res
     let raw = std::fs::read_to_string(&path).map_err(|e| ApiError::Internal(format!("progress 读取失败: {e}")))?;
     let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("progress 解析失败: {e}")))?;
     Ok(Json(serde_json::json!({ "success": true, "data": v })).into_response())
+}
+
+/// 子图深入分析（试用反馈"子图加载失败"根因修复——v2.2 归纳不产子图，文件无人生产；
+/// 此处把缺口变为能力：透明 agent 扫描模块文件产出子图，落盘 .easyvibe/modules/<id>.json，
+/// 与归纳共用写互斥/会话机制。读时拉取无需 watcher，产出后重新展开即见）
+async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let module = snap.json["modules"]
+        .as_array()
+        .and_then(|ms| ms.iter().find(|m| m["id"].as_str() == Some(module_id.as_str())).cloned())
+        .ok_or_else(|| ApiError::NotFound(format!("模块 {module_id} 不在主地图中")))?;
+    let prompt = st
+        .submap_prompt
+        .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
+        .replace("<MODULE_ID>", &module_id)
+        .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());
+    let session = st
+        .session_manager
+        .start_induction(&repo.id, &repo.root, &prompt, &st.agent_command, &st.agent_args)
+        .await?;
+    info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
+    Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
@@ -1174,6 +1203,10 @@ async fn main() {
     )
     .expect("巡检提示词模板不可读（用 EASYVIBE_PATROL_PROMPT_PATH 指定）");
     let schema_path = std::env::var("EASYVIBE_SCHEMA_PATH").unwrap_or_else(|_| "easyvibe-map-schema-v1.json".into());
+    let submap_prompt = std::fs::read_to_string(
+        std::env::var("EASYVIBE_SUBMAP_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-module-submap-prompt.md".into()),
+    )
+    .expect("子图分析提示词不可读（用 EASYVIBE_SUBMAP_PROMPT_PATH 指定）");
 
     // M3-3/S1-3：harness 插槽内核装载（manifest 驱动 + 出厂底账补齐）+ 任务执行引擎 + pending 恢复
     let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
@@ -1254,6 +1287,7 @@ async fn main() {
         harness: harness.clone(),
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
+        submap_prompt: Arc::new(submap_prompt),
         schema_path: Arc::new(schema_path),
         event_bus,
     };
@@ -1339,6 +1373,7 @@ mod tests {
             harness,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
+            submap_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),
             event_bus: bus,
         }
