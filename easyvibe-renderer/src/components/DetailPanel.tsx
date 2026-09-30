@@ -421,7 +421,10 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
           <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
         </div>
-        {tab === 'suggest' && <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />}
+        {/* 常驻挂载 + CSS 隐藏：切页签不重分析、不丢结果（试用反馈#2——此前每次切换都重新调 LLM 浪费 token） */}
+        <div className={tab === 'suggest' ? 'h-full' : 'hidden h-full'}>
+          <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />
+        </div>
         {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} />}
         {tab === 'views' && (
           <ViewsPanel

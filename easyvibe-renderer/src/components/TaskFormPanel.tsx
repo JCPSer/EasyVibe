@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight} from 'lucide-react'
+import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight, Crosshair} from 'lucide-react'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { Module } from '@/types/map'
 
@@ -10,10 +10,12 @@ interface Props {
   onClose: () => void
   /** S1-5：创建成功后的引导（默认前往任务页签） */
   onCreated?: () => void
+  /** 试用反馈#3：影响模块与地图联动——点定位按钮画布飞过去看 */
+  onLocateModule?: (id: string) => void
 }
 
 // 任务表单（任务表单原型.png 的实现）：三字段极简 + 上下文注入预览 + 审批两档
-export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated }: Props) {
+export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onLocateModule }: Props) {
   const [description, setDescription] = useState(draft.description)
   const [acceptance, setAcceptance] = useState(draft.acceptance)
   const [selected, setSelected] = useState<string[]>(draft.modules)
@@ -101,17 +103,27 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated }: P
           <label className="mb-1 block text-[11px] font-semibold text-slate-500">影响模块（从地图选择）</label>
           <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 p-2.5">
             {map.modules.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => toggleModule(m.id)}
-                className={`rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition-colors ${
-                  selected.includes(m.id)
-                    ? 'border-blue-300 bg-blue-50 text-blue-700'
-                    : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
-                }`}
-              >
-                {m.name}
-              </button>
+              <span key={m.id} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => toggleModule(m.id)}
+                  className={`rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition-colors ${
+                    selected.includes(m.id)
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {m.name}
+                </button>
+                {onLocateModule && (
+                  <button
+                    onClick={() => onLocateModule(m.id)}
+                    className="rounded-full p-0.5 text-slate-300 hover:text-blue-500"
+                    title="在画布中定位该模块"
+                  >
+                    <Crosshair size={9} />
+                  </button>
+                )}
+              </span>
             ))}
           </div>
         </div>

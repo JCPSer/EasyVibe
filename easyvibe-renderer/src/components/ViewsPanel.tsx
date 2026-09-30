@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, ExternalLink, Trash2, Bookmark, Check } from 'lucide-react'
+import { MarkdownMessage } from '@/components/MarkdownMessage'
 
 interface ViewItem {
   slug: string
@@ -8,7 +9,7 @@ interface ViewItem {
   nodes: number
   view: {
     nodes?: { ref: string }[]
-    annotations?: { note?: string }[]
+    annotations?: { note?: string; type?: string; content?: string }[]
   }
 }
 
@@ -108,6 +109,7 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
       {views.map((v) => {
         const moduleIds = (v.view.nodes ?? []).map((n) => n.ref.replace(/^module:/, '')).filter(Boolean)
         const note = v.view.annotations?.find((a) => a.note)?.note
+        const mermaid = v.view.annotations?.find((a) => a.type === 'mermaid' && a.content)?.content
         return (
           <div key={v.slug} className="rounded-lg border border-slate-200 p-3">
             <div className="flex items-center gap-1.5">
@@ -131,6 +133,16 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
                   </span>
                 )}
               </div>
+            )}
+            {mermaid && (
+              <details className="mt-1.5 rounded-md border border-slate-100 bg-white p-1.5">
+                <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                  附：对话生成的流程图
+                </summary>
+                <div className="mt-1 max-h-72 overflow-auto">
+                  <MarkdownMessage content={mermaid} />
+                </div>
+              </details>
             )}
             <div className="mt-2 flex items-center gap-2">
               <button

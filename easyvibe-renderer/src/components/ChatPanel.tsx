@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -38,6 +38,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [savedIdx, setSavedIdx] = useState<number | null>(null)
   const [compacting, setCompacting] = useState(false)
   const [clarify, setClarify] = useState<Clarify | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   // 恢复会话（M3-5：历史从域 2 读，完整原文含压缩留痕）
@@ -76,10 +77,14 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     // 服务端为事实源：只发当前消息，历史由后端从库装配（摘要+未压缩窗口）
     setClarify(null)
     setMessages((prev) => [...prev, { role: 'user', content: q, refs: [] }])
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: q }),
+      signal: ac.signal,
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
@@ -96,10 +101,19 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         ])
         setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
       })
-      .catch(() => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '（对话服务不可用：需要本地后端在线）', refs: [] }])
+      .catch((e) => {
+        if (ac.signal.aborted) {
+          setMessages((prev) => [...prev, { role: 'system', content: '已停止生成（后端调用已发出，token 已计费）', refs: [] }])
+        } else {
+          setMessages((prev) => [...prev, { role: 'assistant', content: `（对话服务不可用：${String(e).slice(0, 80)}）`, refs: [] }])
+        }
       })
-      .finally(() => setSending(false))
+      .finally(() => {
+        if (abortRef.current === ac) {
+          abortRef.current = null
+          setSending(false)
+        }
+      })
   }
 
   // 手动压缩（§10a：压缩上下文按钮；自动阈值兜底之外的主动手段）
@@ -174,7 +188,12 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         name,
         nodes: m.refs.map((id) => `module:${id}`),
         edges: [],
-        annotations: [{ ref: 'conversation', note: q }],
+        annotations: [
+          { ref: 'conversation', note: q },
+          // 试用反馈#5：回答里的流程图（mermaid）随视图保存——视图成为"用户创建的图"资产，
+          // 打开视图可直接看到流程图，而不只是定位已有模块
+          ...(m.content.match(/```mermaid[\s\S]*?```/g) ?? []).map((content) => ({ type: 'mermaid', content, note: q })),
+        ],
       }),
     })
       .then((r) => {
@@ -325,13 +344,23 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
           disabled={!backendRepo || sending}
           className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300 disabled:opacity-50"
         />
-        <button
-          onClick={send}
-          disabled={!backendRepo || sending || !input.trim()}
-          className="rounded-lg bg-blue-600 p-2.5 text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
-        >
-          <Send size={14} />
-        </button>
+        {sending ? (
+          <button
+            onClick={() => abortRef.current?.abort()}
+            className="rounded-lg border border-red-200 p-2.5 text-red-600 transition-colors hover:bg-red-50"
+            title="停止等待本次回答"
+          >
+            <Square size={13} />
+          </button>
+        ) : (
+          <button
+            onClick={send}
+            disabled={!backendRepo || !input.trim()}
+            className="rounded-lg bg-blue-600 p-2.5 text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
+          >
+            <Send size={14} />
+          </button>
+        )}
       </div>
     </div>
   )

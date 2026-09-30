@@ -939,6 +939,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
           map={map}
           onClose={() => setTaskDraft(null)}
           onCreated={() => setTab('tasks')}
+          onLocateModule={focusModule}
         />
       )}
 

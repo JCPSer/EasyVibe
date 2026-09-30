@@ -124,25 +124,38 @@ export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLo
               {issue.suggestion}
             </p>
 
-            {issue.moduleId && (
-              <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5 flex items-center gap-2">
+              {issue.moduleId && (
                 <span className="flex items-center gap-1 text-[10px] font-medium text-blue-500">
                   <Crosshair size={10} /> 点击定位到画布
                 </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (issue.moduleId) {
                     const mod = map.modules.find((m) => m.id === issue.moduleId)
                     const concern = mod?.health.concerns?.find((c) => c.finding === issue.finding)
                     if (mod) onCreateTask(concern ? buildConcernTask(map, mod.id, concern, 0) : buildConcernTask(map, mod.id, { severity: issue.severity, finding: issue.finding, suggestion: issue.suggestion }, 0))
-                  }}
-                  className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700"
-                  title="指哪打哪：以该问题为上下文发起修复任务"
-                >
-                  <Wrench size={9} /> 修复
-                </button>
-              </div>
-            )}
+                  } else {
+                    // 架构级问题：以最低分模块为切入点 + 注入架构级 finding（试用反馈#1：架构级没有修复按钮）
+                    const worst = [...map.modules].sort((a, b) => a.health.score - b.health.score).slice(0, 3)
+                    onCreateTask({
+                      title: `架构治理：${issue.finding.slice(0, 24)}`,
+                      description: `【架构级问题】${issue.finding}\n建议：${issue.suggestion}`,
+                      modules: worst.map((m) => m.id),
+                      acceptance: '按建议完成后，架构级问题不再复现（复检可验证趋势）',
+                      source: 'concern',
+                      context: { inject: { archConcern: { severity: issue.severity, finding: issue.finding, suggestion: issue.suggestion }, modules: worst.map((m) => ({ id: m.id, name: m.name, score: m.health.score })) } },
+                    })
+                  }
+                }}
+                className={`flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700 ${issue.moduleId ? 'ml-auto' : ''}`}
+                title="指哪打哪：以该问题为上下文发起修复任务"
+              >
+                <Wrench size={9} /> 修复
+              </button>
+            </div>
           </div>
         ))}
       </div>

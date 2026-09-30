@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Wrench, RefreshCw, Lightbulb } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import type { Suggestion } from '@/lib/taskContext'
@@ -21,19 +21,37 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
   const [items, setItems] = useState<Suggestion[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 试用反馈#2：可打断——AbortController；后端 LLM 调用仍跑完（成本已发生），前端不再等待
+  const abortRef = useRef<AbortController | null>(null)
+
+  const stop = () => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
+  }
 
   const load = () => {
-    if (!backendRepo) return
+    if (!backendRepo || loading) return
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
     setLoading(true)
     setError(null)
-    fetch(`/api/repos/${backendRepo}/suggest`, { method: 'POST' })
+    fetch(`/api/repos/${backendRepo}/suggest`, { method: 'POST', signal: ac.signal })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
       })
       .then((d: { data: Suggestion[] }) => setItems(d.data))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false))
+      .catch((e) => {
+        if (!ac.signal.aborted) setError(String(e))
+      })
+      .finally(() => {
+        if (abortRef.current === ac) {
+          abortRef.current = null
+          setLoading(false)
+        }
+      })
   }
 
   useEffect(() => {
@@ -50,20 +68,31 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
           </h2>
           <p className="mt-0.5 text-[10.5px] text-slate-400">AI 主动发现的优化机会，逐条可发起修复任务</p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading || !backendRepo}
-          className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-        >
-          <RefreshCw size={10} className={loading ? 'animate-spin' : ''} /> 刷新
-        </button>
+        <div className="flex items-center gap-1.5">
+          {loading && (
+            <button
+              onClick={stop}
+              className="flex items-center gap-1 rounded-full border border-red-200 px-2.5 py-1 text-[10.5px] font-semibold text-red-600 hover:bg-red-50"
+              title="停止等待（后端 LLM 调用已发出，成本已发生；不再等待结果）"
+            >
+              停止
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading || !backendRepo}
+            className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+          >
+            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} /> {loading ? '分析中' : '刷新'}
+          </button>
+        </div>
       </div>
 
       {!backendRepo && <p className="py-6 text-center text-[11.5px] text-slate-400">需要本地后端在线</p>}
       {error && <p className="py-6 text-center text-[11.5px] text-red-500">建议生成失败：{error}</p>}
-      {loading && (
+      {loading && items === null && (
         <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-slate-400">
-          <Loader2 size={14} className="animate-spin" /> 正在分析地图…
+          <Loader2 size={14} className="animate-spin" /> 正在分析地图…（结果会保留，切页签不会重分析）
         </div>
       )}
       {items && !loading && items.length === 0 && <p className="py-6 text-center text-[11.5px] text-slate-400">当前地图没有可建议的优化项，保持得很好。</p>}
