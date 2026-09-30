@@ -238,6 +238,22 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     }, 50)
   }
 
+  // D2 拍板：导出并清空——留痕承诺不自动清，由用户显式"导出归档 → 清空"
+  const exportAndClear = () => {
+    exportChat()
+    setTimeout(() => {
+      if (!window.confirm('已导出。清空当前对话？（清空后不可恢复，视图文件不受影响）')) return
+      fetch(`/api/repos/${backendRepo}/chat/reset`, { method: 'POST' })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status))
+          setMessages([])
+          setUsage({ promptTokens: 0, completionTokens: 0 })
+          toast('对话已清空（归档文件已下载）')
+        })
+        .catch(() => toast('清空失败（需要本地后端在线）', 'error'))
+    }, 400)
+  }
+
   // 导出对话为 Markdown（§12d 兑现之一：对话含 mermaid 图，可直接评审/沉淀）
   const exportChat = () => {
     const md = [
@@ -314,13 +330,13 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         </span>
         <div className="flex items-center gap-1">
           <button
-            onClick={exportChat}
+            onClick={exportAndClear}
             disabled={!backendRepo || messages.length === 0}
             className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-            title="导出全部对话为 Markdown（含 mermaid 图，可评审/沉淀）"
+            title="导出为 Markdown 后可清空会话（D2 拍板：留痕照旧，清理显式）"
           >
             <Download size={10} />
-            导出
+            导出/清空
           </button>
           <button
             onClick={upgradeToTask}

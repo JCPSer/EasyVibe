@@ -429,7 +429,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         <div className={tab === 'suggest' ? 'h-full' : 'hidden h-full'}>
           <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />
         </div>
-        {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} />}
+        {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} onCreateTask={onCreateTask} />}
         {tab === 'views' && (
           <ViewsPanel
             backendRepo={backendRepo}

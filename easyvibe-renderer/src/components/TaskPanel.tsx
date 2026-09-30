@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/lib/toast'
-import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw} from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw, Copy} from 'lucide-react'
 import { onTaskEvent, onSessionOutput } from '@/lib/growthBus'
+import type { TaskDraft } from '@/lib/taskContext'
 
 interface TaskResult {
   result?: { summary?: string; changed_modules?: string[] } | null
@@ -28,6 +29,8 @@ interface TaskItem {
 
 interface Props {
   backendRepo: string | null
+  /** D3 拍板：驳回即终局 + "复制为新任务"（不重开旧任务，守一任务一条河） */
+  onCreateTask?: (draft: TaskDraft) => void
 }
 
 const GATE_LABEL: Record<string, string> = { plan: '① 计划审批', diff: '② Diff 审批', report: '③ 审查报告' }
@@ -43,7 +46,7 @@ const STATUS_STYLE: Record<string, { cls: string; label: string }> = {
 }
 
 // 任务列表 + 审批操作（审批中心的数据面；Diff 可视化按审批中心原型是 M3-4 后续增强）
-export function TaskPanel({ backendRepo }: Props) {
+export function TaskPanel({ backendRepo, onCreateTask }: Props) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -200,6 +203,24 @@ export function TaskPanel({ backendRepo }: Props) {
                 <span className="font-semibold text-slate-500">验收标准：</span>
                 {t.acceptance}
               </p>
+            )}
+            {t.status === 'rejected' && onCreateTask && (
+              <button
+                onClick={() =>
+                  onCreateTask({
+                    title: `${t.title}（重提）`,
+                    description: t.description,
+                    modules: t.modules ?? [],
+                    acceptance: t.acceptance ?? '',
+                    source: 'manual',
+                    context: {},
+                  })
+                }
+                className="mt-1.5 flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-50"
+                title="以本任务为模板创建新任务（原驳回记录保留，D3 拍板）"
+              >
+                <Copy size={9} /> 复制为新任务
+              </button>
             )}
             {/* M4-1：终态采集产物——agent 总结 + 变更摘要（diff 关审批的"改了什么"） */}
             {t.result && (
