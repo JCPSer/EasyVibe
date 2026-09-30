@@ -4,3 +4,4 @@ easyvibe-renderer/dist/
 
 # Rust
 /easyvibe-backend/target
+node_modules/
