@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -39,6 +39,9 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [compacting, setCompacting] = useState(false)
   const [clarify, setClarify] = useState<Clarify | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // 附件：文本类文件内容随消息注入（代码/日志/文档片段）；单文件 50KB、最多 3 个
+  const [attachments, setAttachments] = useState<{ name: string; size: number; content: string }[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   // 恢复会话（M3-5：历史从域 2 读，完整原文含压缩留痕）
@@ -69,6 +72,23 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     }
   }, [backendRepo])
 
+  const addFiles = (files: FileList | null) => {
+    if (!files) return
+    for (const f of Array.from(files).slice(0, 3 - attachments.length)) {
+      if (f.size > 50 * 1024) {
+        alert(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`)
+        continue
+      }
+      const reader = new FileReader()
+      reader.onload = () => {
+        const content = String(reader.result ?? '')
+        setAttachments((prev) => [...prev, { name: f.name, size: f.size, content }])
+      }
+      reader.readAsText(f)
+    }
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
   const send = () => {
     const q = input.trim()
     if (!q || sending || !backendRepo) return
@@ -76,14 +96,21 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     setSending(true)
     // 服务端为事实源：只发当前消息，历史由后端从库装配（摘要+未压缩窗口）
     setClarify(null)
-    setMessages((prev) => [...prev, { role: 'user', content: q, refs: [] }])
+    const withAttach =
+      attachments.length > 0
+        ? q +
+          '\n\n' +
+          attachments.map((a) => `--- 附件：${a.name}（${(a.size / 1024).toFixed(1)}KB）---\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
+        : q
+    setMessages((prev) => [...prev, { role: 'user', content: withAttach, refs: [] }])
+    setAttachments([])
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: q }),
+      body: JSON.stringify({ message: withAttach }),
       signal: ac.signal,
     })
       .then((r) => {
@@ -329,7 +356,35 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         )}
       </div>
 
+      {attachments.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {attachments.map((a, i) => (
+            <span key={i} className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] text-blue-700">
+              <Paperclip size={9} />
+              {a.name}（{(a.size / 1024).toFixed(0)}KB）
+              <button onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))} className="text-blue-300 hover:text-red-500">
+                <XIcon size={9} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-3 flex items-end gap-2 border-t border-slate-100 pt-3">
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => addFiles(e.target.files)}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={!backendRepo || attachments.length >= 3}
+          className="rounded-lg border border-slate-200 p-2.5 text-slate-400 transition-colors hover:text-blue-600 disabled:opacity-40"
+          title="添加附件（代码/日志/文档文本，≤50KB×3）——内容随消息一起发给 AI"
+        >
+          <Paperclip size={14} />
+        </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
