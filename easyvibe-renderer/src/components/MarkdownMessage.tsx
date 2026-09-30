@@ -14,12 +14,24 @@ const MermaidBlock = memo(function MermaidBlock({ chart }: { chart: string }) {
         if (cancelled || !ref.current) return
         mermaid.default.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
         const id = `mmd-${Math.random().toString(36).slice(2, 9)}`
+        // 语法预检：模型生成的 mermaid 常有语法错误——parse 失败直接回退代码块。
+        // 不能跳过这步直接 render：mermaid 12 render 失败时会向 body 塞入裸错误节点
+        // （"Syntax error in text"炸弹图挂在页面底部，试用现场实证）
+        try {
+          mermaid.default.parse(chart)
+        } catch {
+          if (!cancelled) setFailed(true)
+          return
+        }
         mermaid.default
           .render(id, chart)
           .then(({ svg }) => {
             if (!cancelled && ref.current) ref.current.innerHTML = svg
           })
-          .catch(() => setFailed(true))
+          .catch(() => {
+            document.getElementById(id)?.remove() // 清理 mermaid 塞到 body 的错误节点
+            if (!cancelled) setFailed(true)
+          })
       })
       .catch(() => setFailed(true))
     return () => {
