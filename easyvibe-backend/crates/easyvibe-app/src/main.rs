@@ -77,6 +77,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
         .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
         .route("/repos/{id}/views", get(list_views).post(save_view))
+        .route("/repos/{id}/views/{slug}", axum::routing::delete(delete_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
@@ -736,6 +737,23 @@ async fn list_views(State(st): State<AppState>, Path(id): Path<String>) -> Resul
     Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
 }
 
+/// 删除视图（F1b 读侧闭环）：slug 复用保存时的安全字符集，防线同 save_view
+async fn delete_view(State(st): State<AppState>, Path((id, slug)): Path<(String, String)>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let safe: String = slug
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
+        .collect();
+    if safe.is_empty() || safe != slug {
+        return Err(AppError(ApiError::BadRequest("非法视图标识".into())));
+    }
+    let path = repo.root.join(".easyvibe/views").join(format!("{safe}.json"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| ApiError::Internal(format!("删除视图失败: {e}")))?;
+    }
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
 /// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
 async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<SaveViewRequest>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
@@ -1217,6 +1235,65 @@ mod tests {
         // 摘要非空且 stub 诚实标注
         let summary = data["summary"].as_str().unwrap().to_string();
         assert!(summary.contains("stub"), "stub 模式压缩应诚实标注: {summary}");
+    }
+
+    #[tokio::test]
+    async fn views_roundtrip_create_list_delete() {
+        let (state, repo) = chat_state("views-crud").await;
+        let dir = std::env::temp_dir().join("ev-chat-test-views-crud/.easyvibe/views");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("我的视图.json"),
+            r#"{"version":"1.0","name":"我的视图","created_at":"2026-09-30","nodes":[{"ref":"module:m1"}],"edges":[],"annotations":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("second.json"),
+            r#"{"version":"1.0","name":"second","created_at":"2026-09-29","nodes":[],"edges":[],"annotations":[]}"#,
+        )
+        .unwrap();
+        let app = build_router(state);
+        let get = |app: axum::Router, path: &str| {
+            let path = path.to_string();
+            async move {
+                let resp = app.oneshot(axum::http::Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+            }
+        };
+        // 列表：按 createdAt 倒序，中文 slug 可读
+        let d = get(app.clone(), &format!("/api/repos/{repo}/views")).await;
+        let items = d["data"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["slug"], "我的视图", "倒序：新者在前");
+        assert_eq!(items[0]["nodes"], 1);
+        // 删除：确认语义——删后列表减一
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::delete(format!("/api/repos/{repo}/views/{}", urlencoding_encode("second")))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let d = get(app.clone(), &format!("/api/repos/{repo}/views")).await;
+        assert_eq!(d["data"].as_array().unwrap().len(), 1);
+        // 非法 slug（路径遍历企图）→ 400
+        let resp = app
+            .oneshot(
+                axum::http::Request::delete(format!("/api/repos/{repo}/views/..%2F..%2Fetc"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    fn urlencoding_encode(s: &str) -> String {
+        s.bytes().map(|b| format!("%{:02X}", b)).collect()
     }
 
     #[tokio::test]
