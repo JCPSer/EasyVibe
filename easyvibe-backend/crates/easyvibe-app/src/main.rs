@@ -32,6 +32,7 @@ pub struct AppState {
     pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+    pub executor: Arc<task_exec::TaskExecutor>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
     pub schema_path: Arc<String>,
@@ -405,9 +406,10 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string();
     let task_id = format!("task-{}", &now);
+    let repo_id = repo.id.clone();
     let row = easyvibe_db::TaskRow {
         id: task_id.clone(),
-        repo: repo.id,
+        repo: repo_id.clone(),
         title: body.title,
         description: body.description,
         modules: serde_json::to_string(&body.modules).unwrap_or_else(|_| "[]".into()),
@@ -421,6 +423,8 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         updated_at: now,
     };
     st.task_repo.create(&row).await?;
+    // M3-3：入队执行（harness 引擎；并发上限 4，审批门 M3-4 接入）
+    st.executor.clone().enqueue_pending(Some(&repo_id)).await;
     Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "success": true, "data": { "id": task_id } }))).into_response())
 }
 
@@ -598,6 +602,8 @@ impl IntoResponse for AppError {
     }
 }
 
+mod task_exec;
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().with_env_filter("info").init();
@@ -751,6 +757,20 @@ async fn main() {
     .expect("巡检提示词模板不可读（用 EASYVIBE_PATROL_PROMPT_PATH 指定）");
     let schema_path = std::env::var("EASYVIBE_SCHEMA_PATH").unwrap_or_else(|_| "easyvibe-map-schema-v1.json".into());
 
+    // M3-3：harness 装载（路径换姓）+ 任务执行引擎 + pending 恢复
+    let workspace_ref = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../reference");
+    let (_harness_dir, framework) = task_exec::load_harness(&workspace_ref).expect("harness 装载失败");
+    info!("harness: {}", _harness_dir.display());
+    let executor = task_exec::TaskExecutor::new(
+        task_repo.clone(),
+        session_manager.clone(),
+        map_service.clone(),
+        Arc::new(framework),
+        Arc::new(agent_command.clone()),
+        Arc::new(agent_args.clone()),
+    );
+    executor.enqueue_pending(None).await;
+
     let state = AppState {
         map_service,
         session_manager,
@@ -762,6 +782,7 @@ async fn main() {
         settings_repo,
         cipher: Arc::new(cipher),
         task_repo,
+        executor,
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
         schema_path: Arc::new(schema_path),
@@ -783,16 +804,25 @@ mod tests {
         let svc = MapService::new(vec![]);
         let (bus, _) = broadcast::channel(8);
         let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let session_manager = SessionManager::new(tx);
         // 巡检槽位用内存库（测试不落盘）
         let db = easyvibe_db::Database::connect_memory().await.unwrap();
         let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(db.pool().clone()));
         let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
         let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
         let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let executor = task_exec::TaskExecutor::new(
+            task_repo.clone(),
+            session_manager.clone(),
+            svc.clone(),
+            Arc::new("框架".into()),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+        );
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {
             map_service: svc,
-            session_manager: SessionManager::new(tx),
+            session_manager,
             prompt_template: Arc::new("test".into()),
             agent_command: Arc::new("true".into()),
             agent_args: Arc::new(vec![]),
@@ -801,6 +831,7 @@ mod tests {
             settings_repo,
             cipher: Arc::new(cipher),
             task_repo,
+            executor,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),
