@@ -921,6 +921,14 @@ async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body
     } else {
         slug
     };
+    // 试用深挖#D：同名视图静默覆盖旧图（数据丢失）——冲突时追加短后缀
+    let view_path = repo.root.join(".easyvibe/views").join(format!("{slug}.json"));
+    let slug = if view_path.exists() {
+        let suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() % 100000).unwrap_or(0);
+        format!("{slug}-{suffix}")
+    } else {
+        slug
+    };
     let view = serde_json::json!({
         "version": "1.0",
         "name": body.name,

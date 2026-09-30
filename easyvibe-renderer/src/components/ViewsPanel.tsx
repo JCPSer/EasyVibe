@@ -27,6 +27,7 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [openedSlug, setOpenedSlug] = useState<string | null>(null)
+  const [zoomed, setZoomed] = useState<{ name: string; content: string } | null>(null)
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -142,6 +143,12 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
                 <div className="mt-1 max-h-72 overflow-auto">
                   <MarkdownMessage content={mermaid} />
                 </div>
+                <button
+                  onClick={() => setZoomed({ name: v.name, content: mermaid })}
+                  className="mt-1 rounded-full border border-slate-200 px-2 py-0.5 text-[9.5px] text-slate-500 hover:bg-slate-50"
+                >
+                  放大查看
+                </button>
               </details>
             )}
             <div className="mt-2 flex items-center gap-2">
@@ -186,6 +193,22 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
           </div>
         )
       })}
+      {/* 深挖#B/E：流程图大图查看——340px 卡片里字小看不清，放大到全屏 */}
+      {zoomed && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-6" onClick={() => setZoomed(null)}>
+          <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[13px] font-bold text-slate-800">{zoomed.name}</span>
+              <button onClick={() => setZoomed(null)} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-500 hover:bg-slate-200">
+                关闭
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <MarkdownMessage content={zoomed.content} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

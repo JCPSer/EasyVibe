@@ -38,6 +38,8 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [savedIdx, setSavedIdx] = useState<number | null>(null)
+  const [namingIdx, setNamingIdx] = useState<number | null>(null)
+  const [viewName, setViewName] = useState('')
   const [compacting, setCompacting] = useState(false)
   const [clarify, setClarify] = useState<Clarify | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -233,7 +235,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const saveAsView = (idx: number) => {
     const m = messages[idx]
     const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
-    const name = q.slice(0, 24)
+    const name = (viewName.trim() || q).slice(0, 40)
     fetch(`/api/repos/${backendRepo}/views`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -252,6 +254,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setSavedIdx(idx)
+        setNamingIdx(null)
         setTimeout(() => setSavedIdx(null), 2500)
       })
       .catch(() => alert('存视图失败（需要本地后端在线）'))
@@ -322,7 +325,7 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
                   <img key={j} src={im.dataUrl} alt={im.name} className="mb-1.5 max-h-40 rounded-lg" />
                 ))}
                 <MarkdownMessage content={m.content} />
-                {m.role === 'assistant' && m.refs.length > 0 && (
+                {(m.role === 'assistant' || m.role === 'user') && (m.refs.length > 0 || /```mermaid/.test(m.content)) && (
                   <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
                     {m.refs.map((id) => (
                       <button
@@ -335,14 +338,42 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
                         {id}
                       </button>
                     ))}
-                    <button
-                      onClick={() => saveAsView(i)}
-                      className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
-                      title="把本回答引用的实体存为可复用视图（.easyvibe/views/）"
-                    >
-                      {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
-                      {savedIdx === i ? '已存视图' : '存为视图'}
-                    </button>
+                    {namingIdx === i ? (
+                      /* 深挖#C：存图命名——多张视图靠问题截断无法区分，存前给命名框 */
+                      <span className="ml-auto flex items-center gap-1">
+                        <input
+                          autoFocus
+                          value={viewName}
+                          onChange={(e) => setViewName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveAsView(i)
+                            if (e.key === 'Escape') setNamingIdx(null)
+                          }}
+                          placeholder="视图名…"
+                          className="w-36 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10.5px] outline-none"
+                        />
+                        <button
+                          onClick={() => saveAsView(i)}
+                          disabled={!viewName.trim()}
+                          className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white disabled:opacity-40"
+                        >
+                          存
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          const q = messages.slice(0, i).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
+                          setViewName(q.replace(/\s+/g, ' ').slice(0, 24))
+                          setNamingIdx(i)
+                        }}
+                        className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                        title="把本回答（含流程图）存为可复用视图（.easyvibe/views/）"
+                      >
+                        {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
+                        {savedIdx === i ? '已存视图' : '存为视图'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
