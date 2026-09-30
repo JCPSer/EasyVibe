@@ -348,7 +348,10 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
         {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} />}
-        {tab === 'chat' && <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />}
+        {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
+        <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
+          <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />
+        </div>
         {tab === 'detail' && module && <ModuleView map={map} mod={module} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
