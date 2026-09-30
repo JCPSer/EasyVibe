@@ -391,7 +391,7 @@ function ModuleToolbar({
         }`}
       >
         <Focus size={12} />
-        只看依赖
+        {solo ? '✕ 退出聚焦' : '只看依赖'}
       </button>
       <button
         onClick={onReinduce}
@@ -516,6 +516,16 @@ function Canvas({
 
   // R2：WS 断线 → 退出生长模式（重连后由用户重新进入，startGrowth 拉全量对齐）
   useEffect(() => setWsCloseListener(() => setGrowth(null)), [])
+
+  // 真人测试反馈#1："只看依赖"是单程票——Esc 退出 + 底部常驻指示条
+  useEffect(() => {
+    if (!filters.solo) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFilters((f) => ({ ...f, solo: false }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [filters.solo])
 
   // S2：地图保鲜——启动拉一次 + WS freshness.changed 增量（git 有新提交而地图未更新）
   useEffect(() => {
@@ -832,6 +842,17 @@ function Canvas({
               />
             ) : (
               <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
+                {/* 真人测试#1：聚焦常驻指示——任何时刻看得见、一键退得出（Esc 同效） */}
+                {filters.solo && selModule && (
+                  <button
+                    onClick={() => setFilters((f) => ({ ...f, solo: false }))}
+                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-[10.5px] font-semibold text-indigo-600 hover:bg-indigo-100"
+                    title="退出聚焦（Esc）"
+                  >
+                    <Focus size={10} />
+                    聚焦：{selModule.name} <span className="text-indigo-400">✕</span>
+                  </button>
+                )}
                 <FilterButton
                   active={filters.violationsOnly}
                   onClick={() => toggleFilter('violationsOnly')}
