@@ -74,3 +74,34 @@ export function buildLayerTask(map: CodeMap, layerId: string): TaskDraft {
     },
   }
 }
+
+export interface Suggestion {
+  title: string
+  description: string
+  modules: string[]
+  priority: string
+  rationale: string
+}
+
+// 智能优化建议 → 任务草稿：AI 主动发现的优化机会一键转修复任务
+export function buildSuggestionTask(map: CodeMap, sg: Suggestion): TaskDraft {
+  const validModules = sg.modules.filter((id) => map.modules.some((m) => m.id === id))
+  const names = validModules.map((id) => map.modules.find((m) => m.id === id)!.name)
+  return {
+    title: sg.title,
+    description: `${sg.description}\n\n（优化建议 · ${sg.rationale}）`,
+    modules: validModules,
+    acceptance: '优化落地后地图重归纳/巡检确认改善，且无新增逆向依赖。',
+    source: 'manual',
+    context: {
+      inject: {
+        suggestion: sg,
+        modules: validModules.map((id) => {
+          const m = map.modules.find((x) => x.id === id)!
+          return { id: m.id, name: m.name, responsibility: m.responsibility, health: m.health }
+        }),
+      },
+      note: `影响模块：${names.join('、') || '待确认'}`,
+    },
+  }
+}

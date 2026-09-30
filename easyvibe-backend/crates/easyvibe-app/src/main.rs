@@ -9,7 +9,7 @@ use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, Sessi
 use easyvibe_common::{events as ev, ApiError, ApiResponse, ErrorResponse};
 use easyvibe_map::{repo_from_root, spawn_map_watcher, MapService};
 use easyvibe_session::SessionManager;
-use easyvibe_ai_agent::QaClient as _;
+use easyvibe_ai_agent::{QaClient as _, SuggestClient as _};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -69,6 +69,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/chat", axum::routing::post(chat))
         .route("/repos/{id}/views", axum::routing::post(save_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
+        .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
@@ -356,6 +357,29 @@ async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(St
 }
 
 // ---------- M3-2：指哪打哪——任务创建（上下文已组织好随表单提交；执行引擎 M3-3 接入） ----------
+
+/// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
+/// 每条建议可一键转修复任务（前端组装 TaskDraft）
+async fn suggest(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let suggestions: Vec<easyvibe_ai_agent::Suggestion> = match *st.llm_mode {
+        LlmMode::Stub => easyvibe_ai_agent::StubSuggestClient.suggest(&snap.json).await?,
+        LlmMode::Anthropic => {
+            let cfg = resolve_llm(&st, &id, "chat").await;
+            if cfg.api_key.is_empty() {
+                return Err(AppError(ApiError::BadRequest("未配置 LLM API key（设置面板或 EASYVIBE_LLM_API_KEY）".into())));
+            }
+            let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
+            easyvibe_ai_agent::LlmSuggestClient::new(llm).suggest(&snap.json).await?
+        }
+    };
+    let items: Vec<serde_json::Value> = suggestions
+        .into_iter()
+        .map(|sg| serde_json::json!({ "title": sg.title, "description": sg.description, "modules": sg.modules, "priority": sg.priority, "rationale": sg.rationale }))
+        .collect();
+    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
+}
 
 #[derive(serde::Deserialize)]
 struct CreateTaskRequest {

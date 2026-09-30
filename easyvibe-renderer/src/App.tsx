@@ -14,7 +14,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings } from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb } from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -819,6 +819,19 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                   <Play size={10} />
                   {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
                 </button>
+                {backendRepo && (
+                  <button
+                    onClick={() => {
+                      setTab('suggest')
+                      setPanelOpen(true)
+                    }}
+                    className="ml-1 flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+                    title="AI 主动发现优化建议，逐条可发起修复"
+                  >
+                    <Lightbulb size={10} />
+                    优化建议
+                  </button>
+                )}
                 <button
                   onClick={() => setSettingsOpen((v) => !v)}
                   className="ml-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-500 transition-colors hover:bg-slate-50"
