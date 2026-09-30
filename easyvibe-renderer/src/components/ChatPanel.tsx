@@ -394,13 +394,14 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
               </p>
               <div className="mt-1.5 space-y-1">
                 {clarify.options.map((o) => (
+                  /* 改进#3：选项纵排（横排挤压曾把"仅桌面端"断成 4 行）——标签一行、理由一行 */
                   <button
                     key={o.label}
                     onClick={() => answerClarify(o.label, o.desc)}
-                    className="flex w-full items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-left text-[11px] text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                    className="flex w-full flex-col items-start gap-0.5 rounded-md border border-amber-200 bg-white px-2 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50"
                   >
-                    <span className="font-medium">{o.label}</span>
-                    {o.desc && <span className="shrink-0 text-[9.5px] text-slate-400">{o.desc}</span>}
+                    <span className="text-[11px] font-medium leading-4 text-slate-700">{o.label}</span>
+                    {o.desc && <span className="text-[9.5px] leading-4 text-slate-400">{o.desc}</span>}
                   </button>
                 ))}
               </div>
