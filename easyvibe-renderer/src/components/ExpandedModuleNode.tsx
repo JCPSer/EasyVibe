@@ -14,6 +14,8 @@ export type ExpandedModuleNodeType = Node<
     subCount: number
     onRetry?: () => void
   onAnalyze?: () => void
+  /** 改进#2：agent 过程直播——最近输出 */
+  agentLines?: string[]
   },
   'moduleExpanded'
 >
@@ -64,7 +66,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
         </span>
         {data.loading ? (
           <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-slate-400">
-            <Loader2 size={12} className="animate-spin" /> 归纳子模块中…
+            <Loader2 size={12} className="animate-spin" /> 归纳子模块中…（约 1-3 分钟）
           </span>
         ) : data.error ? (
           <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-red-500">
@@ -101,6 +103,16 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
           </span>
         )}
       </div>
+      {/* 改进#2：agent 过程直播——分析中显示它正在输出的内容（来自会话 stdout 流） */}
+      {data.loading && data.agentLines && data.agentLines.length > 0 && (
+        <div className="mt-1.5 space-y-0.5 border-t border-slate-100 pt-1.5">
+          {data.agentLines.slice(-3).map((l, i) => (
+            <p key={i} className="truncate font-mono text-[9px] leading-3.5 text-slate-400">
+              <span className="text-emerald-500">›</span> {l}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 })

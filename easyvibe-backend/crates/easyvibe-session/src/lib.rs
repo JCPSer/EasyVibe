@@ -20,6 +20,13 @@ use tracing::{info, warn};
 /// 会话完成/状态变化的回调（app 层翻译为 WS 事件）
 pub type SessionEventSender = tokio::sync::mpsc::Sender<SessionStatusChanged>;
 
+/// 会话 stdout 行（改进#2"分析中黑洞"——agent 过程直播的原料；行已截断）
+#[derive(Debug, Clone)]
+pub struct SessionOutput {
+    pub session_id: String,
+    pub line: String,
+}
+
 pub struct SessionManager {
     active: Arc<RwLock<HashMap<String, SessionStatusChanged>>>, // repo -> 最新会话状态（互斥判定用）
     by_id: Arc<RwLock<HashMap<String, SessionStatusChanged>>>,  // session_id -> 状态（终态归属用，审查 🔴1）
@@ -27,17 +34,26 @@ pub struct SessionManager {
     outputs: Arc<RwLock<HashMap<String, Arc<std::sync::Mutex<String>>>>>,
     counter: AtomicU64,
     events: SessionEventSender,
+    /// agent 过程直播：stdout 逐行广播（改进#2）
+    output_tx: Arc<tokio::sync::broadcast::Sender<SessionOutput>>,
 }
 
 impl SessionManager {
     pub fn new(events: SessionEventSender) -> Arc<Self> {
+        let (output_tx, _) = tokio::sync::broadcast::channel(512);
         Arc::new(Self {
             active: Default::default(),
             by_id: Default::default(),
             outputs: Default::default(),
             counter: AtomicU64::new(0),
             events,
+            output_tx: Arc::new(output_tx),
         })
+    }
+
+    /// 订阅会话 stdout 行（app 层翻译为 WS session.output）
+    pub fn subscribe_output(&self) -> tokio::sync::broadcast::Receiver<SessionOutput> {
+        self.output_tx.subscribe()
     }
 
     /// 会话 stdout（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料；无捕获返回 None
@@ -128,6 +144,8 @@ impl SessionManager {
         // stdout 捕获缓冲（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料
         let stdout_buf = Arc::new(std::sync::Mutex::new(String::new()));
         self.outputs.write().await.insert(session_id.clone(), stdout_buf.clone());
+        let output_tx = self.output_tx.clone();
+        let out_session_id = session_id.clone();
 
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
@@ -157,6 +175,11 @@ impl SessionManager {
                                     let peek: String = line.chars().take(200).collect();
                                     info!("[session {out_id}] stdout#{lines}: {peek}");
                                 }
+                                // 改进#2：过程直播——行截断 200 字符广播（行率不高，直接发）
+                                let _ = output_tx.send(SessionOutput {
+                                    session_id: out_session_id.clone(),
+                                    line: line.chars().take(200).collect(),
+                                });
                                 // M4-1：捕获进缓冲（1MB 封顶，保头丢尾——RESULT 行在末尾）
                                 if let Ok(mut buf) = stdout_buf.lock() {
                                     if buf.len() < 1_048_576 {

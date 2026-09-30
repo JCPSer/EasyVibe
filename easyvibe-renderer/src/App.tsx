@@ -27,7 +27,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
+import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
@@ -56,6 +56,7 @@ function buildFlow(
   retrySubmap?: (id: string) => void,
   growth?: { layers: Set<string>; modules: Set<string> } | null,
   analyzeSubmap?: (id: string) => void,
+  agentLinesFor?: (id: string) => string[] | undefined,
 ) {
   // 展开元信息：加载中给 4 个骨架位
   const expandedMeta = new Map<string, { ids: string[]; loading: boolean }>()
@@ -136,6 +137,7 @@ function buildFlow(
             subCount: sm === 'loading' || sm === 'error' ? 0 : sm.sub_modules.length,
             onRetry: retrySubmap ? () => retrySubmap(mod.id) : undefined,
             onAnalyze: analyzeSubmap ? () => analyzeSubmap(mod.id) : undefined,
+            agentLines: agentLinesFor?.(mod.id),
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,
@@ -502,6 +504,10 @@ function Canvas({
   const [inducing, setInducing] = useState(false)
   const [patrolling, setPatrolling] = useState(false)
   const [freshness, setFreshness] = useState<string | null>(null)
+  // 改进#2：agent 过程直播——按会话存最近输出（子图分析/任务执行）
+  const [agentLines, setAgentLines] = useState<Record<string, string[]>>({})
+  // 子图分析会话号（模块 id → sessionId，用于匹配输出流）
+  const [submapSessions, setSubmapSessions] = useState<Record<string, string>>({})
   const [freshnessInfo, setFreshnessInfo] = useState<{ commitsSinceMap?: number | null }>({})
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
@@ -526,6 +532,18 @@ function Canvas({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [filters.solo])
+
+  // 改进#2：订阅 agent 输出流，按会话保留最近 4 行
+  useEffect(
+    () =>
+      onSessionOutput((e) => {
+        setAgentLines((prev) => {
+          const cur = prev[e.sessionId] ?? []
+          return { ...prev, [e.sessionId]: [...cur.slice(-3), e.line] }
+        })
+      }),
+    [],
+  )
 
   // S2：地图保鲜——启动拉一次 + WS freshness.changed 增量（git 有新提交而地图未更新）
   useEffect(() => {
@@ -680,8 +698,10 @@ function Canvas({
     (id: string) => {
       if (!backendRepo) return
       fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
-        .then((r) => {
+        .then(async (r) => {
           if (!r.ok) throw new Error(String(r.status))
+          const sess = (await r.json()) as { sessionId: string }
+          setSubmapSessions((prev) => ({ ...prev, [id]: sess.sessionId }))
           setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
           let n = 0
           const t = window.setInterval(() => {
@@ -717,8 +737,8 @@ function Canvas({
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap),
-    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? '']),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions],
   )
 
   // S1-1 画布定位收口：pan/zoom 到目标模块 + 选中高亮。
@@ -1174,6 +1194,9 @@ export default function App() {
           if (msg.name === 'session.statusChanged') {
             const d = msg.data
             if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+          }
+          if (msg.name === 'session.output') {
+            emitSessionOutput({ sessionId: msg.data.sessionId, line: msg.data.line })
           }
           if (msg.name === 'freshness.changed' && msg.data?.repo === backendRepo) {
             emitFreshnessEvent({

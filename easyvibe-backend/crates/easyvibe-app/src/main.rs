@@ -67,6 +67,8 @@ pub enum BusEvent {
     TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
     /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
     Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
+    /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
+    SessionOutput { session_id: String, line: String },
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -1018,6 +1020,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "freshness.changed".into(),
                     data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
                 },
+                BusEvent::SessionOutput { session_id, line } => WsMessage {
+                    name: "session.output".into(),
+                    data: serde_json::json!({ "sessionId": session_id, "line": line }),
+                },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -1089,6 +1095,16 @@ async fn main() {
         }
     });
     let session_manager = SessionManager::new(session_tx);
+    // 改进#2：agent 输出 → 事件总线（过程直播）
+    {
+        let mut rx = session_manager.subscribe_output();
+        let bus = event_bus.clone();
+        tokio::spawn(async move {
+            while let Ok(o) = rx.recv().await {
+                let _ = bus.send(BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
+            }
+        });
+    }
 
     // agent CLI 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）。
     // 默认 -p --bare --dangerously-skip-permissions：bare 跳过宿主 hooks（防 grill-me 类

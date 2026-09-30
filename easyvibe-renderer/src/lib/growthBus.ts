@@ -66,3 +66,16 @@ export function onFreshnessEvent(l: FreshnessEventListener): () => void {
     freshnessListeners.delete(l)
   }
 }
+
+// 改进#2：agent 过程直播（session.output——子图分析/任务执行的 stdout 行）
+export type SessionOutputListener = (event: { sessionId: string; line: string }) => void
+const outputListeners = new Set<SessionOutputListener>()
+export function emitSessionOutput(e: { sessionId: string; line: string }) {
+  for (const l of outputListeners) l(e)
+}
+export function onSessionOutput(l: SessionOutputListener): () => void {
+  outputListeners.add(l)
+  return () => {
+    outputListeners.delete(l)
+  }
+}
