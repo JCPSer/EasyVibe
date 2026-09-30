@@ -379,6 +379,7 @@ pub struct TaskRow {
     pub status: String,
     pub trust: String,
     pub error: Option<String>,
+    pub session_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -388,6 +389,7 @@ pub trait TaskRepository: Send + Sync {
     fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn list(&self, repo: &str, limit: i64) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
+    fn set_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
 }
 
 pub struct SqliteTaskRepository {
@@ -404,24 +406,24 @@ impl SqliteTaskRepository {
 struct TaskRowSql {
     id: String, repo: String, title: String, description: String,
     modules: String, acceptance: String, source: String, context: String,
-    status: String, trust: String, error: Option<String>, created_at: String, updated_at: String,
+    status: String, trust: String, error: Option<String>, session_id: Option<String>, created_at: String, updated_at: String,
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, created_at: r.created_at, updated_at: r.updated_at }
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, created_at: r.created_at, updated_at: r.updated_at }
     }
 }
 
 impl TaskRepository for SqliteTaskRepository {
     async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
         .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
-        .bind(&t.created_at).bind(&t.updated_at)
+        .bind(&t.session_id).bind(&t.created_at).bind(&t.updated_at)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -449,6 +451,13 @@ impl TaskRepository for SqliteTaskRepository {
             .bind(id)
             .fetch_optional(&self.pool).await.map_err(db_err)?;
         Ok(row.map(Into::into))
+    }
+
+    async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET session_id = ? WHERE id = ?")
+            .bind(session_id).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
     }
 }
 
@@ -500,7 +509,7 @@ mod tests {
             id: "task-1".into(), repo: "demo".into(), title: "修复耦合".into(),
             description: "d".into(), modules: "[\"m1\"]".into(), acceptance: "a".into(),
             source: "concern".into(), context: "{}".into(), status: "pending".into(),
-            trust: "manual".into(), error: None, created_at: "1".into(), updated_at: "1".into(),
+            trust: "manual".into(), error: None, session_id: None, created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&t).await.unwrap();
         repo.update_status("task-1", "running", None).await.unwrap();

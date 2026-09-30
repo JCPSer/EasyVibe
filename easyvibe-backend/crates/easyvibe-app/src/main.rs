@@ -419,6 +419,7 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         status: "pending".into(), // M3-3：harness 执行引擎接走
         trust: if body.trust == "auto" { "auto".into() } else { "manual".into() },
         error: None,
+        session_id: None,
         created_at: now.clone(),
         updated_at: now,
     };

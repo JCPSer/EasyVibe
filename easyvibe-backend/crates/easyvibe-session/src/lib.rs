@@ -21,14 +21,15 @@ use tracing::{info, warn};
 pub type SessionEventSender = tokio::sync::mpsc::Sender<SessionStatusChanged>;
 
 pub struct SessionManager {
-    active: Arc<RwLock<HashMap<String, SessionStatusChanged>>>, // repo -> 最新会话状态
+    active: Arc<RwLock<HashMap<String, SessionStatusChanged>>>, // repo -> 最新会话状态（互斥判定用）
+    by_id: Arc<RwLock<HashMap<String, SessionStatusChanged>>>,  // session_id -> 状态（终态归属用，审查 🔴1）
     counter: AtomicU64,
     events: SessionEventSender,
 }
 
 impl SessionManager {
     pub fn new(events: SessionEventSender) -> Arc<Self> {
-        Arc::new(Self { active: Default::default(), counter: AtomicU64::new(0), events })
+        Arc::new(Self { active: Default::default(), by_id: Default::default(), counter: AtomicU64::new(0), events })
     }
 
     pub async fn status_of(&self, repo_id: &str) -> Option<SessionStatusChanged> {
@@ -112,37 +113,60 @@ impl SessionManager {
 
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
-        // 看门任务：收集输出（翻译层的最小形态，防大输出——只记行数与前 200 字节），等退出，报终态
+        // 看门任务：stdout/stderr 并发排空（审查 🔴2：串行"先 wait 后排 stderr"会让
+        // 运行期写满 64KB 的 agent 死锁——必须同时读两个管道），再等退出，报终态
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let events = self.events.clone();
         let active = self.active.clone();
+        let by_id = self.by_id.clone();
         let repo = repo_id.to_string();
         let session_id_task = session_id.clone();
         tokio::spawn(async move {
-            let mut out_lines = 0u64;
-            if let Some(mut s) = stdout {
-                use tokio::io::AsyncBufReadExt as _;
-                let mut reader = tokio::io::BufReader::new(&mut s);
-                let mut line = String::new();
-                loop {
-                    match reader.read_line(&mut line).await {
-                        Ok(0) => break,
-                        Ok(_) => {
-                            out_lines += 1;
-                            if out_lines <= 3 || out_lines % 50 == 0 {
-                                let peek: String = line.chars().take(200).collect();
-                                info!("[session {session_id_task}] stdout#{out_lines}: {peek}");
+            use tokio::io::AsyncBufReadExt as _;
+            let out_id = session_id_task.clone();
+            let out_task = tokio::spawn(async move {
+                let mut lines = 0u64;
+                if let Some(mut s) = stdout {
+                    let mut reader = tokio::io::BufReader::new(&mut s);
+                    let mut line = String::new();
+                    loop {
+                        match reader.read_line(&mut line).await {
+                            Ok(0) => break,
+                            Ok(_) => {
+                                lines += 1;
+                                if lines <= 3 || lines % 50 == 0 {
+                                    let peek: String = line.chars().take(200).collect();
+                                    info!("[session {out_id}] stdout#{lines}: {peek}");
+                                }
+                                line.clear();
                             }
-                            line.clear();
-                        }
-                        Err(e) => {
-                            warn!("[session {session_id_task}] stdout 读取失败: {e}");
-                            break;
+                            Err(_) => break,
                         }
                     }
                 }
-            }
+            });
+            let err_id = session_id_task.clone();
+            let err_task = tokio::spawn(async move {
+                let mut lines = 0u64;
+                if let Some(mut e) = stderr {
+                    let mut reader = tokio::io::BufReader::new(&mut e);
+                    let mut line = String::new();
+                    loop {
+                        match reader.read_line(&mut line).await {
+                            Ok(0) => break,
+                            Ok(_) => {
+                                lines += 1;
+                                let peek: String = line.chars().take(200).collect();
+                                warn!("[session {err_id}] stderr#{lines}: {peek}");
+                                line.clear();
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
+            let _ = tokio::join!(out_task, err_task);
             let status = match child.wait().await {
                 Ok(exit) if exit.success() => SessionStatus::Succeeded,
                 Ok(_exit) => SessionStatus::Failed,
@@ -151,25 +175,9 @@ impl SessionManager {
                     SessionStatus::Failed
                 }
             };
-            // stderr 必须排空：管道 64KB 写满会挂死 agent（审查发现）
-            if let Some(mut err) = stderr {
-                use tokio::io::AsyncBufReadExt as _;
-                let mut reader = tokio::io::BufReader::new(&mut err);
-                let mut line = String::new();
-                loop {
-                    match reader.read_line(&mut line).await {
-                        Ok(0) => break,
-                        Ok(_) => {
-                            let peek: String = line.chars().take(200).collect();
-                            warn!("[session {session_id_task}] stderr: {peek}");
-                            line.clear();
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
             let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
             active.write().await.insert(repo.clone(), final_status.clone());
+            by_id.write().await.insert(session_id_task.clone(), final_status.clone());
             let _ = events.send(final_status).await;
             info!("[session {session_id_task}] 终态: {:?}", status);
         });
@@ -188,7 +196,13 @@ impl SessionManager {
 
     async fn publish(&self, s: SessionStatusChanged) {
         self.active.write().await.insert(s.repo.clone(), s.clone());
+        self.by_id.write().await.insert(s.session_id.clone(), s.clone());
         let _ = self.events.send(s).await;
+    }
+
+    /// 按 session_id 查询状态（终态归属的唯一依据——避免按仓库轮询的归属竞态）
+    pub async fn status_of_session(&self, session_id: &str) -> Option<SessionStatusChanged> {
+        self.by_id.read().await.get(session_id).cloned()
     }
 }
 

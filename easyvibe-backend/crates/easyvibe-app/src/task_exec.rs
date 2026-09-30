@@ -42,7 +42,8 @@ impl TaskExecutor {
     }
 
     /// 扫描 pending 任务并执行（启动恢复 + 创建后触发共用）
-    pub async fn enqueue_pending(self: &Arc<Self>, repo_filter: Option<&str>) {
+    pub fn enqueue_pending<'a>(self: &'a Arc<Self>, repo_filter: Option<&'a str>) -> impl std::future::Future<Output = ()> + Send + 'a {
+        async move {
         let repos: Vec<String> = match repo_filter {
             Some(r) => vec![r.to_string()],
             None => self.map_service.repos().into_iter().map(|r| r.id).collect(),
@@ -53,14 +54,14 @@ impl TaskExecutor {
                 self.clone().execute(t).await;
             }
         }
+        }
     }
 
-    /// 执行单个任务：占用并发许可 → 组装 prompt → spawn → 终态回写
-    pub async fn execute(self: Arc<Self>, task: TaskRow) {
-        let Ok(_permit) = self.permits.clone().try_acquire_owned() else {
-            warn!("[task-exec] {} 并发已满（4），任务排队待下一轮", task.id);
-            return;
-        };
+    /// 执行单个任务：占用并发许可（移入看门任务，上限 4 才真实存在）→ 组装 prompt → spawn →
+    /// 按 session_id 归属终态（status_of_session，杜绝按仓库轮询的归属竞态）。
+    /// Conflict（写互斥）= 排队语义：保持 pending，延迟重试——绝不标失败（审查 🔴3）。
+    pub fn execute(self: Arc<Self>, task: TaskRow) -> impl std::future::Future<Output = ()> + Send {
+        async move {
         let repo = match self.map_service.find_repo(&task.repo) {
             Some(r) => r,
             None => {
@@ -68,7 +69,16 @@ impl TaskExecutor {
                 return;
             }
         };
-        let _ = self.task_repo.update_status(&task.id, "running", None).await;
+        let Ok(permit) = self.permits.clone().try_acquire_owned() else {
+            warn!("[task-exec] {} 并发已满（4），稍后重试", task.id);
+            let this = self.clone();
+            let repo = task.repo.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                this.enqueue_pending(Some(&repo)).await;
+            });
+            return;
+        };
         let prompt = assemble_task_prompt(&self.harness_framework, &task);
         match self
             .session_manager
@@ -76,30 +86,33 @@ impl TaskExecutor {
             .await
         {
             Ok(session) => {
-                info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session.session_id, task.trust);
+                let session_id = session.session_id.clone();
+                let _ = self.task_repo.set_session(&task.id, &session_id).await;
+                info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);
                 let this = self.clone();
                 let task_id = task.id.clone();
-                let repo_id = repo.id.clone();
-                let session_id = session.session_id.clone();
                 tokio::spawn(async move {
+                    let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        match this.session_manager.status_of(&repo_id).await {
+                        match this.session_manager.status_of_session(&session_id).await {
                             Some(s)
                                 if !matches!(
                                     s.status,
                                     easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running
                                 ) =>
                             {
-                                // 终态归属校验：该仓库最新的终态会话须为本任务会话
-                                if s.session_id == session_id {
-                                    let failed = s.status == easyvibe_api_types::SessionStatus::Failed;
-                                    let _ = this
-                                        .task_repo
-                                        .update_status(&task_id, if failed { "failed" } else { "succeeded" }, None)
-                                        .await;
-                                    info!("[task-exec] 任务 {} 终态 {:?}", task_id, s.status);
-                                }
+                                let failed = s.status == easyvibe_api_types::SessionStatus::Failed;
+                                let _ = this
+                                    .task_repo
+                                    .update_status(&task_id, if failed { "failed" } else { "succeeded" }, None)
+                                    .await;
+                                info!("[task-exec] 任务 {} 终态 {:?}", task_id, s.status);
+                                break;
+                            }
+                            // None：会话状态被清理等异常——按失败收尸，防幽灵 running
+                            None => {
+                                let _ = this.task_repo.update_status(&task_id, "failed", Some("会话状态丢失")).await;
                                 break;
                             }
                             _ => {}
@@ -107,10 +120,20 @@ impl TaskExecutor {
                     }
                 });
             }
+            Err(ApiError::Conflict(_)) => {
+                warn!("[task-exec] 任务 {} 遇到写互斥，排队延迟重试", task.id);
+                let this = self.clone();
+                let repo = task.repo.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    this.enqueue_pending(Some(&repo)).await;
+                });
+            }
             Err(e) => {
                 warn!("[task-exec] 任务 {} spawn 失败: {e}", task.id);
                 let _ = self.task_repo.update_status(&task.id, "failed", Some(&e.to_string())).await;
             }
+        }
         }
     }
 }
@@ -191,6 +214,7 @@ mod tests {
             status: status.into(),
             trust: "manual".into(),
             error: None,
+            session_id: None,
             created_at: "1".into(),
             updated_at: "1".into(),
         }

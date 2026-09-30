@@ -1,5 +1,5 @@
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench } from 'lucide-react'
-import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
+import { buildLayerTask, buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
@@ -146,7 +146,7 @@ function ModuleView({ map, mod, onCreateTask }: { map: CodeMap; mod: Module; onC
   )
 }
 
-function LayerView({ map, layer }: { map: CodeMap; layer: Layer }) {
+function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; onCreateTask: (d: TaskDraft) => void }) {
   const mods = map.modules.filter((m) => m.layer === layer.id)
   const avg = Math.round(mods.reduce((s, m) => s + m.health.score, 0) / Math.max(mods.length, 1))
   const color = healthColor(avg)
@@ -175,6 +175,13 @@ function LayerView({ map, layer }: { map: CodeMap; layer: Layer }) {
           <span className="text-[11px] font-semibold" style={{ color }}>
             层健康（聚合） · {avg}/100
           </span>
+          <button
+            onClick={() => onCreateTask(buildLayerTask(map, layer.id))}
+            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            title="指哪打哪：以本层为上下文发起治理任务"
+          >
+            <Wrench size={10} /> 发起治理
+          </button>
           <span className="text-[10.5px] text-slate-400">
             {mods.length} 模块 · 逆向依赖 {violations.length} 条
           </span>
@@ -365,7 +372,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         </div>
         {tab === 'suggest' && <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} />}
-        {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} />}
+        {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />
         )}
