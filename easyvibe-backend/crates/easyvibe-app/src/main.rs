@@ -168,6 +168,20 @@ async fn get_health_history(State(st): State<AppState>, Path((id, module_id)): P
     Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
 }
 
+/// 归纳完成超时防线（实弹#4：FENJUE 首归纳产物/进度俱齐，但 CLI 不收尾、会话恒 Running，
+/// 前端"归纳中"假卡住）：progress.json phase=done 且文件落盘超过 grace 秒 → 判 agent 已交付。
+/// 用文件 mtime（系统时间基准）而非 progress.updated_at（RFC3339 带时区，秒级判定会被时区坑）。
+fn progress_done_ago_secs(repo_root: &std::path::Path) -> Option<u64> {
+    let path = repo_root.join(".easyvibe/map/progress.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if v["phase"].as_str() != Some("done") {
+        return None;
+    }
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
+}
+
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
@@ -200,7 +214,30 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
                     }
                     break;
                 }
-                _ => {}
+                // 实弹#4 防线：进度 100% 落盘超过 90s 但会话仍 Running（agent 已交付未自行退出）
+                // → 按成功收尸解除"归纳中"假卡住。产物合法性由 watcher 校验保证（不出残图），
+                // 进程资源由 kill_on_drop 在后端生命周期结束时兜底。巡逻无 progress.json，不误触。
+                Some(_) => {
+                    const GRACE_SECS: u64 = 90;
+                    if let Some(ago) = progress_done_ago_secs(&repo2.root) {
+                        if ago > GRACE_SECS {
+                            tracing::warn!(
+                                "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸（agent 未自行退出，实弹#4）",
+                                ago
+                            );
+                            let Some(s) = st2.session_manager.status_of(&repo2.id).await else { break };
+                            st2.session_manager
+                                .note_status(easyvibe_api_types::SessionStatusChanged {
+                                    repo: repo2.id.clone(),
+                                    session_id: s.session_id.clone(),
+                                    status: easyvibe_api_types::SessionStatus::Succeeded,
+                                })
+                                .await;
+                            break;
+                        }
+                    }
+                }
+                None => {}
             }
         }
     });
@@ -1315,6 +1352,22 @@ mod tests {
         assert_eq!(resp.status(), axum::http::StatusCode::OK, "chat POST 应成功");
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn progress_done_ago_gates_on_phase() {
+        let dir = std::env::temp_dir().join("ev-progress-done-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".easyvibe/map")).unwrap();
+        // 无文件 → None
+        assert!(progress_done_ago_secs(&dir).is_none());
+        // phase != done → None（归纳中不得误判）
+        std::fs::write(dir.join(".easyvibe/map/progress.json"), r#"{"phase":"inducting"}"#).unwrap();
+        assert!(progress_done_ago_secs(&dir).is_none());
+        // phase=done → Some（文件刚写，ago 很小）
+        std::fs::write(dir.join(".easyvibe/map/progress.json"), r#"{"phase":"done"}"#).unwrap();
+        let ago = progress_done_ago_secs(&dir).expect("done 应有秒数");
+        assert!(ago < 5, "刚落盘的文件 ago 应极小: {ago}");
     }
 
     #[tokio::test]
