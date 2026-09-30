@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench } from 'lucide-react'
+import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare, Lightbulb, ShieldCheck, LayoutGrid} from 'lucide-react'
 import { buildLayerTask, buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
@@ -392,24 +392,26 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
     <aside className="flex shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
         <div className="flex gap-1">
+          {/* Y9 清债：页签图标化——六页签纯文字逼近爆宽，图标+短名双保险 */}
           {(
             [
-              ['issues', '问题清单'],
-              ['detail', detailLabel],
-              ['chat', '对话'],
-              ['suggest', '建议'],
-              ['tasks', '任务'],
-              ['views', '视图'],
+              ['issues', '问题', <ListChecks key="i" size={13} />],
+              ['detail', detailLabel, <Boxes key="d" size={13} />],
+              ['chat', '对话', <MessagesSquare key="c" size={13} />],
+              ['suggest', '建议', <Lightbulb key="s" size={13} />],
+              ['tasks', '任务', <ShieldCheck key="t" size={13} />],
+              ['views', '视图', <LayoutGrid key="v" size={13} />],
             ] as const
-          ).map(([key, label]) => (
+          ).map(([key, label, icon]) => (
             <button
-              key={key}
-              onClick={() => onTabChange(key)}
-              className={`rounded-md px-2.5 py-1.5 text-[12px] font-semibold transition-colors ${
+              key={key as string}
+              onClick={() => onTabChange(key as typeof tab)}
+              className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-[11.5px] font-semibold transition-colors ${
                 tab === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'
               }`}
             >
-              {label}
+              {icon}
+              {label as string}
             </button>
           ))}
         </div>

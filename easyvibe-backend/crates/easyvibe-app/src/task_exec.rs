@@ -17,6 +17,8 @@ pub struct TaskExecutor {
     pub map_service: Arc<MapService>,
     /// harness（单一事实源，恢复默认后热换——spawn 时现读，不缓存快照）
     pub harness: Arc<tokio::sync::RwLock<Harness>>,
+    /// Y5：设置仓储——spawn 时解析槽位级 agent 参数（任务槽可单独收紧权限）
+    pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub agent_command: Arc<String>,
     pub agent_args: Arc<Vec<String>>,
     /// 并行执行上限（§11 🟡7 = 4）
@@ -33,6 +35,7 @@ impl TaskExecutor {
         agent_command: Arc<String>,
         agent_args: Arc<Vec<String>>,
         max_parallel: usize,
+        settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
@@ -42,6 +45,7 @@ impl TaskExecutor {
             harness,
             agent_command,
             agent_args,
+            settings_repo,
             // Y2 清债：并发上限可配（env/启动配置传入），默认 4 不再焊死
             permits: Arc::new(Semaphore::new(max_parallel.max(1))),
         })
@@ -191,9 +195,12 @@ impl TaskExecutor {
             let h = self.harness.read().await;
             assemble_task_prompt(&h.framework_transparent, &task)
         };
+        // Y5 清债：任务槽位参数覆盖——settings `agent.args.task`（JSON 数组）优先于全局，
+        // 可把任务执行从 skip-permissions 收紧为带确认（归纳/巡检等透明槽位不受影响）
+        let args = slot_args(&self.settings_repo, "task", &self.agent_args).await;
         match self
             .session_manager
-            .start_induction(&repo.id, &repo.root, &prompt, &self.agent_command, &self.agent_args)
+            .start_induction(&repo.id, &repo.root, &prompt, &self.agent_command, &args)
             .await
         {
             Ok(session) => {
@@ -430,6 +437,19 @@ fn neutralize_transparent(text: &str, patterns: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Y5：槽位级 agent 参数解析（settings `agent.args.<slot>` = JSON 字符串数组；
+/// 解析失败/未配置回退全局默认——失败不阻断）
+pub async fn slot_args(
+    settings: &easyvibe_db::SqliteSettingsRepository,
+    slot: &str,
+    default: &[String],
+) -> Vec<String> {
+    use easyvibe_db::SettingsRepository as _;
+    let v = settings.get("global", &format!("agent.args.{slot}")).await.ok().flatten()
+        .and_then(|r| serde_json::from_str::<Vec<String>>(&r.value).ok());
+    v.unwrap_or_else(|| default.to_vec())
 }
 
 /// 改进#7 supervised 风险预评估（v1 确定性规则——LLM 评估为记档增强）。
@@ -750,6 +770,7 @@ mod tests {
             Arc::new("true".into()),
             Arc::new(vec![]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         let mut task = sample_task("pending");
         task.repo = "ev-task-exec-test".into();
@@ -804,6 +825,7 @@ mod tests {
             Arc::new("true".into()),
             Arc::new(vec![]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         let mut task = sample_task("pending");
         task.id = "task-auto".into();
@@ -890,6 +912,7 @@ mod tests {
             Arc::new("echo".into()),
             Arc::new(vec!["[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}".to_string()]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         let mut task = sample_task("pending");
         task.id = "task-collect".into();
@@ -934,6 +957,7 @@ mod tests {
             task_repo.clone(), approvals.clone(), sessions, maps,
             harness_stub("框架"), Arc::new("true".into()), Arc::new(vec![]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         // 低危：单模块、短描述、无高危词 → 直通 done
         let mut low = sample_task("pending");
@@ -985,6 +1009,7 @@ mod tests {
             Arc::new("true".into()),
             Arc::new(vec![]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         let mut task = sample_task("pending");
         task.trust = "manual".into();
@@ -1022,6 +1047,7 @@ mod tests {
             Arc::new("true".into()), // stub：立即成功
             Arc::new(vec![]),
             4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
         );
         let mut task = sample_task("pending");
         task.trust = "auto".into(); // auto 直通 → spawn_and_watch → 仓库未注册 → failed

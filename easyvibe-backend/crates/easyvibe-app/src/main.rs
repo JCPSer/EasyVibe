@@ -139,10 +139,22 @@ async fn list_repos(State(st): State<AppState>) -> Json<ApiResponse<Vec<RepoInfo
     Json(ApiResponse::ok(repos))
 }
 
-async fn get_map(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
-    Ok(Json(snap.json).into_response())
+    // Y1 清债：ETag 条件请求——内容哈希已有，浏览器重连重同步时 If-None-Match 命中即 304
+    // （body 不传输；前端零改动，浏览器 HTTP 缓存自动处理）
+    let etag = format!("\"{}\"", snap.content_hash);
+    if headers.get("if-none-match").and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+        let mut resp = axum::http::Response::new(axum::body::Body::empty());
+        *resp.status_mut() = axum::http::StatusCode::NOT_MODIFIED;
+        resp.headers_mut().insert("etag", etag.parse().unwrap());
+        return Ok(resp.into_response());
+    }
+    let mut resp = Json(snap.json).into_response();
+    resp.headers_mut().insert("etag", etag.parse().unwrap());
+    resp.headers_mut().insert("cache-control", "private, must-revalidate".parse().unwrap());
+    Ok(resp)
 }
 
 async fn get_growth(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
@@ -1275,26 +1287,9 @@ async fn main() {
     let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(database.pool().clone()));
     let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(database.pool().clone()));
 
-    // 主密钥：EASYVIBE_MASTER_KEY（64 位十六进制）优先，否则数据目录 .master_key（0600，首次生成）
-    let cipher = {
-        let from_env = std::env::var("EASYVIBE_MASTER_KEY").ok().and_then(|hex| easyvibe_common::SecretCipher::from_hex_key(&hex).ok());
-        from_env.unwrap_or_else(|| {
-            let path = format!("{data_dir}/.master_key");
-            let hex = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-                let mut bytes = [0u8; 32];
-                getrandom::getrandom(&mut bytes).expect("主密钥生成失败");
-                let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                std::fs::write(&path, &hex).expect("写主密钥文件失败");
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt as _;
-                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-                }
-                hex
-            });
-            easyvibe_common::SecretCipher::from_hex_key(hex.trim()).expect("主密钥文件损坏")
-        })
-    };
+    // Y4 清债：主密钥走 KeyProvider 抽象（当前=文件源；二期换系统钥匙串只换实现）
+    let cipher = easyvibe_common::SecretCipher::from_provider(&easyvibe_common::FileKeyProvider::new(&data_dir))
+        .expect("主密钥装载失败");
 
     let llm_mode = if std::env::var("EASYVIBE_LLM_MODE").map(|v| v == "stub").unwrap_or(false) {
         LlmMode::Stub
@@ -1328,6 +1323,7 @@ async fn main() {
         Arc::new(agent_command.clone()),
         Arc::new(agent_args.clone()),
         std::env::var("EASYVIBE_MAX_PARALLEL").ok().and_then(|v| v.parse().ok()).unwrap_or(4),
+        settings_repo.clone(),
     );
     // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记
     // interrupted（awaiting_approval 等用户决策的任务不受影响）；pending 任务照常重新入队
@@ -1492,6 +1488,7 @@ mod tests {
             Arc::new("true".into()),
             Arc::new(vec![]),
             4,
+            settings_repo.clone(),
         );
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {
@@ -1523,6 +1520,30 @@ mod tests {
         let app = build_router(test_state().await);
         let resp = app.oneshot(axum::http::Request::get("/api/health").body(axum::body::Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn map_etag_conditional_304() {
+        // Y1 清债回归：ETag 命中即 304（重连重同步不再全量传输）
+        let (state, repo) = chat_state("etag").await;
+        let app = build_router(state);
+        let get = |if_none: Option<&str>| {
+            let mut req = axum::http::Request::get(format!("/api/repos/{repo}/map"))
+                .body(axum::body::Body::empty()).unwrap();
+            if let Some(v) = if_none {
+                req.headers_mut().insert("if-none-match", v.parse().unwrap());
+            }
+            let app = app.clone();
+            async move {
+                let resp = app.oneshot(req).await.unwrap();
+                (resp.status(), resp.headers().get("etag").and_then(|h| h.to_str().ok()).unwrap_or("").to_string())
+            }
+        };
+        let (status, etag) = get(None).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(etag.starts_with('"') && etag.ends_with('"'), "ETag 应为引号包裹的哈希: {etag}");
+        let (status2, _) = get(Some(&etag)).await;
+        assert_eq!(status2, axum::http::StatusCode::NOT_MODIFIED, "If-None-Match 命中应 304");
     }
 
     #[tokio::test]
