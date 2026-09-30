@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, ExternalLink, Trash2, Bookmark, Check } from 'lucide-react'
+import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download } from 'lucide-react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 
 interface ViewItem {
@@ -48,6 +48,16 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
     setViews(null)
     load()
   }, [load])
+
+  // §12d 兑现：视图导出（JSON 文件下载，含 mermaid——资产可外带）
+  const download = (v: ViewItem) => {
+    const blob = new Blob([JSON.stringify(v.view, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${v.slug}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   const remove = (slug: string) => {
     if (!backendRepo) return
@@ -160,6 +170,13 @@ export function ViewsPanel({ backendRepo, onOpenView }: Props) {
               >
                 {openedSlug === v.slug ? <Check size={10} /> : <ExternalLink size={10} />}
                 {openedSlug === v.slug ? '已定位' : '打开视图'}
+              </button>
+              <button
+                onClick={() => download(v)}
+                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] text-slate-500 hover:bg-slate-50"
+                title="下载视图文件（含流程图，资产可外带）"
+              >
+                <Download size={10} />
               </button>
               {confirming === v.slug ? (
                 <>

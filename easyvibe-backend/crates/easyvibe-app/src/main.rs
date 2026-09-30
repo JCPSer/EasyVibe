@@ -652,6 +652,7 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         prompt_tokens: None,
         completion_tokens: None,
         result: None,
+        base_head: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -1317,7 +1318,41 @@ async fn main() {
         schema_path: Arc::new(schema_path),
         event_bus,
     };
-    let app = build_router(state);
+    let app = build_router(state.clone());
+    // 定时巡检（默认关：adv.autoPatrolEnabled=true 开启，间隔 adv.autoPatrolHours 默认 24h）——
+    // 健康保鲜不靠用户想起；成本可控（间隔可调/随时关），无活动会话才触发（写互斥天然排队）
+    {
+        let st_for_patrol = state.clone();
+        let settings = st_for_patrol.settings_repo.clone();
+        let maps = st_for_patrol.map_service.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                let enabled = settings.get("global", "adv.autoPatrolEnabled").await.ok().flatten()
+                    .and_then(|r| serde_json::from_str::<bool>(&r.value).ok()).unwrap_or(false);
+                if !enabled { continue }
+                let hours: i64 = settings.get("global", "adv.autoPatrolHours").await.ok().flatten()
+                    .and_then(|r| serde_json::from_str::<i64>(&r.value).ok()).unwrap_or(24).max(1);
+                for repo in maps.repos() {
+                    use easyvibe_db::HealthRepository as _;
+                    let fresh_enough = st_for_patrol.health_repo.list_runs(&repo.id, 1).await.ok()
+                        .and_then(|runs| runs.first().and_then(|r| r.started_at.parse::<i64>().ok()))
+                        .map(|t| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64 - t < hours * 3600)
+                        .unwrap_or(false);
+                    if fresh_enough { continue }
+                    info!("[auto-patrol] {} 距上次巡检超 {}h，自动触发", repo.id, hours);
+                    let st2 = st_for_patrol.clone();
+                    let repo_id = repo.id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = start_patrol(axum::extract::State(st2), axum::extract::Path(repo_id.clone())).await {
+                            tracing::warn!("[auto-patrol] {} 触发失败: {:?}", repo_id, e.0);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
     let addr = "127.0.0.1:7101";
     info!("EasyVibe backend listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("绑定 7101 失败");

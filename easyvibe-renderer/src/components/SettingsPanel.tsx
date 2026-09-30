@@ -25,7 +25,7 @@ export function SettingsPanel({ backendRepo, onClose }: Props) {
   const [tab, setTab] = useState<'general' | 'advanced'>('general')
   const [services, setServices] = useState<Record<string, Service>>({})
   const [slots, setSlots] = useState<Record<string, string>>({})
-  const [adv, setAdv] = useState({ contextBudget: 256000, maxTokens: 8192 })
+  const [adv, setAdv] = useState({ contextBudget: 256000, maxTokens: 8192, autoPatrolEnabled: false, autoPatrolHours: 24 })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -65,6 +65,8 @@ export function SettingsPanel({ backendRepo, onClose }: Props) {
     setAdv({
       contextBudget: Number(merged['adv.contextBudget'] ?? 256000),
       maxTokens: Number(merged['adv.maxTokens'] ?? 8192),
+      autoPatrolEnabled: Boolean(merged['adv.autoPatrolEnabled'] ?? false),
+      autoPatrolHours: Number(merged['adv.autoPatrolHours'] ?? 24),
     })
     setLoading(false)
   }, [backendRepo])
@@ -105,6 +107,8 @@ export function SettingsPanel({ backendRepo, onClose }: Props) {
       puts.push(
         fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, key: 'adv.contextBudget', value: adv.contextBudget }) }),
         fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, key: 'adv.maxTokens', value: adv.maxTokens }) }),
+        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, key: 'adv.autoPatrolEnabled', value: adv.autoPatrolEnabled }) }),
+        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, key: 'adv.autoPatrolHours', value: adv.autoPatrolHours }) }),
       )
     }
     await Promise.all(puts)
@@ -217,6 +221,16 @@ export function SettingsPanel({ backendRepo, onClose }: Props) {
                 <div className="mb-1 text-[11px] text-slate-500">LLM 最大输出（token，默认 8192）</div>
                 <input className={input} type="number" value={adv.maxTokens} onChange={(e) => setAdv((p) => ({ ...p, maxTokens: Number(e.target.value) }))} />
               </div>
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-slate-500">定时巡检（默认关——间隔小时数可调，无活动会话才触发）</div>
+                <input type="checkbox" checked={adv.autoPatrolEnabled} onChange={(e) => setAdv((p) => ({ ...p, autoPatrolEnabled: e.target.checked }))} />
+              </div>
+              {adv.autoPatrolEnabled && (
+                <div>
+                  <div className="mb-1 text-[11px] text-slate-500">巡检间隔（小时，默认 24）</div>
+                  <input className={input} type="number" value={adv.autoPatrolHours} onChange={(e) => setAdv((p) => ({ ...p, autoPatrolHours: Number(e.target.value) }))} />
+                </div>
+              )}
             </div>
           </div>
         )}

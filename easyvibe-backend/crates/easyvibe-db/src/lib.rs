@@ -394,6 +394,7 @@ pub struct TaskRow {
     pub prompt_tokens: Option<i64>,     // M3-5：token 用量（CLI agent 无法回报时留 NULL）
     pub completion_tokens: Option<i64>,
     pub result: Option<String>,         // M4-1：产物归档 JSON（summary/changedModules/archivedPath/diffStat）
+    pub base_head: Option<String>,      // 变更归因：任务启动时的 git HEAD（0008）
     pub created_at: String,
     pub updated_at: String,
 }
@@ -405,6 +406,8 @@ pub trait TaskRepository: Send + Sync {
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
     fn set_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn set_gate(&self, id: &str, gate: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 变更归因：记录任务启动时的 git HEAD（工作区脏时归因不混历史改动）
+    fn set_base_head(&self, id: &str, head: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// M4-1：任务终态采集产物（[EASYVIBE-RESULT] 解析 + diff stat + 归档路径）
     fn set_result(&self, id: &str, result_json: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// M3-5（§11 🟡4）：后端重启会杀掉 spawn 的 agent（kill_on_drop）——
@@ -427,12 +430,12 @@ struct TaskRowSql {
     id: String, repo: String, title: String, description: String,
     modules: String, acceptance: String, source: String, context: String,
     status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>,
-    prompt_tokens: Option<i64>, completion_tokens: Option<i64>, result: Option<String>, created_at: String, updated_at: String,
+    prompt_tokens: Option<i64>, completion_tokens: Option<i64>, result: Option<String>, base_head: Option<String>, created_at: String, updated_at: String,
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, created_at: r.created_at, updated_at: r.updated_at }
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at }
     }
 }
 
@@ -484,6 +487,13 @@ impl TaskRepository for SqliteTaskRepository {
     async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE tasks SET session_id = ? WHERE id = ?")
             .bind(session_id).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn set_base_head(&self, id: &str, head: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET base_head = ? WHERE id = ?")
+            .bind(head).bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -804,7 +814,7 @@ mod tests {
             description: "d".into(), modules: "[\"m1\"]".into(), acceptance: "a".into(),
             source: "concern".into(), context: "{}".into(), status: "pending".into(),
             trust: "manual".into(), error: None, session_id: None, gate: None,
-            prompt_tokens: None, completion_tokens: None, result: None,
+            prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
             created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&t).await.unwrap();
@@ -860,7 +870,7 @@ mod tests {
             id: id.into(), repo: "demo".into(), title: "t".into(), description: "d".into(),
             modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
             status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
-            prompt_tokens: None, completion_tokens: None, result: None, created_at: "1".into(), updated_at: "1".into(),
+            prompt_tokens: None, completion_tokens: None, result: None, base_head: None, created_at: "1".into(), updated_at: "1".into(),
         };
         repo.create(&mk("task-run", "running")).await.unwrap();
         repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();

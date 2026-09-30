@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -212,6 +212,26 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
     }, 50)
   }
 
+  // 导出对话为 Markdown（§12d 兑现之一：对话含 mermaid 图，可直接评审/沉淀）
+  const exportChat = () => {
+    const md = [
+      `# EasyVibe 对话导出 · ${backendRepo ?? ''}`,
+      `> ${new Date().toLocaleString()}`,
+      '',
+      ...messages.flatMap((m) => {
+        if (m.role === 'system') return [`> ${m.content}`, '']
+        if (m.role === 'user') return [`## 问`, '', m.content, '']
+        return [`## 答`, '', m.content, '']
+      }),
+    ].join('\n')
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `easyvibe-chat-${backendRepo ?? 'export'}-${Date.now()}.md`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
   // S1：对话升级任务——最近用户问题 + 对话摘要 + 引用模块 → TaskDraft（表单可再编辑）
   const upgradeToTask = () => {
     const turns = messages.filter((m) => m.role !== 'system')
@@ -267,6 +287,15 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
         </span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={exportChat}
+            disabled={!backendRepo || messages.length === 0}
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+            title="导出全部对话为 Markdown（含 mermaid 图，可评审/沉淀）"
+          >
+            <Download size={10} />
+            导出
+          </button>
           <button
             onClick={upgradeToTask}
             disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}

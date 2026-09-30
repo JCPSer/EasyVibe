@@ -170,6 +170,17 @@ impl TaskExecutor {
             });
             return;
         };
+        // 变更归因：记录任务启动时的 HEAD（脏工作区 diff 不再混历史改动）
+        let base_head = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&repo.root)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        if let Some(head) = &base_head {
+            let _ = self.task_repo.set_base_head(&task.id, head).await;
+        }
         let prompt = {
             let h = self.harness.read().await;
             assemble_task_prompt(&h.framework_transparent, &task)
@@ -203,7 +214,7 @@ impl TaskExecutor {
                                 // 供 diff 关审批展示；采集失败不阻断终态回写
                                 if !failed {
                                     if let Some(json) =
-                                        collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id).await
+                                        collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id, &this.task_repo).await
                                     {
                                         let _ = this.task_repo.set_result(&task_id, &json).await;
                                         info!("[task-exec] 任务 {} 产物已归档（diff 关供料）", task_id);
@@ -454,7 +465,7 @@ pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
 
 /// git 变更摘要（diff 关供料）：`git diff --stat`（已跟踪改动）+ `git status --porcelain`
 /// （未跟踪新文件）。非 git 仓库返回 None——git 是增强项不是硬依赖（设计定稿）。
-pub async fn git_change_summary(repo_root: &std::path::Path) -> Option<String> {
+pub async fn git_change_summary(repo_root: &std::path::Path, base: Option<&str>) -> Option<String> {
     let run = |args: &[&str]| {
         tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -462,7 +473,11 @@ pub async fn git_change_summary(repo_root: &std::path::Path) -> Option<String> {
         )
     };
     let mut parts: Vec<String> = vec![];
-    match run(&["diff", "--stat", "HEAD"]).await {
+    let stat_args: Vec<&str> = match base {
+        Some(b) => vec!["diff", "--stat", b],
+        None => vec!["diff", "--stat", "HEAD"],
+    };
+    match run(&stat_args).await {
         Ok(Ok(out)) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !s.is_empty() {
@@ -484,10 +499,13 @@ pub async fn git_change_summary(repo_root: &std::path::Path) -> Option<String> {
 
 /// 完整 diff（M4-3 diff 可视化）：`git diff HEAD`，256KB 封顶（超帽截断并标注）。
 /// 非 git 仓库返回 None。落归档文件供 GET task-diff 读取，tasks.result 只带 stat 摘要不带全文。
-pub async fn git_full_diff(repo_root: &std::path::Path) -> Option<String> {
+pub async fn git_full_diff(repo_root: &std::path::Path, base: Option<&str>) -> Option<String> {
     let out = tokio::time::timeout(
         std::time::Duration::from_secs(15),
-        tokio::process::Command::new("git").args(["diff", "HEAD"]).current_dir(repo_root).output(),
+        tokio::process::Command::new("git").args(match base {
+            Some(b) => vec!["diff", b],
+            None => vec!["diff", "HEAD"],
+        }).current_dir(repo_root).output(),
     )
     .await
     .ok()?
@@ -507,6 +525,12 @@ pub async fn git_full_diff(repo_root: &std::path::Path) -> Option<String> {
     Some(s)
 }
 
+/// 变更归因：读任务行拿 base_head（spawn 时已落库）；读不到（竞态/旧库）回退 None=HEAD 口径
+async fn base_head_from_task(task_repo: &easyvibe_db::SqliteTaskRepository, task_id: &str) -> Option<String> {
+    use easyvibe_db::TaskRepository as _;
+    task_repo.get(task_id).await.ok().flatten().and_then(|t| t.base_head)
+}
+
 /// M4-1 终态采集：stdout 的 RESULT 行 + git 变更摘要 → `.easyvibe/development_docs/` 归档
 /// （§9 #2：git 可见、随 PR 评审）→ tasks.result JSON（diff 关审批的展示原料）。
 /// 两者皆无（agent 无输出且非 git 仓库）返回 None。
@@ -515,11 +539,14 @@ pub async fn collect_task_result(
     session_id: &str,
     repo_root: &std::path::Path,
     task_id: &str,
+    task_repo: &easyvibe_db::SqliteTaskRepository,
 ) -> Option<String> {
     let output = session_manager.output_of(session_id).await.unwrap_or_default();
     let parsed = parse_result_line(&output);
-    let diff_stat = git_change_summary(repo_root).await;
-    let diff_full = git_full_diff(repo_root).await;
+    // 变更归因：优先用任务 base_head，缺省回退 HEAD（兼容旧任务与无 git）
+    let base_owned = base_head_from_task(task_repo, task_id).await;
+    let diff_stat = git_change_summary(repo_root, base_owned.as_deref()).await;
+    let diff_full = git_full_diff(repo_root, base_owned.as_deref()).await;
     if parsed.is_none() && diff_stat.is_none() && diff_full.is_none() {
         return None;
     }
@@ -575,6 +602,7 @@ mod tests {
             prompt_tokens: None,
             completion_tokens: None,
             result: None,
+            base_head: None,
             created_at: "1".into(),
             updated_at: "1".into(),
         }
@@ -672,6 +700,8 @@ mod tests {
         // 实弹#3 防线：会话成功但无 RESULT 行 + 有 git 改动 → 采集带警告（审批人警惕空执行/归因错位）
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
         let sessions = SessionManager::new(tx); // 无此会话 → 无输出 → 解析不到 RESULT
+        let db = easyvibe_db::Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
         let repo = std::env::temp_dir().join("ev-git-repo-warn-test");
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(&repo).unwrap();
@@ -683,7 +713,7 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
         std::fs::write(repo.join("x.txt"), "1\n2\n").unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn").await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn", &task_repo).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["result"].is_null());
         assert!(
@@ -803,7 +833,7 @@ mod tests {
         let plain = std::env::temp_dir().join("ev-not-a-repo");
         let _ = std::fs::remove_dir_all(&plain);
         std::fs::create_dir_all(&plain).unwrap();
-        assert!(git_change_summary(&plain).await.is_none(), "非 git 仓库无摘要");
+        assert!(git_change_summary(&plain, None).await.is_none(), "非 git 仓库无摘要");
 
         // 真 git 仓库：提交后修改已跟踪文件 + 新增未跟踪文件
         let repo = std::env::temp_dir().join("ev-git-repo-test");
@@ -820,14 +850,14 @@ mod tests {
         git(&["commit", "-q", "-m", "init"]);
         std::fs::write(repo.join("a.txt"), "one\ntwo\n").unwrap();
         std::fs::write(repo.join("b_new.txt"), "new\n").unwrap();
-        let summary = git_change_summary(&repo).await.expect("git 仓库应有摘要");
+        let summary = git_change_summary(&repo, None).await.expect("git 仓库应有摘要");
         assert!(summary.contains("a.txt"), "已跟踪改动应入摘要: {summary}");
         assert!(summary.contains("b_new.txt"), "未跟踪新文件应入摘要: {summary}");
         // M4-3：完整 diff 含增行；非 git 目录返回 None
-        let full = git_full_diff(&repo).await.expect("应有完整 diff");
+        let full = git_full_diff(&repo, None).await.expect("应有完整 diff");
         assert!(full.contains("+two"), "diff 应含新增行: {full}");
         assert!(full.contains("diff --git"), "标准 diff 格式: {full}");
-        assert!(git_full_diff(&plain).await.is_none(), "非 git 仓库无完整 diff");
+        assert!(git_full_diff(&plain, None).await.is_none(), "非 git 仓库无完整 diff");
     }
 
     #[tokio::test]
