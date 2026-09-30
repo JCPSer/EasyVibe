@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench } from 'lucide-react'
 import { buildLayerTask, buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
@@ -42,7 +43,50 @@ function Row({ icon, label, children }: { icon: React.ReactNode; label: string; 
   )
 }
 
-function ModuleView({ map, mod, onCreateTask }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void }) {
+// S2：健康趋势条——module_health_history 自 M2-4 落库以来的第一个消费者。
+// 分数序列（旧→新）条形图：让"这模块在变好还是腐烂"可见，复检闭环的可视化判据。
+function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId: string }) {
+  const [rows, setRows] = useState<{ score: number; runId: string }[] | null>(null)
+  useEffect(() => {
+    let stale = false
+    fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(moduleId)}/health-history`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: { score: number; runId: string }[] }) => {
+        if (!stale) setRows(d.data.slice().reverse()) // 旧→新
+      })
+      .catch(() => !stale && setRows([]))
+    return () => {
+      stale = true
+    }
+  }, [backendRepo, moduleId])
+
+  if (rows === null) return null
+  if (rows.length < 2) return null // 单点无趋势，不渲染（避免噪音）
+  const latest = rows[rows.length - 1].score
+  const prev = rows[rows.length - 2].score
+  const delta = latest - prev
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="text-[9.5px] font-semibold text-slate-400">健康趋势</span>
+      <div className="flex h-4 items-end gap-0.5">
+        {rows.slice(-12).map((r, i) => (
+          <div
+            key={i}
+            className="w-1.5 rounded-sm"
+            style={{ height: `${Math.max(12, r.score)}%`, background: healthColor(r.score) }}
+            title={`${r.score} 分`}
+          />
+        ))}
+      </div>
+      <span className={`text-[9.5px] font-bold ${delta >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+        {delta >= 0 ? '+' : ''}
+        {delta}
+      </span>
+    </div>
+  )
+}
+
+function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void; backendRepo: string | null }) {
   const color = healthColor(mod.health.score)
   const deps = mod.dependencies.map((id) => map.modules.find((m) => m.id === id)).filter(Boolean) as Module[]
   const dependents = dependentsOf(map, mod)
@@ -80,6 +124,7 @@ function ModuleView({ map, mod, onCreateTask }: { map: CodeMap; mod: Module; onC
             coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
           </span>
         </div>
+        {backendRepo && <HealthTrend backendRepo={backendRepo} moduleId={mod.id} />}
         {mod.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{mod.health.review_note}</p>}
       </div>
 
@@ -384,7 +429,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             onOpenView={(ids) => (onOpenView ? onOpenView(ids) : ids.length > 0 && onLocateModule(ids[0]))}
           />
         )}
-        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} />}
+        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />

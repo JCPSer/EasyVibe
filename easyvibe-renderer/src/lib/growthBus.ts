@@ -48,3 +48,21 @@ export function onTaskEvent(l: TaskEventListener): () => void {
     taskListeners.delete(l)
   }
 }
+
+// S2：地图保鲜事件（freshness.changed）
+export type FreshnessEventListener = (event: {
+  repo: string
+  status: string
+  latestCommitAt?: number | null
+  commitsSinceMap?: number | null
+}) => void
+const freshnessListeners = new Set<FreshnessEventListener>()
+export function emitFreshnessEvent(e: { repo: string; status: string; latestCommitAt?: number | null; commitsSinceMap?: number | null }) {
+  for (const l of freshnessListeners) l(e)
+}
+export function onFreshnessEvent(l: FreshnessEventListener): () => void {
+  freshnessListeners.add(l)
+  return () => {
+    freshnessListeners.delete(l)
+  }
+}

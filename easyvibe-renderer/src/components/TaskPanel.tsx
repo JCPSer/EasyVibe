@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw} from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
 
 interface TaskResult {
@@ -48,6 +48,7 @@ export function TaskPanel({ backendRepo }: Props) {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [diffs, setDiffs] = useState<Record<string, string | null>>({})
+  const [rechecking, setRechecking] = useState(false)
   const [diffLoading, setDiffLoading] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -84,6 +85,19 @@ export function TaskPanel({ backendRepo }: Props) {
       })
       .catch(() => alert(decision === 'rejected' ? '驳回失败（理由必填）' : '审批操作失败'))
       .finally(() => setDeciding(null))
+  }
+
+  // S2 复检闭环：任务 done 且 agent 声明了改动模块 → 一键触发巡检，
+  // 该模块健康分变化会在详情页趋势条中显现（任务成功 ≠ 架构变好，复检让闭环成环）
+  const recheck = () => {
+    if (!backendRepo || rechecking) return
+    setRechecking(true)
+    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+      })
+      .catch(() => alert('触发巡检失败（需要本地后端在线）'))
+      .finally(() => setTimeout(() => setRechecking(false), 3000))
   }
 
   // M4-3：完整 diff 按需懒加载（不随任务列表载荷；归档文件按任务读取）
@@ -211,6 +225,17 @@ export function TaskPanel({ backendRepo }: Props) {
                   <p className="mt-1 truncate text-[9px] text-slate-400" title={t.result.archivedPath}>
                     已归档：{t.result.archivedPath}
                   </p>
+                )}
+                {t.status === 'done' && t.result.result?.changed_modules && t.result.result.changed_modules.length > 0 && (
+                  <button
+                    onClick={recheck}
+                    disabled={rechecking}
+                    className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                    title="任务成功 ≠ 架构变好：触发一次巡检，改动模块的健康变化将在详情页趋势条中可见"
+                  >
+                    <RefreshCw size={9} className={rechecking ? 'animate-spin' : ''} />
+                    {rechecking ? '巡检中…（稍后看详情页趋势条）' : '重新巡检验证改动效果'}
+                  </button>
                 )}
               </div>
             )}

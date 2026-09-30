@@ -63,6 +63,8 @@ pub enum BusEvent {
     Progress { repo: String, progress: Value },
     SessionStatus(SessionStatusChanged),
     TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
+    /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
+    Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -70,6 +72,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/repos", get(list_repos))
         .route("/repos/{id}/map", get(get_map))
+        .route("/repos/{id}/freshness", get(get_freshness))
+        .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
         .route("/repos/{id}/growth", get(get_growth))
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
@@ -134,6 +138,34 @@ async fn get_submap(
     }
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     Ok(Json(st.map_service.load_submap(&repo, &module_id).await?).into_response())
+}
+
+/// S2：地图保鲜状态（§13.4——stale 地图上的对话/建议/健康分全是假数据自信工作）
+async fn get_freshness(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let f = freshness::assess(&repo.root, &snap.json);
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "status": f.status.as_str(),
+            "mapGeneratedAt": f.map_generated_at,
+            "latestCommitAt": f.latest_commit_at,
+            "commitsSinceMap": f.commits_since_map,
+        }
+    }))
+    .into_response())
+}
+
+/// S2：模块健康历史（趋势图数据面；module_health_history 自 M2-4 落库以来的第一个消费者）
+async fn get_health_history(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
+    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    use easyvibe_db::HealthRepository as _;
+    let rows = st.health_repo.list_module_history(&id, &module_id, 20).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
 }
 
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
@@ -879,6 +911,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "task.statusChanged".into(),
                     data: serde_json::json!({ "repo": repo, "taskId": task_id, "status": status, "gate": gate }),
                 },
+                BusEvent::Freshness { repo, status, latest_commit_at, commits_since_map } => WsMessage {
+                    name: "freshness.changed".into(),
+                    data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
+                },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -914,6 +950,7 @@ impl IntoResponse for AppError {
 }
 
 mod task_exec;
+mod freshness;
 
 #[tokio::main]
 async fn main() {
@@ -1095,6 +1132,41 @@ async fn main() {
         Err(e) => tracing::warn!("[startup] interrupted 标记失败: {e}"),
     }
     executor.enqueue_pending(None).await;
+
+    // S2：定时落后度检查——地图保鲜状态变化推 freshness.changed（默认 30 分钟，adv.freshnessCheckMinutes 可调）。
+    // 只检查不自动重归纳：git 漂移通知用户，是否花 agent 成本重归纳由用户决定（一键巡检/重归纳在头部）
+    {
+        let bus = event_bus.clone();
+        let maps = map_service.clone();
+        let settings = settings_repo.clone();
+        tokio::spawn(async move {
+            let mut last: std::collections::HashMap<String, String> = Default::default();
+            loop {
+                for repo in maps.repos() {
+                    let Ok(snap) = maps.load_map(&repo).await else { continue };
+                    let f = freshness::assess(&repo.root, &snap.json);
+                    let status = f.status.as_str().to_string();
+                    let changed = last.get(&repo.id).map(|p| p != &status).unwrap_or(true);
+                    if changed || status != "fresh" {
+                        let _ = bus.send(BusEvent::Freshness {
+                            repo: repo.id.clone(),
+                            status: status.clone(),
+                            latest_commit_at: f.latest_commit_at,
+                            commits_since_map: f.commits_since_map,
+                        });
+                    }
+                    last.insert(repo.id.clone(), status);
+                }
+                let mut mins: u64 = 30;
+                if let Ok(Some(row)) = settings.get("global", "adv.freshnessCheckMinutes").await {
+                    if let Ok(v) = serde_json::from_str::<i64>(&row.value) {
+                        mins = (v.max(1)) as u64;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(mins * 60)).await;
+            }
+        });
+    }
 
     let state = AppState {
         map_service,

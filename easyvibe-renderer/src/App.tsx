@@ -27,7 +27,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitGrowthEvent, emitSessionEvent, emitTaskEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
+import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
@@ -489,6 +489,8 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [liveActivity, setLiveActivity] = useState(false)
   const [inducing, setInducing] = useState(false)
   const [patrolling, setPatrolling] = useState(false)
+  const [freshness, setFreshness] = useState<string | null>(null)
+  const [freshnessInfo, setFreshnessInfo] = useState<{ commitsSinceMap?: number | null }>({})
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   const growthRef = useRef<GrowthState | null>(null)
@@ -498,6 +500,23 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
 
   // R2：WS 断线 → 退出生长模式（重连后由用户重新进入，startGrowth 拉全量对齐）
   useEffect(() => setWsCloseListener(() => setGrowth(null)), [])
+
+  // S2：地图保鲜——启动拉一次 + WS freshness.changed 增量（git 有新提交而地图未更新）
+  useEffect(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${backendRepo}/freshness`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: { status: string; commitsSinceMap?: number | null } }) => {
+        setFreshness(d.data.status === 'fresh' ? null : d.data.status)
+        setFreshnessInfo({ commitsSinceMap: d.data.commitsSinceMap })
+      })
+      .catch(() => {})
+    return onFreshnessEvent((e) => {
+      if (e.repo !== backendRepo) return
+      setFreshness(e.status === 'fresh' ? null : e.status)
+      setFreshnessInfo({ commitsSinceMap: e.commitsSinceMap })
+    })
+  }, [backendRepo])
 
   // 会话状态：终态（succeeded/failed）解除"归纳中"/"巡检中"（patrol 会话以 patrol- 前缀区分）
   useEffect(
@@ -833,6 +852,22 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                     <WifiOff size={9} /> 演示数据 · 后端离线
                   </span>
                 )}
+                {freshness && (
+                  <span
+                    className={`flex items-center gap-1 rounded-full px-1.5 py-px font-semibold ${
+                      freshness === 'stale' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }`}
+                    title={`git 有 ${freshnessInfo.commitsSinceMap ?? '?'} 个提交在地图生成之后——对话/建议/健康分可能基于过时信息`}
+                  >
+                    <AlertTriangle size={9} />
+                    地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
+                    {freshness === 'stale' && backendRepo && (
+                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 px-1 text-[9px] hover:bg-white">
+                        重新归纳
+                      </button>
+                    )}
+                  </span>
+                )}
                 {inducing && (
                   <span className="flex items-center gap-1 font-semibold text-amber-600">
                     <RefreshCw size={10} className="animate-spin" />
@@ -1004,6 +1039,14 @@ export default function App() {
           if (msg.name === 'session.statusChanged') {
             const d = msg.data
             if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+          }
+          if (msg.name === 'freshness.changed' && msg.data?.repo === backendRepo) {
+            emitFreshnessEvent({
+              repo: msg.data.repo,
+              status: msg.data.status,
+              latestCommitAt: msg.data.latestCommitAt,
+              commitsSinceMap: msg.data.commitsSinceMap,
+            })
           }
           if (msg.name === 'task.statusChanged') {
             const d = msg.data
