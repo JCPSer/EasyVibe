@@ -34,6 +34,9 @@ pub struct AppState {
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
     pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
     pub conversation_repo: Arc<easyvibe_db::SqliteConversationRepository>,
+    /// 会话写串行化（审查 🟡1）：append+compact 是 read-modify-write，SQLite 语句原子
+    /// 不保证这段复合操作；发送中点"压缩上下文"是 UI 允许的真实并发
+    pub chat_lock: Arc<tokio::sync::Mutex<()>>,
     pub executor: Arc<task_exec::TaskExecutor>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
@@ -73,7 +76,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/chat", get(get_chat).post(chat))
         .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
         .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
-        .route("/repos/{id}/views", axum::routing::post(save_view))
+        .route("/repos/{id}/views", get(list_views).post(save_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
@@ -523,10 +526,14 @@ fn fold_pairs(messages: &[ConversationMessageRow]) -> Vec<(String, String)> {
 /// 压缩执行（auto 与手动共用）：返回留痕消息（"上下文已压缩：82%→34%"）。
 /// 存储分离（§11 🟡5）：水位前消息标 compacted（原文保留可回放），运行态只剩摘要+窗口；
 /// 摘要必带会话状态（§11 🟡6）：compact_stub/compact_with_llm 的结构化段落保证。
+/// 调用方约定：auto 路径（chat 第 5 步）必须吞错降级——压缩绝不可打断已成功的对话（审查 🔴）；
+/// 手动路径（compact_chat）传播错误，那里没有已落库的回答可损失。
 async fn maybe_compact(st: &AppState, repo_id: &str, budget: i64, threshold: i64, force: bool) -> Result<Option<String>, ApiError> {
     let conv = st.conversation_repo.get_or_create(repo_id).await?;
     let fresh = st.conversation_repo.list_uncompacted(&conv.id).await?;
-    let total: i64 = fresh.iter().map(|m| m.tokens).sum();
+    // 触发口径 = 真实装配口径：未压缩窗口 + 既有摘要（摘要自身增长也会再触发，护栏闭环）
+    let total: i64 = fresh.iter().map(|m| m.tokens).sum::<i64>()
+        + conv.summary.as_deref().map(easyvibe_ai_agent::estimate_tokens).unwrap_or(0);
     if !force && !compaction::needs_compaction(total, budget, threshold) {
         return Ok(None);
     }
@@ -586,7 +593,12 @@ struct ChatHttpRequest {
 /// 用户消息落库 → 运行态上下文=摘要+未压缩窗口 → 问答 → 回答落库+token 记账 → auto-compact 检查
 async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<ChatHttpRequest>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    if body.message.trim().is_empty() {
+        return Err(AppError(ApiError::BadRequest("消息不能为空".into())));
+    }
     let snap = st.map_service.load_map(&repo).await?;
+    // 会话写串行化（审查 🟡1）：持锁覆盖 落库→装配→compact 全段
+    let _guard = st.chat_lock.lock().await;
     let conv = st.conversation_repo.get_or_create(&id).await?;
 
     // 1) 用户消息落库（会话持久化：历史不再只活在前端 state）
@@ -619,10 +631,23 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
         .add_tokens(&conv.id, answer.prompt_tokens as i64, answer.completion_tokens as i64)
         .await?;
 
-    // 5) auto-compact（§10a：80% 触发，全自动不打断）
+    // 5) auto-compact（§10a：80% 触发，全自动不打断）——压缩失败降级不传播（审查 🔴：
+    //    回答已落库，绝不能让第 5 步把本轮问答变成 500）
     let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
     let threshold = resolve_adv_i64(&st, &id, "adv.compactThreshold", DEFAULT_COMPACT_THRESHOLD).await;
-    let compaction_trace = maybe_compact(&st, &id, budget, threshold, false).await?;
+    let compaction_trace = match maybe_compact(&st, &id, budget, threshold, false).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("[chat] {} auto-compact 失败（不阻断对话）: {e}", id);
+            None
+        }
+    };
+
+    // 累计口径（前端"累计 tokens"与 GET 恢复一致；POST 的 usage 是单次调用增量）
+    let usage = {
+        let c = st.conversation_repo.get_or_create(&id).await?;
+        serde_json::json!({ "promptTokens": c.prompt_tokens, "completionTokens": c.completion_tokens })
+    };
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -630,7 +655,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
             "reply": answer.reply,
             "refs": answer.refs,
             "compaction": compaction_trace,
-            "usage": { "promptTokens": answer.prompt_tokens, "completionTokens": answer.completion_tokens },
+            "usage": usage,
         }
     }))
     .into_response())
@@ -639,6 +664,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
 /// 手动压缩（§10a：对话界面"压缩上下文"按钮；自动阈值兜底之外的主动手段）
 async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let _guard = st.chat_lock.lock().await;
     let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
     let trace = maybe_compact(&st, &id, budget, 0, true).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": { "compacted": trace.is_some(), "trace": trace } })).into_response())
@@ -647,6 +673,7 @@ async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Res
 /// 新对话：清空消息与摘要（会话行保留，token 计数归零）
 async fn reset_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let _guard = st.chat_lock.lock().await;
     let conv = st.conversation_repo.get_or_create(&id).await?;
     st.conversation_repo.reset(&conv.id).await?;
     Ok(Json(serde_json::json!({ "success": true })).into_response())
@@ -661,6 +688,32 @@ struct SaveViewRequest {
     edges: Vec<serde_json::Value>,
     #[serde(default)]
     annotations: Vec<serde_json::Value>,
+}
+
+/// 视图列表（F1b 读侧）：.easyvibe/views/*.json 引用式视图，供前端"视图"页签消费
+async fn list_views(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let dir = repo.root.join(".easyvibe/views");
+    let mut items: Vec<serde_json::Value> = vec![];
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { continue };
+            items.push(serde_json::json!({
+                "slug": path.file_stem().and_then(|s| s.to_str()).unwrap_or(""),
+                "name": v["name"],
+                "createdAt": v["created_at"],
+                "nodes": v["nodes"].as_array().map(|a| a.len()).unwrap_or(0),
+                "view": v,
+            }));
+        }
+    }
+    items.sort_by(|a, b| b["createdAt"].as_str().cmp(&a["createdAt"].as_str()));
+    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
 }
 
 /// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
@@ -956,6 +1009,7 @@ async fn main() {
         task_repo,
         approval_repo,
         conversation_repo,
+        chat_lock: Arc::new(tokio::sync::Mutex::new(())),
         executor,
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
@@ -1030,6 +1084,7 @@ mod tests {
             task_repo,
             approval_repo,
             conversation_repo,
+            chat_lock: Arc::new(tokio::sync::Mutex::new(())),
             executor,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
@@ -1101,8 +1156,8 @@ mod tests {
         assert_eq!(messages.len(), 4, "两轮对话 = user+assistant × 2");
         assert_eq!(messages[0]["role"], "user");
         assert!(messages[0]["content"].as_str().unwrap().contains("评测提交"));
-        // token 用量已记账（stub 估算 > 0）
-        assert!(data["usage"]["promptTokens"].as_i64().unwrap() >= 0);
+        // token 用量已记账（stub 估算为正；POST 返回累计口径）
+        assert!(data["usage"]["promptTokens"].as_i64().unwrap() > 0, "记账链路应产生正用量");
     }
 
     #[tokio::test]

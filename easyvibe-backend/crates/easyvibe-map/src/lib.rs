@@ -370,4 +370,18 @@ mod tests {
         assert_eq!(content_hash("abc"), content_hash("abc"));
         assert_ne!(content_hash("abc"), content_hash("abd"));
     }
+
+    #[test]
+    fn fixtures_pilot_map_passes_strict_validation() {
+        // §7 契约回归：fixtures 是提示词试点的验收产物（v1.1 全字段），
+        // Rust 校验器消费它——格式演进（edge id / meta.stats / 封闭枚举）有真实回归网
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/hover-client-v2.1-pilot/expected/map.json");
+        let raw = std::fs::read_to_string(&path).expect("fixtures map.json 不可读（提示词试点验收产物）");
+        let map: Value = serde_json::from_str(&raw).expect("fixtures map.json 非法 JSON");
+        validate_strict(&map).expect("fixtures 试点地图必须过严格验收（v1.1）");
+        // 读路径底线：存量地图 minimum 必过
+        let svc = MapService::new(vec![]);
+        assert!(svc.check_minimum(&map).is_ok());
+    }
 }

@@ -31,12 +31,15 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
   const listRef = useRef<HTMLDivElement>(null)
 
   // 恢复会话（M3-5：历史从域 2 读，完整原文含压缩留痕）
+  // stale 保护：快速切换仓库时，旧 fetch 返回不得覆盖新会话（审查 🟡2）
   useEffect(() => {
     if (!backendRepo) return
+    let stale = false
     setMessages([])
     fetch(`/api/repos/${backendRepo}/chat`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ChatRestore }) => {
+        if (stale) return
         setUsage(d.data.usage)
         setMessages(
           d.data.messages.map((m) => ({
@@ -50,6 +53,9 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
       .catch(() => {
         /* 后端不在线：保持空会话，发送时会有错误提示 */
       })
+    return () => {
+      stale = true
+    }
   }, [backendRepo])
 
   const send = () => {
