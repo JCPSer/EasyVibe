@@ -1078,7 +1078,10 @@ export default function App() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json() as Promise<CodeMap>
       })
-      .then(setMap)
+      .then((m) => {
+        setError(null) // 实弹#4 前端根因：成功后必须清错误态，否则 (error && backendRepo) 恒真永远白屏等待
+        setMap(m)
+      })
       .catch((e) => setError(String(e)))
   }, [backendRepo, reloadTick])
 
@@ -1095,7 +1098,7 @@ export default function App() {
       <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
         <Loader2 size={16} className="animate-spin text-blue-500" />
         <span className="font-semibold text-slate-700">正在归纳代码地图…</span>
-        <span className="text-[11px] text-slate-400">后台 agent 执行中，模块将随生长事件陆续出现（完成后自动展示）</span>
+        <span className="text-[11px] text-slate-400">后台 agent 执行中（通常数分钟，取决于仓库规模）——完成后地图会自动出现；之后可点头部"生长演示"回放生成过程</span>
       </div>
     )
   }
