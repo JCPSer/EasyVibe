@@ -18,7 +18,7 @@
 ```
 
 - 模块 id：`<MODULE_ID>`
-- **产出文件（唯一交付物）**：`<REPO_ROOT>/.easyvibe/modules/<MODULE_ID>.json`
+- **产出文件（唯一交付物）**：`<REPO_ROOT>/.easyvibe/map/modules/<MODULE_ID>.json`（注意在 map/ 子目录下，先 mkdir -p）
 
 ## 分析范围
 
