@@ -732,6 +732,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
         "data": {
             "reply": answer.reply,
             "refs": answer.refs,
+            "clarify": answer.clarify,
             "compaction": compaction_trace,
             "usage": usage,
         }

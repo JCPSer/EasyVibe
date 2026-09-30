@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw } from 'lucide-react'
+import type { TaskDraft } from '@/lib/taskContext'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -8,9 +9,17 @@ interface ChatMessage {
   refs: string[]
 }
 
+interface Clarify {
+  question: string
+  options: { label: string; desc?: string }[]
+  why?: string
+}
+
 interface Props {
   backendRepo: string | null
   onLocateModule: (moduleId: string) => void
+  /** S1：对话升级任务入口——把本轮对话组织成 TaskDraft 交给任务表单 */
+  onCreateTask: (draft: TaskDraft) => void
 }
 
 interface ChatRestore {
@@ -21,13 +30,14 @@ interface ChatRestore {
 
 // 入口对话（F2 + M3-5 会话持久化）：服务端 SQLite 是会话事实源——
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, onLocateModule }: Props) {
+export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [savedIdx, setSavedIdx] = useState<number | null>(null)
   const [compacting, setCompacting] = useState(false)
+  const [clarify, setClarify] = useState<Clarify | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   // 恢复会话（M3-5：历史从域 2 读，完整原文含压缩留痕）
@@ -64,6 +74,7 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
     setInput('')
     setSending(true)
     // 服务端为事实源：只发当前消息，历史由后端从库装配（摘要+未压缩窗口）
+    setClarify(null)
     setMessages((prev) => [...prev, { role: 'user', content: q, refs: [] }])
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
@@ -74,8 +85,9 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
       })
-      .then((d: { data: { reply: string; refs: string[]; compaction: string | null; usage: { promptTokens: number; completionTokens: number } } }) => {
+      .then((d: { data: { reply: string; refs: string[]; compaction: string | null; clarify: Clarify | null; usage: { promptTokens: number; completionTokens: number } } }) => {
         setUsage(d.data.usage)
+        setClarify(d.data.clarify)
         setMessages((prev) => [
           ...prev,
           { role: 'assistant', content: d.data.reply, refs: d.data.refs },
@@ -121,6 +133,36 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
       .catch(() => alert('重置失败（需要本地后端在线）'))
   }
 
+  // 澄清卡点选：选择即回答（grill-me 选择题形态的产品化；选择带建议理由回传）
+  const answerClarify = (label: string, desc?: string) => {
+    setClarify(null)
+    setInput(`选择：${label}${desc ? `（${desc}）` : ''}`)
+    setTimeout(() => {
+      const btn = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="问点什么"]')
+      btn?.focus()
+    }, 50)
+  }
+
+  // S1：对话升级任务——最近用户问题 + 对话摘要 + 引用模块 → TaskDraft（表单可再编辑）
+  const upgradeToTask = () => {
+    const turns = messages.filter((m) => m.role !== 'system')
+    const lastUser = [...turns].reverse().find((m) => m.role === 'user')
+    if (!lastUser) return
+    const refs = [...new Set(turns.flatMap((m) => m.refs))].slice(0, 5)
+    const summary = turns
+      .slice(-6)
+      .map((m) => `${m.role === 'user' ? '问' : '答'}：${m.content.slice(0, 120)}`)
+      .join('\n')
+    onCreateTask({
+      title: `对话：${lastUser.content.slice(0, 16)}`,
+      description: `${lastUser.content}\n\n—— 来自对话的已澄清需求，见上下文中的对话摘要。`,
+      modules: refs,
+      acceptance: '',
+      source: 'manual',
+      context: { inject: { conversation: summary, refs } },
+    })
+  }
+
   const saveAsView = (idx: number) => {
     const m = messages[idx]
     const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
@@ -150,6 +192,15 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
         </span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={upgradeToTask}
+            disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+            title="把本轮对话（已澄清的需求与引用模块）组织成修复任务"
+          >
+            <Wrench size={10} />
+            转为任务
+          </button>
           <button
             onClick={compact}
             disabled={!backendRepo || compacting}
@@ -222,6 +273,33 @@ export function ChatPanel({ backendRepo, onLocateModule }: Props) {
               </div>
             </div>
           ),
+        )}
+        {/* S1 grill-me 澄清卡：选择题形态，点选即回答 */}
+        {clarify && (
+          <div className="flex justify-start">
+            <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-[11px] font-semibold leading-4 text-amber-800">
+                {clarify.question}
+                {clarify.why && (
+                  <span className="ml-1 font-normal text-amber-500" title={clarify.why}>
+                    ⓘ
+                  </span>
+                )}
+              </p>
+              <div className="mt-1.5 space-y-1">
+                {clarify.options.map((o) => (
+                  <button
+                    key={o.label}
+                    onClick={() => answerClarify(o.label, o.desc)}
+                    className="flex w-full items-center justify-between gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-left text-[11px] text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                  >
+                    <span className="font-medium">{o.label}</span>
+                    {o.desc && <span className="shrink-0 text-[9.5px] text-slate-400">{o.desc}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
         {sending && (
           <div className="flex justify-start">

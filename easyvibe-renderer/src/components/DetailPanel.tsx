@@ -374,7 +374,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} />}
         {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
-          <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />
+          <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
         </div>
         {tab === 'suggest' && <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />}
         {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} />}
