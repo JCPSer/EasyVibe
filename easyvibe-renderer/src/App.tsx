@@ -976,10 +976,20 @@ export default function App() {
       .catch((e) => setError(String(e)))
   }, [backendRepo, reloadTick])
 
-  if (error) {
+  if (error && !backendRepo) {
     return (
       <div className="flex h-screen items-center justify-center text-[13px] text-red-500">
-        地图数据加载失败（/data/map.json）：{error}
+        静态数据加载失败（/data/map.json）：{error}
+      </div>
+    )
+  }
+  if ((error && backendRepo) || (!map && backendRepo)) {
+    // 后端在线但地图尚未生成：归纳进行中，map.changed 会触发自动重试
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
+        <Loader2 size={16} className="animate-spin text-blue-500" />
+        <span className="font-semibold text-slate-700">正在归纳代码地图…</span>
+        <span className="text-[11px] text-slate-400">后台 agent 执行中，模块将随生长事件陆续出现（完成后自动展示）</span>
       </div>
     )
   }

@@ -564,6 +564,17 @@ async fn main() {
 
     // 每个仓库一个地图 watcher，变更翻译为总线事件
     for r in repos {
+        // F1 打开仓库自动初始化（后端侧）：无合法地图的仓库启动即触发归纳，
+        // 产物经 watcher 推送，前端 map.changed 后自动渲染
+        if map_service.cached(&r.id).await.is_none() {
+            info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
+            if let Err(e) = session_manager
+                .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args)
+                .await
+            {
+                tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);
+            }
+        }
         let mut rx = spawn_map_watcher(map_service.clone(), r.clone());
         let bus = event_bus.clone();
         let repo_id = r.id.clone();

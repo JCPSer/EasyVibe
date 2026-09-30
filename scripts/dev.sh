@@ -6,6 +6,11 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 REPO=${1:-/Users/liyuhang/Documents/git_projects/language-band/hover-client}
 
+# 清理占端口的旧进程（曾导致新后端绑定失败、页面连到旧仓库）
+lsof -ti :7101 | xargs kill -9 2>/dev/null || true
+lsof -ti :7100 | xargs kill -9 2>/dev/null || true
+sleep 1
+
 echo "▶ 启动 EasyVibe 后端 (127.0.0.1:7101, 仓库: $REPO)"
 cd easyvibe-backend
 EASYVIBE_REPO="$REPO" \
