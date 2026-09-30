@@ -31,6 +31,7 @@ pub struct AppState {
     pub health_repo: Arc<easyvibe_db::SqliteHealthRepository>,
     pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub cipher: Arc<easyvibe_common::SecretCipher>,
+    pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
     pub llm_mode: Arc<LlmMode>,
     pub patrol_prompt: Arc<String>,
     pub schema_path: Arc<String>,
@@ -67,6 +68,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
         .route("/repos/{id}/chat", axum::routing::post(chat))
         .route("/repos/{id}/views", axum::routing::post(save_view))
+        .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
@@ -353,6 +355,67 @@ async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(St
     Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
 
+// ---------- M3-2：指哪打哪——任务创建（上下文已组织好随表单提交；执行引擎 M3-3 接入） ----------
+
+#[derive(serde::Deserialize)]
+struct CreateTaskRequest {
+    title: String,
+    description: String,
+    #[serde(default)]
+    modules: Vec<String>,
+    #[serde(default)]
+    acceptance: String,
+    #[serde(default)]
+    source: String, // module / concern / layer / manual
+    #[serde(default)]
+    context: serde_json::Value,
+    #[serde(default)]
+    trust: String, // manual / auto
+}
+
+async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateTaskRequest>) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    if body.description.trim().is_empty() {
+        return Err(AppError(ApiError::BadRequest("需求描述不能为空".into())));
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string();
+    let task_id = format!("task-{}", &now);
+    let row = easyvibe_db::TaskRow {
+        id: task_id.clone(),
+        repo: repo.id,
+        title: body.title,
+        description: body.description,
+        modules: serde_json::to_string(&body.modules).unwrap_or_else(|_| "[]".into()),
+        acceptance: body.acceptance,
+        source: if body.source.is_empty() { "manual".into() } else { body.source },
+        context: serde_json::to_string(&body.context).unwrap_or_else(|_| "{}".into()),
+        status: "pending".into(), // M3-3：harness 执行引擎接走
+        trust: if body.trust == "auto" { "auto".into() } else { "manual".into() },
+        error: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    st.task_repo.create(&row).await?;
+    Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "success": true, "data": { "id": task_id } }))).into_response())
+}
+
+async fn list_tasks(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let tasks = st.task_repo.list(&id, 50).await?;
+    let items: Vec<serde_json::Value> = tasks
+        .into_iter()
+        .map(|t| serde_json::json!({
+            "id": t.id, "title": t.title, "description": t.description,
+            "modules": serde_json::from_str::<serde_json::Value>(&t.modules).unwrap_or_default(),
+            "acceptance": t.acceptance, "source": t.source,
+            "status": t.status, "trust": t.trust, "error": t.error,
+            "createdAt": t.created_at, "updatedAt": t.updated_at,
+        }))
+        .collect();
+    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
+}
+
 #[derive(serde::Deserialize)]
 struct ChatHttpRequest {
     message: String,
@@ -630,6 +693,7 @@ async fn main() {
     let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(database.pool().clone()));
     let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
     let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(database.pool().clone()));
+    let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(database.pool().clone()));
 
     // 主密钥：EASYVIBE_MASTER_KEY（64 位十六进制）优先，否则数据目录 .master_key（0600，首次生成）
     let cipher = {
@@ -673,6 +737,7 @@ async fn main() {
         health_repo,
         settings_repo,
         cipher: Arc::new(cipher),
+        task_repo,
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
         schema_path: Arc::new(schema_path),
@@ -699,6 +764,7 @@ mod tests {
         let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(db.pool().clone()));
         let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
         let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {
             map_service: svc,
@@ -710,6 +776,7 @@ mod tests {
             health_repo,
             settings_repo,
             cipher: Arc::new(cipher),
+            task_repo,
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),

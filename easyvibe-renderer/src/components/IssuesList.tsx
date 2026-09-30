@@ -1,4 +1,5 @@
-import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info } from 'lucide-react'
+import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Wrench } from 'lucide-react'
+import { buildConcernTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Concern, Module } from '@/types/map'
 import { healthColor, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
@@ -72,7 +73,7 @@ function SeverityChip({ severity }: { severity: 'critical' | 'high' }) {
   )
 }
 
-export function IssuesList({ map, onLocate }: { map: CodeMap; onLocate: (moduleId: string) => void }) {
+export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLocate: (moduleId: string) => void; onCreateTask: (d: TaskDraft) => void }) {
   const issues = collectIssues(map)
 
   return (
@@ -124,9 +125,23 @@ export function IssuesList({ map, onLocate }: { map: CodeMap; onLocate: (moduleI
             </p>
 
             {issue.moduleId && (
-              <p className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-blue-500">
-                <Crosshair size={10} /> 点击定位到画布
-              </p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="flex items-center gap-1 text-[10px] font-medium text-blue-500">
+                  <Crosshair size={10} /> 点击定位到画布
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const mod = map.modules.find((m) => m.id === issue.moduleId)
+                    const concern = mod?.health.concerns?.find((c) => c.finding === issue.finding)
+                    if (mod) onCreateTask(concern ? buildConcernTask(map, mod.id, concern, 0) : buildConcernTask(map, mod.id, { severity: issue.severity, finding: issue.finding, suggestion: issue.suggestion }, 0))
+                  }}
+                  className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700"
+                  title="指哪打哪：以该问题为上下文发起修复任务"
+                >
+                  <Wrench size={9} /> 修复
+                </button>
+              </div>
             )}
           </div>
         ))}

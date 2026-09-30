@@ -24,6 +24,8 @@ import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/Ex
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
+import { TaskFormPanel } from '@/components/TaskFormPanel'
+import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitGrowthEvent, emitSessionEvent, notifyWsClosed, onGrowthEvent, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
@@ -488,6 +490,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
   const [inducing, setInducing] = useState(false)
   const [patrolling, setPatrolling] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   const growthRef = useRef<GrowthState | null>(null)
   useEffect(() => {
     growthRef.current = growth
@@ -847,6 +850,9 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
       {/* 设置面板（滑出） */}
       {settingsOpen && <SettingsPanel backendRepo={backendRepo} onClose={() => setSettingsOpen(false)} />}
 
+      {/* 任务表单（指哪打哪：模块/问题/层入口预填） */}
+      {taskDraft && <TaskFormPanel backendRepo={backendRepo} draft={taskDraft} map={map} onClose={() => setTaskDraft(null)} />}
+
       {/* 右侧详情面板 */}
       {panelOpen ? (
         <DetailPanel
@@ -856,6 +862,7 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
           onTabChange={setTab}
           submaps={submaps}
           backendRepo={backendRepo}
+          onCreateTask={(d) => setTaskDraft(d)}
           onLocateModule={(id) => {
             setSelection({ kind: 'module', id })
             setTab('detail')

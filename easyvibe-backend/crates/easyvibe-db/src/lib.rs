@@ -363,6 +363,95 @@ impl From<SettingRowSql> for SettingRow {
     }
 }
 
+// ---------- 任务（M3-2） ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRow {
+    pub id: String,
+    pub repo: String,
+    pub title: String,
+    pub description: String,
+    pub modules: String,   // JSON
+    pub acceptance: String,
+    pub source: String,
+    pub context: String,   // JSON
+    pub status: String,
+    pub trust: String,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub trait TaskRepository: Send + Sync {
+    fn create(&self, t: &TaskRow) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    fn list(&self, repo: &str, limit: i64) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
+    fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
+}
+
+pub struct SqliteTaskRepository {
+    pool: SqlitePool,
+}
+
+impl SqliteTaskRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct TaskRowSql {
+    id: String, repo: String, title: String, description: String,
+    modules: String, acceptance: String, source: String, context: String,
+    status: String, trust: String, error: Option<String>, created_at: String, updated_at: String,
+}
+
+impl From<TaskRowSql> for TaskRow {
+    fn from(r: TaskRowSql) -> Self {
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, created_at: r.created_at, updated_at: r.updated_at }
+    }
+}
+
+impl TaskRepository for SqliteTaskRepository {
+    async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
+        sqlx::query(
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
+        .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
+        .bind(&t.created_at).bind(&t.updated_at)
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET status = ?, error = ?, updated_at = ? WHERE id = ?")
+            .bind(status).bind(error)
+            .bind(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string())
+            .bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn list(&self, repo: &str, limit: i64) -> Result<Vec<TaskRow>, ApiError> {
+        let rows = sqlx::query_as::<_, TaskRowSql>(
+            "SELECT * FROM tasks WHERE repo = ? ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(repo).bind(limit)
+        .fetch_all(&self.pool).await.map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<TaskRow>, ApiError> {
+        let row = sqlx::query_as::<_, TaskRowSql>("SELECT * FROM tasks WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool).await.map_err(db_err)?;
+        Ok(row.map(Into::into))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +490,25 @@ mod tests {
         assert_eq!(repo.list("global").await.unwrap().len(), 1);
         repo.delete("hover-client", "slot.patrol").await.unwrap();
         assert!(repo.get("hover-client", "slot.patrol").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn task_roundtrip() {
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteTaskRepository::new(db.pool().clone());
+        let t = TaskRow {
+            id: "task-1".into(), repo: "demo".into(), title: "修复耦合".into(),
+            description: "d".into(), modules: "[\"m1\"]".into(), acceptance: "a".into(),
+            source: "concern".into(), context: "{}".into(), status: "pending".into(),
+            trust: "manual".into(), error: None, created_at: "1".into(), updated_at: "1".into(),
+        };
+        repo.create(&t).await.unwrap();
+        repo.update_status("task-1", "running", None).await.unwrap();
+        let list = repo.list("demo", 10).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].status, "running");
+        assert_eq!(list[0].source, "concern");
+        assert!(repo.get("task-1").await.unwrap().is_some());
     }
 
     #[tokio::test]

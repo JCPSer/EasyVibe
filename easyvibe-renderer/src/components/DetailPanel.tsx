@@ -1,4 +1,5 @@
-import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info } from 'lucide-react'
+import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench } from 'lucide-react'
+import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,7 @@ interface Props {
   onTabChange: (tab: PanelTab) => void
   submaps: Record<string, SubMap | 'loading' | 'error'>
   backendRepo: string | null
+  onCreateTask: (draft: TaskDraft) => void
   onLocateModule: (moduleId: string) => void
   onClose: () => void
 }
@@ -35,7 +37,7 @@ function Row({ icon, label, children }: { icon: React.ReactNode; label: string; 
   )
 }
 
-function ModuleView({ map, mod }: { map: CodeMap; mod: Module }) {
+function ModuleView({ map, mod, onCreateTask }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void }) {
   const color = healthColor(mod.health.score)
   const deps = mod.dependencies.map((id) => map.modules.find((m) => m.id === id)).filter(Boolean) as Module[]
   const dependents = dependentsOf(map, mod)
@@ -62,6 +64,13 @@ function ModuleView({ map, mod }: { map: CodeMap; mod: Module }) {
           <span className="text-[11px] font-semibold" style={{ color }}>
             {healthLabel(mod.health.score)} · {mod.health.score}/100
           </span>
+          <button
+            onClick={() => onCreateTask(buildModuleTask(map, mod.id))}
+            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            title="指哪打哪：以本模块为上下文发起修复任务"
+          >
+            <Wrench size={10} /> 发起修复
+          </button>
           <span className="text-[10.5px] text-slate-400">
             coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
           </span>
@@ -308,7 +317,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onLocateModule, onClose }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -347,12 +356,12 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         </button>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} />}
+        {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} />}
         {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
           <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} />
         </div>
-        {tab === 'detail' && module && <ModuleView map={map} mod={module} />}
+        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />
