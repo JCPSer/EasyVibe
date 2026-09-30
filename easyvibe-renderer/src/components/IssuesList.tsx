@@ -150,7 +150,7 @@ export function IssuesList({ map, onLocate, onCreateTask }: { map: CodeMap; onLo
                     })
                   }
                 }}
-                className={`flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700 ${issue.moduleId ? 'ml-auto' : ''}`}
+                className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700"
                 title="指哪打哪：以该问题为上下文发起修复任务"
               >
                 <Wrench size={9} /> 修复

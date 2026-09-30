@@ -17,6 +17,14 @@ pub mod compaction;
 pub struct ChatRequest<'a> {
     pub system: &'a str,
     pub user: &'a str,
+    /// S3 附件：dataURL 格式的图片（data:image/png;base64,...）；仅支持图像的模型消费
+    pub images: &'a [String],
+}
+
+impl<'a> Default for ChatRequest<'a> {
+    fn default() -> Self {
+        Self { system: "", user: "", images: &[] }
+    }
 }
 
 /// LLM 调用结果：文本 + token 用量（§10 #4 成本护栏第一步的原始口径 §11 🟢10）
@@ -77,17 +85,18 @@ impl AnthropicClient {
 
 impl LlmClient for AnthropicClient {
     async fn chat(&self, req: ChatRequest<'_>) -> Result<ChatOutcome, ApiError> {
+        /// content：纯文本为 JSON string；含图片为 block 数组（[text, image...]）
         #[derive(serde::Serialize)]
-        struct Msg<'a> {
-            role: &'a str,
-            content: &'a str,
+        struct Msg {
+            role: &'static str,
+            content: serde_json::Value,
         }
         #[derive(serde::Serialize)]
         struct Body<'a> {
             model: &'a str,
             max_tokens: u32,
             system: &'a str,
-            messages: [Msg<'a>; 1],
+            messages: [Msg; 1],
         }
         // 无超时会让会话永久 Running（审查 Y2）
         let client = reqwest::Client::builder()
@@ -102,7 +111,34 @@ impl LlmClient for AnthropicClient {
         for (k, v) in &self.extra_headers {
             http_req = http_req.header(k, v);
         }
-        let body = Body { model: &self.model, max_tokens: self.max_tokens, system: req.system, messages: [Msg { role: "user", content: req.user }] };
+        // dataURL 解析：data:image/png;base64,<data> → (media_type, data)（不合法的跳过，不阻断对话）
+        let mut blocks: Vec<(String, String)> = vec![];
+        for url in req.images {
+            let Some(rest) = url.strip_prefix("data:") else { continue };
+            let Some((meta, data)) = rest.split_once(";base64,") else { continue };
+            if !meta.starts_with("image/") {
+                continue;
+            }
+            blocks.push((meta.to_string(), data.to_string()));
+        }
+        let content = if blocks.is_empty() {
+            serde_json::Value::String(req.user.to_string())
+        } else {
+            let mut arr = vec![serde_json::json!({ "type": "text", "text": req.user })];
+            for (media_type, data) in blocks {
+                arr.push(serde_json::json!({
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": media_type, "data": data },
+                }));
+            }
+            serde_json::Value::Array(arr)
+        };
+        let body = Body {
+            model: &self.model,
+            max_tokens: self.max_tokens,
+            system: req.system,
+            messages: [Msg { role: "user", content }],
+        };
         let resp = http_req.json(&body).send()
             .await
             .map_err(|e| ApiError::Internal(format!("LLM 请求失败: {e}")))?;
@@ -252,7 +288,7 @@ impl<R: HealthRepository> PatrolService<R> {
                 "<CURRENT_MAP>",
                 &format!("<CURRENT_MAP_EMBED>\n{}\n</CURRENT_MAP_EMBED>", serde_json::to_string(current_map).unwrap_or_default()),
             );
-        let outcome = llm.chat(ChatRequest { system: "你是 EasyVibe 巡检 Agent，只输出 JSON 本身。", user: &user }).await?;
+        let outcome = llm.chat(ChatRequest { system: "你是 EasyVibe 巡检 Agent，只输出 JSON 本身。", user: &user, images: &[] }).await?;
         let raw = outcome.text;
 
         let new_map = extract_json(&raw)?;
@@ -475,7 +511,7 @@ pub fn parse_clarify(raw: &str) -> (String, Option<Clarify>) {
 /// 对话槽位客户端。Stub = 确定性地图检索（零成本、回答真实基于地图）；
 /// LLM 实现 = 地图上下文注入（M2-5 范围：基于地图回答；代码级追问留待 M3 工具能力）。
 pub trait QaClient: Send + Sync {
-    async fn ask(&self, map: &Value, question: &str, history: &[(String, String)]) -> Result<QaAnswer, ApiError>;
+    async fn ask(&self, map: &Value, question: &str, history: &[(String, String)], images: &[String]) -> Result<QaAnswer, ApiError>;
     fn model(&self) -> &str;
 }
 
@@ -490,7 +526,7 @@ impl StubQaClient {
 }
 
 impl QaClient for StubQaClient {
-    async fn ask(&self, map: &Value, question: &str, _history: &[(String, String)]) -> Result<QaAnswer, ApiError> {
+    async fn ask(&self, map: &Value, question: &str, _history: &[(String, String)], _images: &[String]) -> Result<QaAnswer, ApiError> {
         let mut ans = stub_answer(map, question);
         // stub 无真实 API usage，用估算值记账（让成本护栏链路在零成本模式下也可验证）
         ans.prompt_tokens = (estimate_tokens(question) + estimate_tokens(&serde_json::to_string(map).unwrap_or_default())) as u64;
@@ -628,7 +664,7 @@ impl<C: LlmClient> LlmQaClient<C> {
 }
 
 impl<C: LlmClient> QaClient for LlmQaClient<C> {
-    async fn ask(&self, map: &Value, question: &str, history: &[(String, String)]) -> Result<QaAnswer, ApiError> {
+    async fn ask(&self, map: &Value, question: &str, history: &[(String, String)], images: &[String]) -> Result<QaAnswer, ApiError> {
         let hist: Vec<String> = history
             .iter()
             .rev()
@@ -646,7 +682,7 @@ impl<C: LlmClient> QaClient for LlmQaClient<C> {
             if hist.is_empty() { "（无）".into() } else { hist.join("\n\n") },
             question
         );
-        let raw = self.llm.chat(ChatRequest { system: &system, user: &user }).await?;
+        let raw = self.llm.chat(ChatRequest { system: &system, user: &user, images }).await?;
         // S1：先剥澄清卡标记，再剥 refs（两标记同存时互不干扰）
         let (text, clarify) = parse_clarify(&raw.text);
         let (reply, refs) = match text.rfind("[refs:") {
@@ -775,7 +811,7 @@ impl<C: LlmClient> SuggestClient for LlmSuggestClient<C> {
 ```
 
 给出你的优化建议列表。", serde_json::to_string(map).unwrap_or_default());
-        let raw = self.llm.chat(ChatRequest { system, user: &user }).await?;
+        let raw = self.llm.chat(ChatRequest { system, user: &user, images: &[] }).await?;
         let arr = extract_json_array(&raw.text)?;
         let mut out = vec![];
         for it in arr.iter().filter_map(|x| x.as_object()) {
@@ -856,11 +892,11 @@ mod qa_tests {
         let map = sample_map();
         let qa = StubQaClient::new();
         // 改动意图 → 澄清卡
-        let a = qa.ask(&map, "我想给系统新增支付功能", &[]).await.unwrap();
+        let a = qa.ask(&map, "我想给系统新增支付功能", &[], &[]).await.unwrap();
         assert!(a.clarify.is_some(), "改动意图应触发澄清卡");
         assert!(!a.clarify.unwrap().options.is_empty());
         // 普通提问 → 无澄清卡
-        let b = qa.ask(&map, "评测提交流程是谁负责的？", &[]).await.unwrap();
+        let b = qa.ask(&map, "评测提交流程是谁负责的？", &[], &[]).await.unwrap();
         assert!(b.clarify.is_none());
     }
 

@@ -7,6 +7,8 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   refs: string[]
+  /** 图片附件（dataURL；仅当前会话内存，刷新后不还原） */
+  images?: { name: string; dataUrl: string }[]
 }
 
 interface Clarify {
@@ -39,8 +41,9 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [compacting, setCompacting] = useState(false)
   const [clarify, setClarify] = useState<Clarify | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  // 附件：文本类文件内容随消息注入（代码/日志/文档片段）；单文件 50KB、最多 3 个
+  // 附件：文本类内容随消息注入（50KB×3）；图片走 images 通道（1.5MB×2，视觉模型消费）
   const [attachments, setAttachments] = useState<{ name: string; size: number; content: string }[]>([])
+  const [images, setImages] = useState<{ name: string; size: number; dataUrl: string }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -74,17 +77,35 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
 
   const addFiles = (files: FileList | null) => {
     if (!files) return
-    for (const f of Array.from(files).slice(0, 3 - attachments.length)) {
-      if (f.size > 50 * 1024) {
-        alert(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`)
-        continue
+    for (const f of Array.from(files)) {
+      if (f.type.startsWith('image/')) {
+        if (images.length >= 2) {
+          alert('图片最多 2 张')
+          continue
+        }
+        if (f.size > 1.5 * 1024 * 1024) {
+          alert(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`)
+          continue
+        }
+        const reader = new FileReader()
+        reader.onload = () => setImages((prev) => [...prev, { name: f.name, size: f.size, dataUrl: String(reader.result ?? '') }])
+        reader.readAsDataURL(f)
+      } else {
+        if (attachments.length >= 3) {
+          alert('文本附件最多 3 个')
+          continue
+        }
+        if (f.size > 50 * 1024) {
+          alert(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`)
+          continue
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          const content = String(reader.result ?? '')
+          setAttachments((prev) => [...prev, { name: f.name, size: f.size, content }])
+        }
+        reader.readAsText(f)
       }
-      const reader = new FileReader()
-      reader.onload = () => {
-        const content = String(reader.result ?? '')
-        setAttachments((prev) => [...prev, { name: f.name, size: f.size, content }])
-      }
-      reader.readAsText(f)
     }
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -102,15 +123,20 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
           '\n\n' +
           attachments.map((a) => `--- 附件：${a.name}（${(a.size / 1024).toFixed(1)}KB）---\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
         : q
-    setMessages((prev) => [...prev, { role: 'user', content: withAttach, refs: [] }])
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: withAttach, refs: [], images: images.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) },
+    ])
     setAttachments([])
+    const sendImages = images.map((i) => i.dataUrl)
+    setImages([])
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: withAttach }),
+      body: JSON.stringify({ message: withAttach, images: sendImages }),
       signal: ac.signal,
     })
       .then((r) => {
@@ -292,6 +318,9 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >
+                {m.images?.map((im, j) => (
+                  <img key={j} src={im.dataUrl} alt={im.name} className="mb-1.5 max-h-40 rounded-lg" />
+                ))}
                 <MarkdownMessage content={m.content} />
                 {m.role === 'assistant' && m.refs.length > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
@@ -356,8 +385,17 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         )}
       </div>
 
-      {attachments.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+      {(attachments.length > 0 || images.length > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {images.map((im, i) => (
+            <span key={`img-${i}`} className="relative flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+              <img src={im.dataUrl} alt={im.name} className="h-8 w-8 rounded object-cover" />
+              <span className="max-w-[90px] truncate text-[9.5px] text-slate-500">{im.name}</span>
+              <button onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500">
+                <XIcon size={9} />
+              </button>
+            </span>
+          ))}
           {attachments.map((a, i) => (
             <span key={i} className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] text-blue-700">
               <Paperclip size={9} />

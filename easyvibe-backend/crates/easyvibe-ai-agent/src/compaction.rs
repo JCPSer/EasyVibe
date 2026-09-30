@@ -89,7 +89,7 @@ pub async fn compact_with_llm<C: LlmClient>(
 ) -> Result<CompactionResult, ApiError> {
     let system = "你是 EasyVibe 的上下文压缩器。把对话早期历史压缩为结构化摘要，供后续对话继续基于它作答。铁律：已拍板决策、未决问题、进行中的任务意图必须保留；宁可保留不可丢失。只输出摘要正文，不输出任何解释。";
     let user = summary_user_prompt(existing, compacted);
-    let outcome = llm.chat(ChatRequest { system, user: &user }).await?;
+    let outcome = llm.chat(ChatRequest { system, user: &user, images: &[] }).await?;
     let after_total = estimate_tokens(&outcome.text);
     Ok(CompactionResult {
         summary: outcome.text,

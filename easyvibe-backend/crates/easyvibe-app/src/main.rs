@@ -741,6 +741,9 @@ async fn get_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<
 #[derive(serde::Deserialize)]
 struct ChatHttpRequest {
     message: String,
+    /// 图片附件：dataURL 数组（随消息发给视觉模型；不持久化原文，库中只留占位）
+    #[serde(default)]
+    images: Vec<String>,
 }
 
 /// 入口对话（M2-5 + M3-5 持久化）：服务端是会话事实源——
@@ -756,8 +759,14 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
     let conv = st.conversation_repo.get_or_create(&id).await?;
 
     // 1) 用户消息落库（会话持久化：历史不再只活在前端 state）
+    let persisted = if body.images.is_empty() {
+        body.message.clone()
+    } else {
+        format!("{}
+[图片附件 {} 张（未持久化，重开对话后不可见）]", body.message, body.images.len())
+    };
     st.conversation_repo
-        .append_message(&conv.id, "user", &body.message, easyvibe_ai_agent::estimate_tokens(&body.message))
+        .append_message(&conv.id, "user", &persisted, easyvibe_ai_agent::estimate_tokens(&persisted))
         .await?;
 
     // 2) 运行态上下文：未压缩消息（近期窗口原文 + 此前由摘要代表）
@@ -766,7 +775,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
 
     // 3) 问答（槽位配置 M3-1）
     let answer: easyvibe_ai_agent::QaAnswer = match *st.llm_mode {
-        LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs).await?,
+        LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs, &body.images).await?,
         LlmMode::Anthropic => {
             let cfg = resolve_llm(&st, &id, "chat").await;
             if cfg.api_key.is_empty() {
@@ -780,7 +789,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
             } else {
                 format!("\n\n## 对话技能（grill-me：需求有歧义时主动用选择题澄清）\n\n{skills}\n\n---\n")
             };
-            easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &body.message, &pairs).await?
+            easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &body.message, &pairs, &body.images).await?
         }
     };
 

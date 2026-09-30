@@ -478,7 +478,17 @@ function GrowthPanel({
   )
 }
 
-function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null }) {
+function Canvas({
+  map,
+  backendRepo,
+  repos,
+  onRepoChange,
+}: {
+  map: CodeMap
+  backendRepo: string | null
+  repos: { id: string; name: string }[]
+  onRepoChange: (id: string) => void
+}) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('issues')
@@ -823,6 +833,20 @@ function Canvas({ map, backendRepo }: { map: CodeMap; backendRepo: string | null
                 <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">EasyVibe</span>
                 <span className="text-[10px] text-slate-300">|</span>
                 <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo} · 语义代码地图</h1>
+                {repos.length > 1 && (
+                  <select
+                    value={backendRepo ?? ''}
+                    onChange={(e) => onRepoChange(e.target.value)}
+                    className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 outline-none hover:border-blue-300"
+                    title="切换工作仓库（dev.sh 以逗号分隔挂载多个）"
+                  >
+                    {repos.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <button
                 onClick={() => setHeaderExpanded((v) => !v)}
@@ -1051,6 +1075,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   // 后端模式：探测 /api/health 成功且仓库列表非空则启用；失败降级静态 demo 数据
   const [backendRepo, setBackendRepo] = useState<string | null>(null)
+  const [repos, setRepos] = useState<{ id: string; name: string }[]>([])
   const [reloadTick, setReloadTick] = useState(0)
 
   useEffect(() => {
@@ -1058,8 +1083,11 @@ export default function App() {
     fetch('/api/health')
       .then((r) => (r.ok ? fetch('/api/repos') : Promise.reject(new Error('no backend'))))
       .then((r) => r.json())
-      .then((d: { data?: { id: string }[] }) => {
-        if (!cancelled && d.data && d.data.length > 0) setBackendRepo(d.data[0].id)
+      .then((d: { data?: { id: string; name: string }[] }) => {
+        if (!cancelled && d.data && d.data.length > 0) {
+          setRepos(d.data)
+          setBackendRepo((cur) => cur ?? d.data![0].id) // 保留当前选择（切换器驱动）
+        }
       })
       .catch(() => {
         if (!cancelled) setBackendRepo(null)
@@ -1146,6 +1174,13 @@ export default function App() {
       </div>
     )
   }
+  const switchRepo = (id: string) => {
+    if (id === backendRepo) return
+    setMap(null)
+    setError(null)
+    setBackendRepo(id)
+  }
+
   if ((error && backendRepo) || (!map && backendRepo)) {
     // 后端在线但地图尚未生成：归纳进行中，map.changed 会触发自动重试
     return <InductionWaiting repo={backendRepo} />
@@ -1160,7 +1195,7 @@ export default function App() {
   return (
     <CanvasBoundary>
       <ReactFlowProvider>
-        <Canvas map={map} backendRepo={backendRepo} />
+        <Canvas map={map} backendRepo={backendRepo} repos={repos} onRepoChange={switchRepo} />
       </ReactFlowProvider>
     </CanvasBoundary>
   )
