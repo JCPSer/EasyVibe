@@ -16,10 +16,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/easyvibe-backend"],
-    "resources": ["resources/prompts/", "resources/dist/"]
+    "externalBin": [
+      "binaries/easyvibe-backend"
+    ],
+    "resources": [
+      "resources/prompts/",
+      "resources/dist/"
+    ]
   },
   "plugins": {
     "updater": {
@@ -27,7 +35,7 @@
         "https://releases.easyvibe.dev/latest.json",
         "https://github.com/easyvibe/easyvibe/releases/latest/download/latest.json"
       ],
-      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklEZ3pPREk1UWpNelEwTTVOMEpGUVVJS1VsZFRjblp3WmsxTk5YVkRaeTlqVW5sV1lXRk5PVFp2TTJOeGNYTlhXRFZwYTFaclducEJiRGhQVVdGVVlYVjZkV1poVTJoTGRta0s="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzODI5QjMzQ0M5N0JFQUIKUldTcnZwZk1NNXVDZy9jUnlWYWFNOTZvM2NxcXNXWDVpa1ZrWnpBbDhPUWFUYXV6dWZhU2hLdmkK"
     }
   }
 }
