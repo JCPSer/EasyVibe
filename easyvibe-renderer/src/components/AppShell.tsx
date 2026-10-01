@@ -1,0 +1,158 @@
+import { useState } from 'react'
+import {
+  Map as MapIcon,
+  Boxes,
+  Waypoints,
+  Radar,
+  HeartPulse,
+  MonitorCog,
+  ListChecks,
+  ClipboardList,
+  ShieldCheck,
+  History,
+  BookOpen,
+  ScrollText,
+  Plug,
+  Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react'
+
+// M4-1 应用壳：左侧导航（探索/工作区/知识库 + 设置）+ 顶栏槽位 + 页面容器。
+// 信息架构以 docs/m4-design-brief-v3.md 为准；P1/P2 页面先占位（PlaceholderPage 诚实空态）。
+export type PageId =
+  | 'map'
+  | 'modules'
+  | 'deps'
+  | 'drift'
+  | 'health'
+  | 'workbench'
+  | 'tasks'
+  | 'todo'
+  | 'review'
+  | 'changes'
+  | 'kb-docs'
+  | 'kb-decisions'
+  | 'kb-apis'
+  | 'settings'
+
+export const NAV: { group: string; items: { id: PageId; label: string; icon: typeof MapIcon }[] }[] = [
+  {
+    group: '探索',
+    items: [
+      { id: 'map', label: '架构地图', icon: MapIcon },
+      { id: 'modules', label: '模块目录', icon: Boxes },
+      { id: 'deps', label: '依赖关系', icon: Waypoints },
+      { id: 'drift', label: '漂移洞察', icon: Radar },
+      { id: 'health', label: '健康看板', icon: HeartPulse },
+    ],
+  },
+  {
+    group: '工作区',
+    items: [
+      { id: 'workbench', label: '开发工作台', icon: MonitorCog },
+      { id: 'tasks', label: '任务', icon: ListChecks },
+      { id: 'todo', label: '我的待办', icon: ClipboardList },
+      { id: 'review', label: '评审', icon: ShieldCheck },
+      { id: 'changes', label: '变更记录', icon: History },
+    ],
+  },
+  {
+    group: '知识库',
+    items: [
+      { id: 'kb-docs', label: '文档中心', icon: BookOpen },
+      { id: 'kb-decisions', label: '决策记录', icon: ScrollText },
+      { id: 'kb-apis', label: '接口目录', icon: Plug },
+    ],
+  },
+]
+
+interface Props {
+  page: PageId
+  onPageChange: (p: PageId) => void
+  /** 页签徽标（如 评审 的待审批数） */
+  badges?: Partial<Record<PageId, number>>
+  /** 顶栏内容（项目选择器 + 全局动作），由 App 注入 */
+  topBar: React.ReactNode
+  children: React.ReactNode
+}
+
+export function AppShell({ page, onPageChange, badges, topBar, children }: Props) {
+  // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）
+  const [collapsed, setCollapsed] = useState(false)
+  return (
+    <div className="flex h-screen flex-col bg-slate-50">
+      {/* 顶栏：项目选择器 + 全局动作（App 注入） */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3">
+        <span className="flex items-center gap-1.5 pr-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
+          <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>
+        </span>
+        {topBar}
+      </header>
+      <div className="flex min-h-0 flex-1">
+        {/* 左侧导航 */}
+        <nav
+          className={`flex shrink-0 flex-col border-r border-slate-200 bg-white transition-all ${
+            collapsed ? 'w-12 items-center' : 'w-52'
+          }`}
+        >
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
+            {NAV.map((g) => (
+              <div key={g.group}>
+                {!collapsed && <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">{g.group}</p>}
+                {g.items.map((it) => {
+                  const active = page === it.id
+                  const badge = badges?.[it.id]
+                  return (
+                    <button
+                      key={it.id}
+                      onClick={() => onPageChange(it.id)}
+                      title={collapsed ? it.label : undefined}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] transition-colors ${
+                        active ? 'border-r-2 border-blue-600 bg-blue-50/70 font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                      } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
+                    >
+                      <it.icon size={15} className="shrink-0" />
+                      {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>}
+                      {!collapsed && badge ? (
+                        <span className="rounded-full bg-red-500 px-1.5 text-[9.5px] font-bold leading-4 text-white">{badge}</span>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+          {/* 底部：设置 + 折叠把手 */}
+          <div className={`border-t border-slate-100 py-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
+            <button
+              onClick={() => onPageChange('settings')}
+              title="设置"
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] ${
+                page === 'settings' ? 'font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
+            >
+              <Settings size={15} className="shrink-0" />
+              {!collapsed && <span>设置</span>}
+            </button>
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              title={collapsed ? '展开导航' : '收起导航'}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 hover:text-slate-500 ${collapsed ? 'justify-center px-0' : ''}`}
+            >
+              {collapsed ? <PanelLeftOpen size={14} /> : (
+                <>
+                  <PanelLeftClose size={14} />
+                  <span>收起</span>
+                </>
+              )}
+            </button>
+          </div>
+        </nav>
+        {/* 页面容器 */}
+        <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+      </div>
+    </div>
+  )
+}

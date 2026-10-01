@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, LayoutGrid, MonitorCog, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Boxes, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -24,6 +24,11 @@ import { BandNode, type BandNodeType } from '@/components/BandNode'
 import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/ExpandedModuleNode'
 import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNode'
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
+import { AppShell, type PageId } from '@/components/AppShell'
+import { PlaceholderPage } from '@/components/PlaceholderPage'
+import { TaskPanel } from '@/components/TaskPanel'
+import { ViewsPanel } from '@/components/ViewsPanel'
+import { SuggestPanel } from '@/components/SuggestPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -34,6 +39,13 @@ import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
+
+// M4-1 全页面集合（ui.page 持久化校验用）
+const ALL_PAGES: Set<PageId> = new Set([
+  'map', 'modules', 'deps', 'drift', 'health',
+  'workbench', 'tasks', 'todo', 'review', 'changes',
+  'kb-docs', 'kb-decisions', 'kb-apis', 'settings',
+])
 
 interface Filters {
   violationsOnly: boolean
@@ -60,11 +72,13 @@ function buildFlow(
   growth?: { layers: Set<string>; modules: Set<string> } | null,
   analyzeSubmap?: (id: string) => void,
   agentLinesFor?: (id: string) => string[] | undefined,
+  analyzeErrorFor?: (id: string) => string | undefined,
 ) {
-  // 展开元信息：加载中给 4 个骨架位
+  // 展开元信息：加载中给 4 个骨架位；错误态不再给骨架（M4-1 诚实三态——此前 error 也渲染"分析中…"骨架，
+  // 造成"头部报错 + 身体永远转圈"的撕裂画面）
   const expandedMeta = new Map<string, { ids: string[]; loading: boolean }>()
   for (const [id, sm] of expanded) {
-    expandedMeta.set(id, sm === 'loading' || sm === 'error' ? { ids: ['__s0', '__s1', '__s2', '__s3'], loading: true } : { ids: sm.sub_modules.map((s) => s.id), loading: false })
+    expandedMeta.set(id, sm === 'loading' ? { ids: ['__s0', '__s1', '__s2', '__s3'], loading: true } : sm === 'error' ? { ids: [], loading: false } : { ids: sm.sub_modules.map((s) => s.id), loading: false })
   }
   const { positions, bands, blocks } = layoutMap(map, expandedMeta)
 
@@ -141,6 +155,7 @@ function buildFlow(
             onRetry: retrySubmap ? () => retrySubmap(mod.id) : undefined,
             onAnalyze: analyzeSubmap ? () => analyzeSubmap(mod.id) : undefined,
             agentLines: agentLinesFor?.(mod.id),
+            analyzeError: analyzeErrorFor?.(mod.id),
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,
@@ -488,57 +503,75 @@ function GrowthPanel({
 function Canvas({
   map,
   backendRepo,
-  repos,
-  onRepoChange,
-  onAddRepo,
-  onRemoveRepo,
+  onPatrollingChange,
+  panelOpen,
+  onPanelOpenChange,
+  panelWidth,
+  onPanelWidthChange,
+  viewRequest,
+  onViewRequestConsumed,
+  guide,
+  onTaskCreated,
 }: {
   map: CodeMap
   backendRepo: string | null
-  repos: { id: string; name: string }[]
-  onRepoChange: (id: string) => void
-  onAddRepo: () => void
-  onRemoveRepo: (id: string) => void
+  /** M4-1：巡检终态回调（状态本体在壳层，顶栏按钮在 App） */
+  onPatrollingChange: (v: boolean) => void
+  /** M4-1：右栏开合/宽度由壳层持有（随项目持久化） */
+  panelOpen: boolean
+  onPanelOpenChange: (open: boolean) => void
+  panelWidth: number
+  onPanelWidthChange: (w: number) => void
+  /** 视图定位请求（顶栏视图抽屉 → 画布聚焦），消费后回执 */
+  viewRequest?: string[] | null
+  onViewRequestConsumed?: () => void
+  /** M4-1 旧入口引导卡（渲染在右栏上方，可关闭） */
+  guide?: React.ReactNode
+  /** 任务创建成功 → 壳层跳任务页 */
+  onTaskCreated: () => void
 }) {
   const [selection, setSelection] = useState<Selection>(null)
-  const [panelOpen, setPanelOpen] = useState(true)
-  // D5 仓库管理面板开关
-  const [repoPanelOpen, setRepoPanelOpen] = useState(false)
+  // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
+  const [tab, setTab] = useState<PanelTab>('detail')
   // 改进#4：右栏可调宽（默认 340–560；对话页签放宽到 720，D1-C）
-  const [tab, setTab] = useState<PanelTab>('issues')
-  const [panelWidth, setPanelWidth] = useState(340)
-  const handleTabChange = useCallback((t: PanelTab) => {
-    setTab(t)
-    // 离开对话页签时若宽度超出默认上限，收回（避免宽栏压窄其他页签内容）
-    if (t !== 'chat') setPanelWidth((w) => Math.min(w, 560))
-  }, [])
-  const startPanelDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startW = panelWidth
-    const maxW = tab === 'chat' ? 720 : 560
-    const onMove = (ev: MouseEvent) => setPanelWidth(Math.min(maxW, Math.max(340, startW + (startX - ev.clientX))))
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [panelWidth, tab])
+  const handleTabChange = useCallback(
+    (t: PanelTab) => {
+      setTab(t)
+      // 离开对话页签时若宽度超出默认上限，收回（避免宽栏压窄其他页签内容）
+      if (t !== 'chat') onPanelWidthChange(Math.min(panelWidth, 560))
+    },
+    [onPanelWidthChange, panelWidth],
+  )
+  const startPanelDrag = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const startX = e.clientX
+      const startW = panelWidth
+      const maxW = tab === 'chat' ? 720 : 560
+      const onMove = (ev: MouseEvent) => onPanelWidthChange(Math.min(maxW, Math.max(340, startW + (startX - ev.clientX))))
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    },
+    [panelWidth, tab, onPanelWidthChange],
+  )
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading' | 'error'>>({})
   const [growth, setGrowth] = useState<GrowthState | null>(null)
   const [liveActivity, setLiveActivity] = useState(false)
   const [inducing, setInducing] = useState(false)
-  const [patrolling, setPatrolling] = useState(false)
   const [freshness, setFreshness] = useState<string | null>(null)
   // 改进#2：agent 过程直播——按会话存最近输出（子图分析/任务执行）
   const [agentLines, setAgentLines] = useState<Record<string, string[]>>({})
   // 子图分析会话号（模块 id → sessionId，用于匹配输出流）
   const [submapSessions, setSubmapSessions] = useState<Record<string, string>>({})
+  // M4-1 诚实三态：分析错误原因（启动失败/会话失败/超时）按模块记录，UI 必须说人话
+  const [submapErrors, setSubmapErrors] = useState<Record<string, string>>({})
   const [freshnessInfo, setFreshnessInfo] = useState<{ commitsSinceMap?: number | null }>({})
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   const growthRef = useRef<GrowthState | null>(null)
   const submapsRef = useRef<typeof submaps | null>(null)
@@ -595,9 +628,18 @@ function Canvas({
   useEffect(
     () =>
       onSessionEvent((evt) => {
+        // M4-1 诚实三态：子图分析会话终态失败 → 立即报"会话失败"，不等轮询超时
+        setSubmapSessions((prev) => {
+          const hit = Object.entries(prev).find(([, sid]) => sid === evt.sessionId)
+          if (hit && evt.status === 'failed') {
+            setSubmapErrors((e) => ({ ...e, [hit[0]]: '分析会话失败（agent 未能完成内部结构分析）。可重试"深入分析"；多次失败请检查 LLM 配置。' }))
+            setSubmaps((p) => ({ ...p, [hit[0]]: 'error' }))
+          }
+          return prev
+        })
         if (evt.status !== 'succeeded' && evt.status !== 'failed') return
         setInducing(false)
-        if (evt.sessionId.startsWith('patrol-')) setPatrolling(false)
+        if (evt.sessionId.startsWith('patrol-')) onPatrollingChange(false)
       }),
     [],
   )
@@ -668,7 +710,7 @@ function Canvas({
   const onSelectLayer = useCallback((id: string) => {
     setSelection({ kind: 'layer', id })
     setTab('detail')
-    setPanelOpen(true)
+    onPanelOpenChange(true)
   }, [])
 
   const toggleExpand = useCallback((id: string) => {
@@ -690,16 +732,6 @@ function Canvas({
       .catch(() => setInducing(false))
   }, [backendRepo, inducing, startGrowth])
 
-  // 巡检（M2-4）：Supervisor 直调 LLM，产出新地图原子写回 + 健康历史落库
-  const startPatrol = useCallback(() => {
-    if (!backendRepo || patrolling) return
-    setPatrolling(true)
-    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
-      .then((r) => {
-        if (!r.ok) throw new Error(String(r.status))
-      })
-      .catch(() => setPatrolling(false))
-  }, [backendRepo, patrolling])
 
   // 懒加载子图：任何 loading 状态触发取数（后端模式走 API，否则静态文件）
   useEffect(() => {
@@ -724,10 +756,12 @@ function Canvas({
   }, [])
 
   // 子图深入分析：派透明 agent 扫描模块文件生成子图，落盘后即可加载。
-  // 启动后轮询重试（6s×20=2 分钟），产物就绪自动刷新展开态
+  // M4-1 诚实三态：① POST 失败 → 立即报"启动失败"；② 会话终态失败 → 立即报"会话失败"（不等轮询）；
+  // ③ 轮询 6s×40=4 分钟无产物 → 报"超时"并停止。杜绝"永远转圈"。
   const analyzeSubmap = useCallback(
     (id: string) => {
       if (!backendRepo) return
+      setSubmapErrors((prev) => ({ ...prev, [id]: '' }))
       fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
         .then(async (r) => {
           if (!r.ok) throw new Error(String(r.status))
@@ -738,14 +772,27 @@ function Canvas({
           const t = window.setInterval(() => {
             n += 1
             const cur = submapsRef.current?.[id]
-            if ((cur && cur !== 'loading' && cur !== 'error') || n >= 20) {
+            if (cur && cur !== 'loading' && cur !== 'error') {
               window.clearInterval(t)
+              return
+            }
+            if (n >= 40) {
+              window.clearInterval(t)
+              // 超时必须显式告之——此前静默停轮询，界面永远"分析中"
+              setSubmapErrors((prev) => ({
+                ...prev,
+                [id]: '分析超时（4 分钟未产出内部结构）。可能是 agent 执行缓慢或失败，请重试"深入分析"。',
+              }))
+              setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
               return
             }
             retrySubmap(id)
           }, 6000)
         })
-        .catch(() => setSubmaps((prev) => ({ ...prev, [id]: 'error' })))
+        .catch(() => {
+          setSubmapErrors((prev) => ({ ...prev, [id]: '分析启动失败（后端未接受请求，请确认后端在线后重试）。' }))
+          setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
+        })
     },
     [backendRepo, retrySubmap],
   )
@@ -768,8 +815,8 @@ function Canvas({
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? '']),
-    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id]),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions, submapErrors],
   )
 
   // S1-1 画布定位收口：pan/zoom 到目标模块 + 选中高亮。
@@ -779,7 +826,7 @@ function Canvas({
       const node = nodes.find((n) => n.id === id)
       setSelection({ kind: 'module', id })
       setTab('detail')
-      setPanelOpen(true)
+      onPanelOpenChange(true)
       if (!node) return
       const w = node.measured?.width ?? node.width ?? 220
       setCenter(node.position.x + w / 2, node.position.y + 70, { zoom: 1.15, duration: 450 })
@@ -798,6 +845,14 @@ function Canvas({
     [focusModule],
   )
 
+  // M4-1 顶栏视图抽屉 → 画布定位：消费 App 下发的视图请求
+  useEffect(() => {
+    if (viewRequest && viewRequest.length > 0) {
+      openView(viewRequest)
+      onViewRequestConsumed?.()
+    }
+  }, [viewRequest, openView, onViewRequestConsumed])
+
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.12, duration: 300 }), 60)
     return () => clearTimeout(t)
@@ -808,14 +863,14 @@ function Canvas({
     if (node.type === 'module' || node.type === 'moduleExpanded') {
       setSelection({ kind: 'module', id: node.id })
       setTab('detail')
-      setPanelOpen(true)
+      onPanelOpenChange(true)
     } else if (node.type === 'submodule' && node.parentId) {
       // 加载中的骨架不可选中（其 id 是占位符，选中后数据到达会无法匹配）
       if ((node.data as { loading?: boolean }).loading) return
       const subId = node.id.slice(`sub:${node.parentId}:`.length)
       setSelection({ kind: 'submodule', parentId: node.parentId, subId })
       setTab('detail')
-      setPanelOpen(true)
+      onPanelOpenChange(true)
     }
   }, [growth])
   const onPaneClick = useCallback(() => setSelection(null), [])
@@ -929,78 +984,14 @@ function Canvas({
           </Panel>
         </ReactFlow>
 
-        {/* 头部信息条 */}
+        {/* 头部信息条（M4-1：全局组件已移至应用壳顶栏，此处仅保留地图本地信息） */}
         <div className="pointer-events-none absolute left-0 top-0 z-10 w-full">
           <div className="px-5 py-3">
             <div className="pointer-events-auto inline-block rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">EasyVibe</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">架构地图</span>
                 <span className="text-[10px] text-slate-300">|</span>
-                <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo} · 语义代码地图</h1>
-                {repos.length > 1 && (
-                  <select
-                    value={backendRepo ?? ''}
-                    onChange={(e) => onRepoChange(e.target.value)}
-                    className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 outline-none hover:border-blue-300"
-                    title="切换工作仓库"
-                  >
-                    {repos.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {/* D5 仓库管理：添加（本地目录选择器）/移除，持久化到 ~/.easyvibe/desktop-repos */}
-                <div className="relative">
-                  <button
-                    onClick={() => setRepoPanelOpen((v) => !v)}
-                    className="flex items-center gap-0.5 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-blue-300 hover:text-blue-600"
-                    title="管理仓库（添加/移除本地仓库）"
-                  >
-                    <Plus size={9} />
-                    仓库
-                  </button>
-                  {repoPanelOpen && (
-                    <div className="absolute left-0 top-full z-30 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                      <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
-                      <div className="max-h-52 space-y-0.5 overflow-y-auto">
-                        {repos.map((r) => (
-                          <div key={r.id} className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-50">
-                            <button
-                              className={`min-w-0 flex-1 truncate text-left text-[11.5px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
-                              onClick={() => {
-                                onRepoChange(r.id)
-                                setRepoPanelOpen(false)
-                              }}
-                              title={r.name}
-                            >
-                              {r.name}
-                            </button>
-                            <button
-                              onClick={() => onRemoveRepo(r.id)}
-                              className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
-                              title="移除（地图产物保留在磁盘）"
-                            >
-                              <X size={11} />
-                            </button>
-                          </div>
-                        ))}
-                        {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400">尚未挂载任何仓库</p>}
-                      </div>
-                      <button
-                        onClick={() => {
-                          setRepoPanelOpen(false)
-                          onAddRepo()
-                        }}
-                        className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
-                      >
-                        <Plus size={11} />
-                        添加本地仓库…
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo}</h1>
               </div>
               <button
                 onClick={() => setHeaderExpanded((v) => !v)}
@@ -1065,73 +1056,12 @@ function Canvas({
                   <Play size={10} />
                   {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
                 </button>
-                {backendRepo && (
-                  <button
-                    onClick={() => {
-                      setTab('suggest')
-                      setPanelOpen(true)
-                    }}
-                    className="ml-1 flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700 transition-colors hover:bg-amber-100"
-                    title="AI 主动发现优化建议，逐条可发起修复"
-                  >
-                    <Lightbulb size={10} />
-                    优化建议
-                  </button>
-                )}
-                <button
-                  onClick={() => setSettingsOpen((v) => !v)}
-                  className="ml-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-500 transition-colors hover:bg-slate-50"
-                  title="设置（LLM 服务 / 槽位绑定 / 高级）"
-                >
-                  <Settings size={10} />
-                </button>
-                {backendRepo && (
-                  <button
-                    onClick={startPatrol}
-                    disabled={patrolling}
-                    className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-60 ${
-                      patrolling
-                        ? 'border-amber-300 bg-amber-50 text-amber-700'
-                        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    }`}
-                    title="巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史"
-                  >
-                    <Activity size={10} className={patrolling ? 'animate-pulse' : ''} />
-                    {patrolling ? '巡检中…' : '巡检'}
-                  </button>
-                )}
-                {map && (
-                  <button
-                    onClick={() => downloadHealthReport(map)}
-                    className="ml-1 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-600 transition-colors hover:bg-slate-50"
-                    title="导出架构健康报告（Markdown，零 token 成本）"
-                  >
-                    <FileDown size={10} />
-                    导出
-                  </button>
-                )}
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      {/* 设置面板（滑出） */}
-      {settingsOpen && <SettingsPanel backendRepo={backendRepo} onClose={() => setSettingsOpen(false)} />}
-
-      {/* 任务表单（指哪打哪：模块/问题/层入口预填） */}
-      {taskDraft && (
-        <TaskFormPanel
-          backendRepo={backendRepo}
-          draft={taskDraft}
-          map={map}
-          onClose={() => setTaskDraft(null)}
-          onCreated={() => setTab('tasks')}
-          onLocateModule={focusModule}
-        />
-      )}
-
-      {/* 右侧详情面板 */}
+      {/* 右侧详情面板（M4-1：三页签 详情/问题/对话 + 顶部旧入口引导卡） */}
       {panelOpen ? (
         <>
         {/* 改进#4：右栏宽度拖拽手柄 */}
@@ -1140,29 +1070,46 @@ function Canvas({
           className="w-1 shrink-0 cursor-col-resize bg-slate-100 transition-colors hover:bg-blue-300"
           title="拖拽调整面板宽度"
         />
-        <DetailPanel
-          map={map}
-          selection={selection}
-          tab={tab}
-          onTabChange={handleTabChange}
-          submaps={submaps}
-          backendRepo={backendRepo}
-          onCreateTask={(d) => setTaskDraft(d)}
-          onLocateModule={focusModule}
-          onOpenView={openView}
-          onClose={() => setPanelOpen(false)}
-          width={panelWidth}
-        />
+        <div className="flex w-full shrink-0 flex-col" style={{ width: panelWidth }}>
+          {guide}
+          <div className="min-h-0 flex-1">
+            <DetailPanel
+              map={map}
+              selection={selection}
+              tab={tab}
+              onTabChange={handleTabChange}
+              submaps={submaps}
+              backendRepo={backendRepo}
+              onCreateTask={(d) => setTaskDraft(d)}
+              onLocateModule={focusModule}
+              onOpenView={openView}
+              onClose={() => onPanelOpenChange(false)}
+              width={undefined}
+            />
+          </div>
+        </div>
         </>
       ) : (
         <button
-          onClick={() => panelOpen === false && setPanelOpen(true)}
+          onClick={() => panelOpen === false && onPanelOpenChange(true)}
           className="flex w-9 shrink-0 flex-col items-center gap-2 border-l border-slate-200 bg-white py-4 text-slate-400 hover:text-blue-600"
           title="展开面板"
         >
           <PanelRightOpen size={15} />
           <span className="text-[10px] [writing-mode:vertical-rl]">{selection ? '详情' : '面板'}</span>
         </button>
+      )}
+
+      {/* 任务表单（指哪打哪：模块/问题/层入口预填）；创建成功后跳任务页（由壳接管） */}
+      {taskDraft && (
+        <TaskFormPanel
+          backendRepo={backendRepo}
+          draft={taskDraft}
+          map={map}
+          onClose={() => setTaskDraft(null)}
+          onCreated={onTaskCreated}
+          onLocateModule={focusModule}
+        />
       )}
     </div>
   )
@@ -1257,6 +1204,88 @@ export default function App() {
   useEffect(() => {
     initUpdater()
   }, [])
+
+  // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
+  const [page, setPage] = useState<PageId>('map')
+  const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
+  const [repoPanelOpen, setRepoPanelOpen] = useState(false)
+  const [guideDismissed, setGuideDismissed] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem('ev.m4.guide') === '1',
+  )
+  const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
+  const [viewRequest, setViewRequest] = useState<string[] | null>(null)
+  // 右栏开合/宽度提升到 App：随项目持久化（settings_repo 的 repo scope，后端已有设施）
+  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelWidth, setPanelWidth] = useState(340)
+  // 巡检状态（M4-1 从 Canvas 上移：顶栏"巡检"按钮由壳层持有）
+  const [patrolling, setPatrolling] = useState(false)
+  const startPatrol = useCallback(() => {
+    if (!backendRepo || patrolling) return
+    setPatrolling(true)
+    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+      })
+      .catch(() => setPatrolling(false))
+  }, [backendRepo, patrolling])
+
+  const saveUiPref = useCallback(
+    (key: string, value: unknown) => {
+      if (!backendRepo) return
+      fetch('/api/settings/set', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: backendRepo, key, value }),
+      }).catch(() => {})
+    },
+    [backendRepo],
+  )
+
+  const handlePageChange = useCallback(
+    (p: PageId) => {
+      setPage(p)
+      saveUiPref('ui.page', p)
+    },
+    [saveUiPref],
+  )
+
+  // 每项目记忆：最后所在页 / 右栏宽度 / 面板开合（M4-1 状态持久化，防刷新丢位置）
+  useEffect(() => {
+    if (!backendRepo) return
+    let stale = false
+    fetch(`/api/settings?scope=${encodeURIComponent(backendRepo)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { key: string; value: unknown }[] } | null) => {
+        if (stale || !d?.data) return
+        const get = (k: string) => d.data!.find((i) => i.key === k)?.value
+        const p = get('ui.page')
+        if (typeof p === 'string' && (ALL_PAGES as Set<string>).has(p)) setPage(p as PageId)
+        const w = get('ui.panelWidth')
+        if (typeof w === 'number' && Number.isFinite(w)) setPanelWidth(Math.min(720, Math.max(340, w)))
+        const po = get('ui.panelOpen')
+        if (typeof po === 'boolean') setPanelOpen(po)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [backendRepo])
+
+  const handlePanelOpenChange = useCallback(
+    (open: boolean) => {
+      setPanelOpen(open)
+      saveUiPref('ui.panelOpen', open)
+    },
+    [saveUiPref],
+  )
+
+  const handlePanelWidthChange = useCallback(
+    (w: number) => {
+      setPanelWidth(w)
+      saveUiPref('ui.panelWidth', w)
+    },
+    [saveUiPref],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -1456,13 +1485,287 @@ export default function App() {
       </div>
     )
   }
+
+  // M4-1 顶栏：项目选择器（含仓库管理面板）+ 全局动作（视图/优化建议/巡检/导出/设置）
+  const topBar = (
+    <>
+      <div className="relative">
+        <button
+          onClick={() => setRepoPanelOpen((v) => !v)}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 hover:border-blue-300"
+          title="切换/管理仓库"
+        >
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          {backendRepo ?? '未选择仓库'}
+          <span className="text-slate-300">▾</span>
+        </button>
+        {repoPanelOpen && (
+          <div className="absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+            <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
+            <div className="max-h-52 space-y-0.5 overflow-y-auto">
+              {repos.map((r) => (
+                <div key={r.id} className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-50">
+                  <button
+                    className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
+                    onClick={() => {
+                      switchRepo(r.id)
+                      setRepoPanelOpen(false)
+                    }}
+                    title={r.name}
+                  >
+                    {r.name}
+                  </button>
+                  <button
+                    onClick={() => removeRepo(r.id)}
+                    className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                    title="移除（地图产物保留在磁盘）"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400">尚未挂载任何仓库</p>}
+            </div>
+            <button
+              onClick={() => {
+                setRepoPanelOpen(false)
+                addRepo()
+              }}
+              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+            >
+              <Plus size={11} />
+              打开本地仓库…
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="ml-auto flex items-center gap-1.5">
+        <button
+          onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
+          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11.5px] font-semibold text-slate-500 hover:bg-slate-50"
+          title="我的视图（对话沉淀的图资产）"
+        >
+          <LayoutGrid size={12} />
+          视图
+        </button>
+        {backendRepo && (
+          <button
+            onClick={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
+            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11.5px] font-semibold text-amber-700 hover:bg-amber-100"
+            title="AI 主动发现优化建议，逐条可发起修复"
+          >
+            <Lightbulb size={12} />
+            优化建议
+          </button>
+        )}
+        {backendRepo && (
+          <button
+            onClick={startPatrol}
+            disabled={patrolling}
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11.5px] font-semibold transition-colors disabled:opacity-60 ${
+              patrolling ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            }`}
+            title="巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史"
+          >
+            <Activity size={12} className={patrolling ? 'animate-pulse' : ''} />
+            {patrolling ? '巡检中…' : '巡检'}
+          </button>
+        )}
+        <button
+          onClick={() => downloadHealthReport(map)}
+          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11.5px] font-semibold text-slate-600 hover:bg-slate-50"
+          title="导出架构健康报告（Markdown，零 token 成本）"
+        >
+          <FileDown size={12} />
+          导出
+        </button>
+        <button
+          onClick={() => handlePageChange('settings')}
+          className={`rounded-lg border px-2 py-1 text-[11.5px] font-semibold ${
+            page === 'settings' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+          }`}
+          title="设置（LLM 服务 / 槽位绑定 / 高级）"
+        >
+          <Settings size={12} />
+        </button>
+      </div>
+    </>
+  )
+
+  const PAGES: Record<PageId, React.ReactNode> = {
+    map: (
+      <CanvasBoundary>
+        <ReactFlowProvider>
+          <Canvas
+            map={map}
+            backendRepo={backendRepo}
+            onPatrollingChange={setPatrolling}
+            panelOpen={panelOpen}
+            onPanelOpenChange={handlePanelOpenChange}
+            panelWidth={panelWidth}
+            onPanelWidthChange={handlePanelWidthChange}
+            viewRequest={viewRequest}
+            onViewRequestConsumed={() => setViewRequest(null)}
+            guide={
+              guideDismissed ? undefined : (
+                <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+                  <p className="flex-1 text-[11px] leading-5 text-slate-600">
+                    <span className="font-semibold text-blue-700">界面已整理：</span>
+                    页签瘦身为 详情/问题/对话；任务在左侧「工作区 · 任务」，视图与优化建议在顶栏。
+                  </p>
+                  <button
+                    onClick={() => {
+                      setGuideDismissed(true)
+                      localStorage.setItem('ev.m4.guide', '1')
+                    }}
+                    className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-slate-600"
+                    title="知道了"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )
+            }
+            onTaskCreated={() => handlePageChange('tasks')}
+          />
+        </ReactFlowProvider>
+      </CanvasBoundary>
+    ),
+    tasks: (
+      <div className="h-full overflow-y-auto p-5">
+        <h2 className="mb-3 text-[15px] font-bold text-slate-800">任务</h2>
+        <TaskPanel backendRepo={backendRepo} onCreateTask={(d) => setTaskDraft(d)} />
+      </div>
+    ),
+    settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
+    // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
+    workbench: (
+      <PlaceholderPage
+        title="开发工作台"
+        milestone="M4-2"
+        description="多会话 agent 面板（会话列表 + 计划进度 + 内联审批 + 影响面）将在 M4-2 落地，见 ui-mockups/开发工作台原型.png。届时任务、审批、对话在此闭环。"
+        action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
+        icon={MonitorCog}
+      />
+    ),
+    todo: (
+      <PlaceholderPage
+        title="我的待办"
+        milestone="M4-2"
+        description="我发起的任务的运行态聚合（运行中 / 等待审批 / 失败），带徽标提醒。设计见 ui-mockups/我的待办原型.png。"
+        action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
+        icon={ClipboardList}
+      />
+    ),
+    review: (
+      <PlaceholderPage
+        title="评审"
+        milestone="M4-2"
+        description="审批中心整页（三道关进度 + 双栏 Diff + 模块聚合影响面），按 ui-mockups/审批中心原型.png 实现。当前可在任务页内完成审批。"
+        action={{ label: '前往任务页审批', onClick: () => handlePageChange('tasks') }}
+        icon={ShieldCheck}
+      />
+    ),
+    changes: (
+      <PlaceholderPage
+        title="变更记录"
+        milestone="M4-3"
+        description="任务 diff 留痕时间线 + 回放入口 + 详情侧栏，按 ui-mockups/变更记录原型.png 实现。数据已全程留痕在任务系统。"
+        icon={History}
+      />
+    ),
+    drift: (
+      <PlaceholderPage
+        title="漂移洞察"
+        milestone="M4-3"
+        description="git 落后度排序、地图保鲜、重新归纳提醒，按 ui-mockups/漂移洞察原型.png 实现。当前地图新鲜度提示在地图页头部。"
+        icon={Radar}
+      />
+    ),
+    health: (
+      <PlaceholderPage
+        title="健康看板"
+        milestone="M4-3"
+        description="KPI 卡 + 架构级/模块平均双线趋势 + 模块健康排行 + 巡检记录表。巡检数据已在域 2 落库，顶栏可导出 Markdown 健康报告。"
+        icon={HeartPulse}
+      />
+    ),
+    modules: (
+      <PlaceholderPage
+        title="模块目录"
+        milestone="M4-4"
+        description="以模块为行的表格视图（职责/健康分/files glob），兼任画布的无障碍列表模式。"
+        icon={Boxes}
+      />
+    ),
+    deps: (
+      <PlaceholderPage
+        title="依赖关系"
+        milestone="M4-4"
+        description="以边为中心的视角：边类型、方向违例、强度排序。"
+        icon={Waypoints}
+      />
+    ),
+    'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,
+    'kb-decisions': <PlaceholderPage title="决策记录" milestone="M4-4" description="巡检 review_note 与任务留痕的决策视角，P3 骨架。" icon={ScrollText} />,
+    'kb-apis': <PlaceholderPage title="接口目录" milestone="M4-4" description="关键入口（key_entries）聚合的接口视角，P3 骨架。" icon={Plug} />,
+  }
+
   return (
     <>
-    <CanvasBoundary>
-      <ReactFlowProvider>
-        <Canvas map={map} backendRepo={backendRepo} repos={repos} onRepoChange={switchRepo} onAddRepo={addRepo} onRemoveRepo={removeRepo} />
-      </ReactFlowProvider>
-    </CanvasBoundary>
+      <AppShell page={page} onPageChange={handlePageChange} topBar={topBar}>
+        {PAGES[page]}
+      </AppShell>
+      {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
+      {overlay === 'views' && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
+          <div className="flex h-full w-[460px] flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+              <span className="text-[12.5px] font-bold text-slate-700">我的视图</span>
+              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <ViewsPanel
+                backendRepo={backendRepo}
+                onOpenView={(ids) => {
+                  setOverlay(null)
+                  setPage('map')
+                  setViewRequest(ids)
+                }}
+                validModuleIds={new Set(map.modules.map((m) => m.id))}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      {overlay === 'suggest' && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
+          <div className="flex h-full w-[460px] flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+              <span className="text-[12.5px] font-bold text-slate-700">智能优化建议</span>
+              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={(d) => { setOverlay(null); setTaskDraft(d) }} />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 任务表单（全局：地图/建议/工作区页共用） */}
+      {taskDraft && (
+        <TaskFormPanel
+          backendRepo={backendRepo}
+          draft={taskDraft}
+          map={map}
+          onClose={() => setTaskDraft(null)}
+          onCreated={() => handlePageChange('tasks')}
+          onLocateModule={() => handlePageChange('map')}
+        />
+      )}
       <ToastHost />
     </>
   )

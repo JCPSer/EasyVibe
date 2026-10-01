@@ -12,6 +12,8 @@ interface Service {
 interface Props {
   backendRepo: string | null
   onClose: () => void
+  /** M4-1：作为设置"页"嵌入应用壳（非滑出抽屉） */
+  embedded?: boolean
 }
 
 const SLOTS = [
@@ -21,7 +23,7 @@ const SLOTS = [
 ] as const
 
 // 设置面板（backend-design §10 两档展示：常规 = 服务列表+槽位绑定；高级 = 预算类）
-export function SettingsPanel({ backendRepo, onClose }: Props) {
+export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   const [tab, setTab] = useState<'general' | 'advanced'>('general')
   const [services, setServices] = useState<Record<string, Service>>({})
   const [slots, setSlots] = useState<Record<string, string>>({})
@@ -136,7 +138,7 @@ export function SettingsPanel({ backendRepo, onClose }: Props) {
   const input = 'w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11.5px] text-slate-700 outline-none focus:border-blue-300'
 
   return (
-    <div className="fixed inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l border-slate-200 bg-white shadow-xl">
+    <div className={`${embedded ? 'h-full w-full' : 'fixed inset-y-0 right-0 z-30 w-[400px] shadow-xl'} flex flex-col border-l border-slate-200 bg-white`}>
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <span className="text-[13px] font-bold text-slate-800">设置</span>
         <div className="flex gap-1">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare, Lightbulb, ShieldCheck, LayoutGrid} from 'lucide-react'
+import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare} from 'lucide-react'
 import { buildLayerTask, buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
@@ -7,15 +7,12 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
 import { ChatPanel } from '@/components/ChatPanel'
-import { SuggestPanel } from '@/components/SuggestPanel'
-import { TaskPanel } from '@/components/TaskPanel'
-import { ViewsPanel } from '@/components/ViewsPanel'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
   | { kind: 'submodule'; parentId: string; subId: string }
   | null
-export type PanelTab = 'issues' | 'detail' | 'chat' | 'suggest' | 'tasks' | 'views'
+export type PanelTab = 'detail' | 'issues' | 'chat'
 
 interface Props {
   map: CodeMap
@@ -376,7 +373,7 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, onOpenView, width }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, width }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -392,15 +389,12 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
     <aside className="flex shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
         <div className="flex gap-1">
-          {/* Y9 清债：页签图标化——六页签纯文字逼近爆宽，图标+短名双保险 */}
+          {/* M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页 */}
           {(
             [
-              ['issues', '问题', <ListChecks key="i" size={13} />],
               ['detail', detailLabel, <Boxes key="d" size={13} />],
+              ['issues', '问题', <ListChecks key="i" size={13} />],
               ['chat', '对话', <MessagesSquare key="c" size={13} />],
-              ['suggest', '建议', <Lightbulb key="s" size={13} />],
-              ['tasks', '任务', <ShieldCheck key="t" size={13} />],
-              ['views', '视图', <LayoutGrid key="v" size={13} />],
             ] as const
           ).map(([key, label, icon]) => (
             <button
@@ -425,18 +419,6 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
           <ChatPanel backendRepo={backendRepo} map={map} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
         </div>
-        {/* 常驻挂载 + CSS 隐藏：切页签不重分析、不丢结果（试用反馈#2——此前每次切换都重新调 LLM 浪费 token） */}
-        <div className={tab === 'suggest' ? 'h-full' : 'hidden h-full'}>
-          <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />
-        </div>
-        {tab === 'tasks' && <TaskPanel key={`${backendRepo}-${Date.now()}`} backendRepo={backendRepo} onCreateTask={onCreateTask} />}
-        {tab === 'views' && (
-          <ViewsPanel
-            backendRepo={backendRepo}
-            onOpenView={(ids) => (onOpenView ? onOpenView(ids) : ids.length > 0 && onLocateModule(ids[0]))}
-            validModuleIds={new Set(map.modules.map((m) => m.id))}
-          />
-        )}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
@@ -447,12 +429,32 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             子模块数据不存在或仍在加载中，请稍候再点击。
           </p>
         )}
+        {/* M4-1 详情空选态 = 地图级摘要（设计师要求：禁止空白，三态规范最高频面板落地） */}
         {tab === 'detail' && !module && !layer && !sub && selection?.kind !== 'submodule' && (
-          <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
-            点击画布中的模块卡片、层标签或展开的子模块查看详情；
-            <br />
-            选中模块后顶部工具栏可展开内部结构。
-          </p>
+          <div className="space-y-3 pt-2">
+            <p className="text-[11px] font-semibold text-slate-400">地图概览</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['模块', `${map.modules.length}`],
+                ['依赖边', `${map.edges.length}`],
+                ['架构健康分', `${map.health.score}`],
+                ['耦合度', map.health.coupling],
+              ].map(([k, v]) => (
+                <div key={k} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <p className="text-[10px] text-slate-400">{k}</p>
+                  <p className="text-[15px] font-bold text-slate-700">{v}</p>
+                </div>
+              ))}
+            </div>
+            {map.health.review_note && (
+              <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">
+                {map.health.review_note}
+              </p>
+            )}
+            <p className="text-[10.5px] leading-5 text-slate-400">
+              点击画布中的模块卡片、层标签或展开的子模块查看详情；选中模块后顶部工具栏可展开内部结构。
+            </p>
+          </div>
         )}
       </div>
     </aside>

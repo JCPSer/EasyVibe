@@ -13,9 +13,11 @@ export type ExpandedModuleNodeType = Node<
     error: boolean
     subCount: number
     onRetry?: () => void
-  onAnalyze?: () => void
-  /** 改进#2：agent 过程直播——最近输出 */
-  agentLines?: string[]
+    onAnalyze?: () => void
+    /** 改进#2：agent 过程直播——最近输出 */
+    agentLines?: string[]
+    /** M4-1 诚实三态：失败原因（启动失败/会话失败/超时），必须说人话 */
+    analyzeError?: string
   },
   'moduleExpanded'
 >
@@ -69,32 +71,38 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
             <Loader2 size={12} className="animate-spin" /> 归纳子模块中…（约 1-3 分钟）
           </span>
         ) : data.error ? (
-          <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-red-500">
-            <AlertTriangle size={11} />
-            {data.onAnalyze ? '暂无内部结构分析' : '子图加载失败'}
-            {data.onAnalyze && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  data.onAnalyze!()
-                }}
-                className="flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-600 hover:bg-blue-100"
-                title="派 agent 深入扫描该模块的文件，生成内部结构子图（约 1-3 分钟）"
-              >
-                <Search size={9} /> 深入分析
-              </button>
-            )}
-            {data.onRetry && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  data.onRetry!()
-                }}
-                className="flex items-center gap-0.5 rounded-full border border-red-200 bg-white px-1.5 py-0.5 font-semibold hover:bg-red-50"
-                title="重试加载子图"
-              >
-                <RotateCcw size={9} /> 重试
-              </button>
+          <span className="ml-auto flex flex-col items-end gap-1">
+            <span className="flex items-center gap-1.5 text-[10.5px] text-red-500">
+              <AlertTriangle size={11} />
+              {data.onAnalyze ? '暂无内部结构分析' : '子图加载失败'}
+              {data.onAnalyze && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    data.onAnalyze!()
+                  }}
+                  className="flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-600 hover:bg-blue-100"
+                  title="派 agent 深入扫描该模块的文件，生成内部结构子图（约 1-3 分钟）"
+                >
+                  <Search size={9} /> 深入分析
+                </button>
+              )}
+              {data.onRetry && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    data.onRetry!()
+                  }}
+                  className="flex items-center gap-0.5 rounded-full border border-red-200 bg-white px-1.5 py-0.5 font-semibold hover:bg-red-50"
+                  title="重新加载子图（若从未生成过，请用「深入分析」）"
+                >
+                  <RotateCcw size={9} /> 重试
+                </button>
+              )}
+            </span>
+            {/* M4-1 诚实三态：失败原因必须显式呈现，不允许只给"失败"两个字 */}
+            {data.analyzeError && (
+              <span className="max-w-[420px] text-right text-[9.5px] leading-4 text-red-400">{data.analyzeError}</span>
             )}
           </span>
         ) : (
