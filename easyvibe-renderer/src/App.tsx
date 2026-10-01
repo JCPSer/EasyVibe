@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -490,14 +490,20 @@ function Canvas({
   backendRepo,
   repos,
   onRepoChange,
+  onAddRepo,
+  onRemoveRepo,
 }: {
   map: CodeMap
   backendRepo: string | null
   repos: { id: string; name: string }[]
   onRepoChange: (id: string) => void
+  onAddRepo: () => void
+  onRemoveRepo: (id: string) => void
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
+  // D5 仓库管理面板开关
+  const [repoPanelOpen, setRepoPanelOpen] = useState(false)
   // 改进#4：右栏可调宽（默认 340–560；对话页签放宽到 720，D1-C）
   const [tab, setTab] = useState<PanelTab>('issues')
   const [panelWidth, setPanelWidth] = useState(340)
@@ -936,7 +942,7 @@ function Canvas({
                     value={backendRepo ?? ''}
                     onChange={(e) => onRepoChange(e.target.value)}
                     className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 outline-none hover:border-blue-300"
-                    title="切换工作仓库（dev.sh 以逗号分隔挂载多个）"
+                    title="切换工作仓库"
                   >
                     {repos.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -945,6 +951,56 @@ function Canvas({
                     ))}
                   </select>
                 )}
+                {/* D5 仓库管理：添加（本地目录选择器）/移除，持久化到 ~/.easyvibe/desktop-repos */}
+                <div className="relative">
+                  <button
+                    onClick={() => setRepoPanelOpen((v) => !v)}
+                    className="flex items-center gap-0.5 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-blue-300 hover:text-blue-600"
+                    title="管理仓库（添加/移除本地仓库）"
+                  >
+                    <Plus size={9} />
+                    仓库
+                  </button>
+                  {repoPanelOpen && (
+                    <div className="absolute left-0 top-full z-30 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                      <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
+                      <div className="max-h-52 space-y-0.5 overflow-y-auto">
+                        {repos.map((r) => (
+                          <div key={r.id} className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-50">
+                            <button
+                              className={`min-w-0 flex-1 truncate text-left text-[11.5px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
+                              onClick={() => {
+                                onRepoChange(r.id)
+                                setRepoPanelOpen(false)
+                              }}
+                              title={r.name}
+                            >
+                              {r.name}
+                            </button>
+                            <button
+                              onClick={() => onRemoveRepo(r.id)}
+                              className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                              title="移除（地图产物保留在磁盘）"
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                        {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400">尚未挂载任何仓库</p>}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setRepoPanelOpen(false)
+                          onAddRepo()
+                        }}
+                        className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+                      >
+                        <Plus size={11} />
+                        添加本地仓库…
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setHeaderExpanded((v) => !v)}
@@ -1204,11 +1260,10 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/health')
-      .then((r) => (r.ok ? fetch('/api/health').then((h) => h.json()).then((h: { data?: { version?: string } }) => {
-        if (h.data?.version) setServerVersion(h.data.version)
-      }).then(() => r) : Promise.reject(new Error('no backend'))))
-      .then((r) => r.json())
+    // 后端探测：/api/repos 取仓库列表（Y7 回归修复——此前误把 /api/health 的响应当 repos 解析，
+    // data 无 length 恒为演示模式，桌面壳与浏览器一并中招）
+    fetch('/api/repos')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
       .then((d: { data?: { id: string; name: string }[] }) => {
         if (!cancelled && d.data && d.data.length > 0) {
           setRepos(d.data)
@@ -1218,6 +1273,13 @@ export default function App() {
       .catch(() => {
         if (!cancelled) setBackendRepo(null)
       })
+    // 版本感知（Y7）：仅取 version，不参与后端模式判定
+    fetch('/api/health')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((h: { data?: { version?: string } } | null) => {
+        if (!cancelled && h?.data?.version) setServerVersion(h.data.version)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -1321,6 +1383,68 @@ export default function App() {
     setBackendRepo(id)
   }
 
+  // D5 仓库管理：刷新列表（添加/移除后）；后端事实源是 /api/repos
+  const refreshRepos = useCallback(() => {
+    fetch('/api/repos')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { id: string; name: string }[] } | null) => {
+        if (!d?.data) return
+        setRepos(d.data)
+        setBackendRepo((cur) => (cur && d.data!.some((r) => r.id === cur) ? cur : d.data![0]?.id ?? null))
+      })
+      .catch(() => {})
+  }, [])
+
+  // 添加本地仓库：桌面壳走系统目录选择器（Tauri dialog），浏览器降级为路径输入
+  const addRepo = useCallback(async () => {
+    let path: string | null = null
+    try {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        const { open } = await import('@tauri-apps/plugin-dialog')
+        const sel = await open({ directory: true, title: '选择本地仓库目录' })
+        path = typeof sel === 'string' ? sel : null
+      } else {
+        path = window.prompt('输入本地仓库目录的绝对路径')
+      }
+    } catch {
+      path = window.prompt('目录选择器不可用，输入本地仓库目录的绝对路径')
+    }
+    if (!path?.trim()) return
+    try {
+      const r = await fetch('/api/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path.trim() }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) {
+        toast(d?.error ?? '添加失败（目录不可读或已挂载）', 'error')
+        return
+      }
+      toast('已添加仓库，正在归纳…')
+      refreshRepos()
+      setBackendRepo(d.data.id)
+    } catch {
+      toast('添加失败（需要后端在线）', 'error')
+    }
+  }, [refreshRepos])
+
+  const removeRepo = useCallback(async (id: string) => {
+    if (!window.confirm(`移除仓库 ${id}？（地图产物保留在磁盘，可随时重新添加）`)) return
+    try {
+      const r = await fetch(`/api/repos/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!r.ok) {
+        toast('移除失败', 'error')
+        return
+      }
+      toast('已移除仓库')
+      if (id === backendRepo) setMap(null)
+      refreshRepos()
+    } catch {
+      toast('移除失败（需要后端在线）', 'error')
+    }
+  }, [backendRepo, refreshRepos])
+
   if ((error && backendRepo) || (!map && backendRepo)) {
     // 后端在线但地图尚未生成：归纳进行中，map.changed 会触发自动重试
     return <InductionWaiting repo={backendRepo} />
@@ -1336,7 +1460,7 @@ export default function App() {
     <>
     <CanvasBoundary>
       <ReactFlowProvider>
-        <Canvas map={map} backendRepo={backendRepo} repos={repos} onRepoChange={switchRepo} />
+        <Canvas map={map} backendRepo={backendRepo} repos={repos} onRepoChange={switchRepo} onAddRepo={addRepo} onRemoveRepo={removeRepo} />
       </ReactFlowProvider>
     </CanvasBoundary>
       <ToastHost />

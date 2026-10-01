@@ -56,7 +56,7 @@ impl TaskExecutor {
         async move {
         let repos: Vec<String> = match repo_filter {
             Some(r) => vec![r.to_string()],
-            None => self.map_service.repos().into_iter().map(|r| r.id).collect(),
+            None => self.map_service.repos().await.into_iter().map(|r| r.id).collect(),
         };
         for repo_id in repos {
             let Ok(tasks) = self.task_repo.list(&repo_id, 50).await else { continue };
@@ -163,7 +163,7 @@ impl TaskExecutor {
     /// spawn agent 并看门：终态后 manual 任务回到审批流（diff 关），auto 直接 done
     async fn spawn_and_watch(self: Arc<Self>, task: TaskRow) {
         let trust_manual = task.trust == "manual";
-        let repo = match self.map_service.find_repo(&task.repo) {
+        let repo = match self.map_service.find_repo(&task.repo).await {
             Some(r) => r,
             None => {
                 let _ = self.task_repo.update_status(&task.id, "failed", Some("仓库未注册")).await;

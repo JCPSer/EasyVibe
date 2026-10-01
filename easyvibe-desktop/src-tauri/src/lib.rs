@@ -26,6 +26,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         // 启动错误页走自定义协议（v2 无 WebviewUrl::Html；everr:// 始终可服务，不依赖后端）
         .register_uri_scheme_protocol("everr", |_app, _req| {
             let log_hint = std::env::var("HOME")
@@ -47,18 +48,8 @@ pub fn run() {
             let static_dir = res_dir.join("resources/dist");
             let prompt_dir = res_dir.join("resources/prompts");
 
-            // 仓库列表：~/.easyvibe/desktop-repos（每行一个仓库根路径；空文件=零仓库起步）
-            let repos = std::env::var("HOME")
-                .map(|h| {
-                    std::fs::read_to_string(format!("{h}/.easyvibe/desktop-repos"))
-                        .unwrap_or_default()
-                        .lines()
-                        .map(|l| l.trim())
-                        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .unwrap_or_default();
+            // 仓库列表不再由壳代传：后端启动时自己读 ~/.easyvibe/desktop-repos（后端独占该文件，
+            // 应用内添加/注销由后端改写，壳不感知）
 
             // 端口复用守卫：7151 已有健康后端（如壳异常退出留下的孤儿）则直接复用，
             // 不再 spawn 第二个（第二个 bind 失败即死，还会让"杀 sidecar"误杀别人）
@@ -75,7 +66,6 @@ pub fn run() {
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
                 .env("EASYVIBE_PORT", &port_str)
                 .env("EASYVIBE_STATIC_DIR", &static_dir)
-                .env("EASYVIBE_REPO", &repos)
                 .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
                 .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
                 .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))

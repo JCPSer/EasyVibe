@@ -127,22 +127,41 @@ pub struct MapSnapshot {
 }
 
 pub struct MapService {
-    repos: Vec<Repo>,
+    /// D5 仓库管理：改为写锁 Vec——启动后仍可动态注册/注销（应用内仓库管理）
+    repos: tokio::sync::RwLock<Vec<Repo>>,
     /// 每个仓库最后一次"合法"地图快照（内存缓存）
     cache: tokio::sync::RwLock<std::collections::HashMap<String, MapSnapshot>>,
 }
 
 impl MapService {
     pub fn new(repos: Vec<Repo>) -> Arc<Self> {
-        Arc::new(Self { repos, cache: Default::default() })
+        Arc::new(Self { repos: tokio::sync::RwLock::new(repos), cache: Default::default() })
     }
 
-    pub fn repos(&self) -> Vec<Repo> {
-        self.repos.clone()
+    pub async fn repos(&self) -> Vec<Repo> {
+        self.repos.read().await.clone()
     }
 
-    pub fn find_repo(&self, id: &str) -> Option<Repo> {
-        self.repos.iter().find(|r| r.id == id).cloned()
+    pub async fn find_repo(&self, id: &str) -> Option<Repo> {
+        self.repos.read().await.iter().find(|r| r.id == id).cloned()
+    }
+
+    /// 动态注册（POST /api/repos）：同 id 返回 Conflict，不落地
+    pub async fn add_repo(&self, repo: Repo) -> Result<(), ApiError> {
+        let mut repos = self.repos.write().await;
+        if repos.iter().any(|r| r.id == repo.id) {
+            return Err(ApiError::Conflict(format!("仓库 {} 已挂载", repo.id)));
+        }
+        repos.push(repo);
+        Ok(())
+    }
+
+    /// 动态注销（DELETE /api/repos/{id}）：返回是否命中
+    pub async fn remove_repo(&self, id: &str) -> bool {
+        let mut repos = self.repos.write().await;
+        let before = repos.len();
+        repos.retain(|r| r.id != id);
+        repos.len() != before
     }
 
     /// 读取并自检一张地图；通过则更新缓存

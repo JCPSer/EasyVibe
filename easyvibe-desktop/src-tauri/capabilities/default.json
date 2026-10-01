@@ -12,6 +12,7 @@
       "allow": [{ "name": "binaries/easyvibe-backend", "sidecar": true }]
     },
     "updater:default",
-    "process:default"
+    "process:default",
+    "dialog:default"
   ]
 }

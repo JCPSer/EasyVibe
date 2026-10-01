@@ -74,7 +74,8 @@ pub enum BusEvent {
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
-        .route("/repos", get(list_repos))
+        .route("/repos", get(list_repos).post(add_repo))
+        .route("/repos/{id}", axum::routing::delete(remove_repo))
         .route("/repos/{id}/map", get(get_map))
         .route("/repos/{id}/freshness", get(get_freshness))
         .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
@@ -160,15 +161,88 @@ async fn health() -> Json<ApiResponse<HealthResponse>> {
 async fn list_repos(State(st): State<AppState>) -> Json<ApiResponse<Vec<RepoInfo>>> {
     let repos = st
         .map_service
-        .repos()
+        .repos().await
         .into_iter()
         .map(|r| RepoInfo { id: r.id, name: r.name, root: r.root.to_string_lossy().into_owned() })
         .collect();
     Json(ApiResponse::ok(repos))
 }
 
+// ---------- D5 应用内仓库管理：动态注册/注销（desktop-repos 文件由后端独占） ----------
+
+fn data_dir() -> std::path::PathBuf {
+    std::env::var("EASYVIBE_DATA_DIR").map(Into::into).unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(format!("{home}/.easyvibe"))
+    })
+}
+
+fn desktop_repos_file() -> std::path::PathBuf {
+    data_dir().join("desktop-repos")
+}
+
+/// 读 desktop-repos 持久化文件（每行一个仓库根路径；# 开头为注释）
+fn read_desktop_repos() -> Vec<std::path::PathBuf> {
+    std::fs::read_to_string(desktop_repos_file())
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(Into::into)
+        .collect()
+}
+
+/// 全量重写 desktop-repos（注销后保持一致）
+fn write_desktop_repos(roots: &[std::path::PathBuf]) {
+    let content = roots.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n") + "\n";
+    if let Err(e) = std::fs::write(desktop_repos_file(), content) {
+        tracing::warn!("desktop-repos 持久化失败: {e}");
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AddRepoRequest {
+    path: String,
+}
+
+async fn add_repo(State(st): State<AppState>, Json(body): Json<AddRepoRequest>) -> Result<Response, AppError> {
+    let root = std::path::PathBuf::from(body.path.trim());
+    if !root.is_dir() {
+        return Err(AppError(ApiError::BadRequest(format!("目录不存在或不可读: {}", root.display()))));
+    }
+    let repo = repo_from_root(&root);
+    st.map_service.add_repo(repo.clone()).await.map_err(AppError)?;
+    // 持久化 + 启动该仓库的 watcher 管线（自动归纳由管线内决定）
+    let mut roots = read_desktop_repos();
+    if !roots.iter().any(|p| p == &root) {
+        roots.push(root.clone());
+        write_desktop_repos(&roots);
+    }
+    tokio::spawn(spawn_repo_pipeline(
+        repo.clone(),
+        st.map_service.clone(),
+        st.event_bus.clone(),
+        st.session_manager.clone(),
+        (*st.prompt_template).clone(),
+        (*st.agent_command).clone(),
+        (*st.agent_args).clone(),
+    ));
+    info!("[repo-add] 动态注册 {} -> {}", repo.id, repo.root.display());
+    Ok(Json(serde_json::json!({ "success": true, "data": { "id": repo.id, "name": repo.name, "root": repo.root.to_string_lossy() } })).into_response())
+}
+
+async fn remove_repo(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    if !st.map_service.remove_repo(&id).await {
+        return Err(AppError(ApiError::NotFound(format!("仓库 {id} 未挂载"))));
+    }
+    let remaining: Vec<_> = st.map_service.repos().await.into_iter().map(|r| r.root).collect();
+    write_desktop_repos(&remaining);
+    info!("[repo-remove] 注销 {}", id);
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
 async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
     // Y1 清债：ETag 条件请求——内容哈希已有，浏览器重连重同步时 If-None-Match 命中即 304
     // （body 不传输；前端零改动，浏览器 HTTP 缓存自动处理）
@@ -186,7 +260,7 @@ async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: ax
 }
 
 async fn get_growth(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     // 原样返回 growth.log 事件数组（与文件行一致，前端状态机统一消费）
     Ok(Json(st.map_service.load_growth(&repo).await?).into_response())
 }
@@ -199,13 +273,13 @@ async fn get_submap(
     if !easyvibe_map::is_valid_id(&module_id) {
         return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
     }
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     Ok(Json(st.map_service.load_submap(&repo, &module_id).await?).into_response())
 }
 
 /// S2：地图保鲜状态（§13.4——stale 地图上的对话/建议/健康分全是假数据自信工作）
 async fn get_freshness(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
     let f = freshness::assess(&repo.root, &snap.json);
     Ok(Json(serde_json::json!({
@@ -225,7 +299,7 @@ async fn get_health_history(State(st): State<AppState>, Path((id, module_id)): P
     if !easyvibe_map::is_valid_id(&module_id) {
         return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
     }
-    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     use easyvibe_db::HealthRepository as _;
     let rows = st.health_repo.list_module_history(&id, &module_id, 20).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
@@ -248,7 +322,7 @@ fn progress_done_ago_secs(repo_root: &std::path::Path) -> Option<u64> {
 /// S2.5：归纳进度（progress.json 透传——首归纳等待页显示真实阶段/百分比，
 /// 不再只转圈；文件缺失（如巡检场景无 progress）返回 done 形状，前端不渲染进度）
 async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let path = repo.root.join(".easyvibe/map/progress.json");
     if !path.exists() {
         return Ok(Json(serde_json::json!({ "success": true, "data": null })).into_response());
@@ -265,7 +339,7 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
     if !easyvibe_map::is_valid_id(&module_id) {
         return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
     }
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
     let module = snap.json["modules"]
         .as_array()
@@ -293,7 +367,7 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
     // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
     let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
@@ -360,7 +434,7 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
 ///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
 /// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if *st.llm_mode == LlmMode::Anthropic && std::env::var("EASYVIBE_LLM_API_KEY").is_err() {
         return Err(ApiError::BadRequest("未配置 EASYVIBE_LLM_API_KEY".into()).into());
     }
@@ -562,13 +636,13 @@ async fn export_diagnostics(State(st): State<AppState>) -> Result<Response, AppE
         .map(|t| t.lines().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
         .unwrap_or_else(|_| "（日志文件不可读）".into());
     use easyvibe_db::{ApprovalRepository as _, HealthRepository as _, TaskRepository as _};
-    let tasks = st.task_repo.list(st.map_service.repos().first().map(|r| r.id.as_str()).unwrap_or(""), 100).await.unwrap_or_default();
-    let runs = st.health_repo.list_runs(st.map_service.repos().first().map(|r| r.id.as_str()).unwrap_or(""), 20).await.unwrap_or_default();
+    let tasks = st.task_repo.list(st.map_service.repos().await.first().map(|r| r.id.as_str()).unwrap_or(""), 100).await.unwrap_or_default();
+    let runs = st.health_repo.list_runs(st.map_service.repos().await.first().map(|r| r.id.as_str()).unwrap_or(""), 20).await.unwrap_or_default();
     let aps = tasks.iter().take(10).map(|t| t.id.clone()).collect::<Vec<_>>();
     let body = serde_json::json!({
         "version": VERSION,
         "llm_mode": format!("{:?}", *st.llm_mode),
-        "repos": st.map_service.repos().iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        "repos": st.map_service.repos().await.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
         "task_counts": {
             "by_status": tasks.iter().fold(serde_json::json!({}), |mut acc, t| {
                 let k = t.status.clone();
@@ -660,7 +734,7 @@ async fn list_task_approvals(State(st): State<AppState>, Path((_, tid)): Path<(S
 /// M4-3：任务完整 diff（按需读取，不随任务列表载荷）——development_docs 归档中的 diffFull；
 /// 无归档/无 diff 返回 diff=null（调用方展示"无变更"）
 async fn get_task_diff(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let path = repo.root.join(".easyvibe/development_docs").join(format!("{tid}.json"));
     if !path.exists() {
         return Ok(Json(serde_json::json!({ "success": true, "data": { "diff": null, "diffStat": null } })).into_response());
@@ -677,7 +751,7 @@ async fn get_task_diff(State(st): State<AppState>, Path((id, tid)): Path<(String
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
 /// 每条建议可一键转修复任务（前端组装 TaskDraft）
 async fn suggest(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
     let suggestions: Vec<easyvibe_ai_agent::Suggestion> = match *st.llm_mode {
         LlmMode::Stub => easyvibe_ai_agent::StubSuggestClient.suggest(&snap.json).await?,
@@ -715,7 +789,7 @@ struct CreateTaskRequest {
 
 async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateTaskRequest>) -> Result<Response, AppError> {
     use easyvibe_db::TaskRepository as _;
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if body.description.trim().is_empty() {
         return Err(AppError(ApiError::BadRequest("需求描述不能为空".into())));
     }
@@ -862,7 +936,7 @@ async fn get_chat(
     Path(id): Path<String>,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, AppError> {
-    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let conv = st.conversation_repo.get_or_create(&id).await?;
     let before = q.get("before").and_then(|v| v.parse::<i64>().ok());
     let limit: i64 = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 200);
@@ -894,7 +968,7 @@ struct ChatHttpRequest {
 /// 入口对话（M2-5 + M3-5 持久化）：服务端是会话事实源——
 /// 用户消息落库 → 运行态上下文=摘要+未压缩窗口 → 问答 → 回答落库+token 记账 → auto-compact 检查
 async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<ChatHttpRequest>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if body.message.trim().is_empty() {
         return Err(AppError(ApiError::BadRequest("消息不能为空".into())));
     }
@@ -1006,7 +1080,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
 
 /// 手动压缩（§10a：对话界面"压缩上下文"按钮；自动阈值兜底之外的主动手段）
 async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let _guard = st.chat_lock.lock().await;
     let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
     let trace = maybe_compact(&st, &id, budget, 0, true).await?;
@@ -1015,7 +1089,7 @@ async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Res
 
 /// 新对话：清空消息与摘要（会话行保留，token 计数归零）
 async fn reset_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let _guard = st.chat_lock.lock().await;
     let conv = st.conversation_repo.get_or_create(&id).await?;
     st.conversation_repo.reset(&conv.id).await?;
@@ -1035,7 +1109,7 @@ struct SaveViewRequest {
 
 /// 视图列表（F1b 读侧）：.easyvibe/views/*.json 引用式视图，供前端"视图"页签消费
 async fn list_views(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let dir = repo.root.join(".easyvibe/views");
     let mut items: Vec<serde_json::Value> = vec![];
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -1061,7 +1135,7 @@ async fn list_views(State(st): State<AppState>, Path(id): Path<String>) -> Resul
 
 /// 删除视图（F1b 读侧闭环）：slug 复用保存时的安全字符集，防线同 save_view
 async fn delete_view(State(st): State<AppState>, Path((id, slug)): Path<(String, String)>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let safe: String = slug
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
@@ -1078,7 +1152,7 @@ async fn delete_view(State(st): State<AppState>, Path((id, slug)): Path<(String,
 
 /// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
 async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<SaveViewRequest>) -> Result<Response, AppError> {
-    let repo = st.map_service.find_repo(&id).ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let slug: String = body
         .name
         .chars()
@@ -1196,6 +1270,70 @@ impl IntoResponse for AppError {
 mod task_exec;
 mod freshness;
 
+/// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
+/// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
+async fn spawn_repo_pipeline(
+    r: easyvibe_map::Repo,
+    map_service: Arc<MapService>,
+    event_bus: broadcast::Sender<BusEvent>,
+    session_manager: Arc<easyvibe_session::SessionManager>,
+    prompt_template: String,
+    agent_command: String,
+    agent_args: Vec<String>,
+) {
+    // F1 打开仓库自动初始化（后端侧）：无合法地图的仓库启动即触发归纳，
+    // 产物经 watcher 推送，前端 map.changed 后自动渲染
+    if map_service.cached(&r.id).await.is_none() {
+        info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
+        if let Err(e) = session_manager
+            .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args)
+            .await
+        {
+            tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);
+        }
+    }
+    let mut rx = spawn_map_watcher(map_service.clone(), r.clone());
+    let bus = event_bus.clone();
+    let repo_id = r.id.clone();
+    tokio::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let event = match rx.borrow().clone() {
+                Ok(snap) => {
+                    let version = snap.json.get("version").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                    BusEvent::MapChanged(MapChanged { repo: repo_id.clone(), version })
+                }
+                Err(e) => BusEvent::MapInvalid(MapInvalid { repo: repo_id.clone(), error: e }),
+            };
+            let _ = bus.send(event);
+        }
+    });
+
+    // growth.log 增量 → growth.event
+    let mut grx = easyvibe_map::spawn_growth_watcher(r.clone());
+    let bus = event_bus.clone();
+    let repo_id = r.id.clone();
+    tokio::spawn(async move {
+        while grx.changed().await.is_ok() {
+            let batch = grx.borrow().clone();
+            for event in batch {
+                let _ = bus.send(BusEvent::Growth { repo: repo_id.clone(), event });
+            }
+        }
+    });
+
+    // progress.json → progress.updated
+    let mut prx = easyvibe_map::spawn_progress_watcher(r.clone());
+    let bus = event_bus;
+    let repo_id = r.id.clone();
+    tokio::spawn(async move {
+        while prx.changed().await.is_ok() {
+            let progress = prx.borrow().clone();
+            if progress.is_null() { continue; }
+            let _ = bus.send(BusEvent::Progress { repo: repo_id.clone(), progress });
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
     // Y3 清债：日志落盘（排障不再只靠终端）——数据目录 logs/ 按天滚动，双写 stderr
@@ -1221,15 +1359,22 @@ async fn main() {
         guard
     };
 
-    // 仓库注册：从 EASYVIBE_REPO 环境变量读取（逗号分隔的多仓库）。D5：桌面壳场景允许为空
-    //（用户尚未在壳内添加仓库时后端照常启动，前端引导添加）——空则零仓库起步。
-    let repo_roots: Vec<std::path::PathBuf> = std::env::var("EASYVIBE_REPO")
+    // 仓库注册：EASYVIBE_REPO 环境变量（开发期手段）+ ~/.easyvibe/desktop-repos 持久化文件
+    //（D5：文件归后端独占——应用内添加/注销都改写它，桌面壳不再代读）。
+    // 合并去重、跳过不存在目录；两者皆空 = 零仓库起步（前端引导添加）。
+    let mut repo_roots: Vec<std::path::PathBuf> = std::env::var("EASYVIBE_REPO")
         .unwrap_or_default()
         .split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(Into::into)
         .collect();
+    for p in read_desktop_repos() {
+        if !repo_roots.contains(&p) {
+            repo_roots.push(p);
+        }
+    }
+    let repo_roots: Vec<_> = repo_roots.into_iter().filter(|p| p.is_dir()).collect();
     let repos: Vec<_> = repo_roots.iter().map(|p| repo_from_root(p)).collect();
     for r in &repos {
         info!("注册仓库 {} -> {}", r.id, r.root.display());
@@ -1282,58 +1427,17 @@ async fn main() {
     info!("agent={} args={:?} prompt={}", agent_command, agent_args, prompt_path);
 
     // 每个仓库一个地图 watcher，变更翻译为总线事件
+    // D5：抽成 spawn_repo_pipeline——启动挂载与 POST /api/repos 动态注册共用同一条管线
     for r in repos {
-        // F1 打开仓库自动初始化（后端侧）：无合法地图的仓库启动即触发归纳，
-        // 产物经 watcher 推送，前端 map.changed 后自动渲染
-        if map_service.cached(&r.id).await.is_none() {
-            info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
-            if let Err(e) = session_manager
-                .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args)
-                .await
-            {
-                tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);
-            }
-        }
-        let mut rx = spawn_map_watcher(map_service.clone(), r.clone());
-        let bus = event_bus.clone();
-        let repo_id = r.id.clone();
-        tokio::spawn(async move {
-            while rx.changed().await.is_ok() {
-                let event = match rx.borrow().clone() {
-                    Ok(snap) => {
-                        let version = snap.json.get("version").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-                        BusEvent::MapChanged(MapChanged { repo: repo_id.clone(), version })
-                    }
-                    Err(e) => BusEvent::MapInvalid(MapInvalid { repo: repo_id.clone(), error: e }),
-                };
-                let _ = bus.send(event);
-            }
-        });
-
-        // growth.log 增量 → growth.event
-        let mut grx = easyvibe_map::spawn_growth_watcher(r.clone());
-        let bus = event_bus.clone();
-        let repo_id = r.id.clone();
-        tokio::spawn(async move {
-            while grx.changed().await.is_ok() {
-                let batch = grx.borrow().clone();
-                for event in batch {
-                    let _ = bus.send(BusEvent::Growth { repo: repo_id.clone(), event });
-                }
-            }
-        });
-
-        // progress.json → progress.updated
-        let mut prx = easyvibe_map::spawn_progress_watcher(r.clone());
-        let bus = event_bus.clone();
-        let repo_id = r.id.clone();
-        tokio::spawn(async move {
-            while prx.changed().await.is_ok() {
-                let progress = prx.borrow().clone();
-                if progress.is_null() { continue; }
-                let _ = bus.send(BusEvent::Progress { repo: repo_id.clone(), progress });
-            }
-        });
+        tokio::spawn(spawn_repo_pipeline(
+            r,
+            map_service.clone(),
+            event_bus.clone(),
+            session_manager.clone(),
+            prompt_template.clone(),
+            agent_command.clone(),
+            agent_args.clone(),
+        ));
     }
 
     // M2-4：域 2 SQLite + 巡检槽位
@@ -1409,7 +1513,7 @@ async fn main() {
         tokio::spawn(async move {
             let mut last: std::collections::HashMap<String, String> = Default::default();
             loop {
-                for repo in maps.repos() {
+                for repo in maps.repos().await {
                     let Ok(snap) = maps.load_map(&repo).await else { continue };
                     let f = freshness::assess(&repo.root, &snap.json);
                     let status = f.status.as_str().to_string();
@@ -1472,7 +1576,7 @@ async fn main() {
                 if !enabled { continue }
                 let hours: i64 = settings.get("global", "adv.autoPatrolHours").await.ok().flatten()
                     .and_then(|r| serde_json::from_str::<i64>(&r.value).ok()).unwrap_or(24).max(1);
-                for repo in maps.repos() {
+                for repo in maps.repos().await {
                     use easyvibe_db::HealthRepository as _;
                     let fresh_enough = st_for_patrol.health_repo.list_runs(&repo.id, 1).await.ok()
                         .and_then(|runs| runs.first().and_then(|r| r.started_at.parse::<i64>().ok()))
