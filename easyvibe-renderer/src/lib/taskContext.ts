@@ -1,4 +1,4 @@
-import type { CodeMap, Concern } from '@/types/map'
+import type { CodeMap, Concern, Module } from '@/types/map'
 
 export interface TaskDraft {
   title: string
@@ -36,6 +36,25 @@ export function buildModuleTask(map: CodeMap, moduleId: string): TaskDraft {
           health: mod.health,
         },
         violations,
+      },
+    },
+  }
+}
+
+/** M4-1.5：子模块修复——任务挂在父模块上，上下文注入子模块的职责/文件/健康评审 */
+export function buildSubmoduleTask(parent: Module, sub: { id: string; name: string; responsibility: string; files: string[]; health: unknown }): TaskDraft {
+  const h = sub.health as { score: number; review_note?: string; decay_flags?: string[] }
+  const desc = `修复父模块「${parent.name}」内的子模块「${sub.name}」（内部健康 ${h.score} 分）。\n职责：${sub.responsibility}\n文件：${sub.files.join('、')}\n评审意见：${h.review_note ?? '无'}${h.decay_flags?.length ? `\n腐化标记：${h.decay_flags.join('、')}` : ''}`
+  return {
+    title: `修复 ${parent.name} · ${sub.name}`,
+    description: desc,
+    modules: [parent.id],
+    acceptance: '子模块内部健康度提升（重新展开子图复检），不破坏父模块对外契约。',
+    source: 'module',
+    context: {
+      inject: {
+        module: { id: parent.id, name: parent.name, layer: parent.layer, responsibility: parent.responsibility, files: parent.files },
+        submodule: { id: sub.id, name: sub.name, files: sub.files, health: sub.health },
       },
     },
   }

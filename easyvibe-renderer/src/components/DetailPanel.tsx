@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare} from 'lucide-react'
-import { buildLayerTask, buildModuleTask, type TaskDraft } from '@/lib/taskContext'
+import { buildLayerTask, buildModuleTask, buildSubmoduleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
@@ -283,7 +283,7 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
 }
 
 // 子模块详情（§8 子图 drill-down 层）
-function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule; submap: SubMap }) {
+function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; sub: SubModule; submap: SubMap; onCreateTask: (d: TaskDraft) => void }) {
   const color = healthColor(sub.health.score)
   const siblings = new Map(submap.sub_modules.map((s) => [s.id, s]))
   const deps = sub.dependencies.map((id) => siblings.get(id)).filter(Boolean) as SubModule[]
@@ -294,6 +294,14 @@ function SubmoduleView({ parent, sub, submap }: { parent: Module; sub: SubModule
       <div>
         <div className="flex items-center gap-2">
           <h2 className="text-[15px] font-bold text-slate-800">{sub.name}</h2>
+          {/* M4-1.5：子模块补上修复入口（模块/层都有，此前独缺） */}
+          <button
+            onClick={() => onCreateTask(buildSubmoduleTask(parent, sub))}
+            className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            title="指哪打哪：以父模块+该子模块为上下文发起修复任务"
+          >
+            <Wrench size={10} /> 发起修复
+          </button>
           <Badge variant="outline" className="border-slate-200 text-slate-500">
             {sub.id}
           </Badge>
@@ -386,6 +394,8 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
     : undefined
 
   const detailLabel = module ? '模块详情' : layer ? '架构层详情' : sub ? '子模块详情' : '选中详情'
+  // M4-1.5 选区收敛：模块或子模块选中时，问题清单随之收敛到该模块
+  const scopeModuleName = module?.name ?? parent?.name
 
   return (
     <aside className="anim-panel-in flex h-full shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
@@ -416,7 +426,16 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         </button>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
+        {tab === 'issues' && (
+          <IssuesList
+            map={map}
+            onLocate={(id) => onLocateModule(id)}
+            onCreateTask={onCreateTask}
+            backendRepo={backendRepo}
+            scopeId={selection?.kind === 'module' ? selection.id : selection?.kind === 'submodule' ? selection.parentId : undefined}
+            scopeName={scopeModuleName}
+          />
+        )}
         {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
           <ChatPanel backendRepo={backendRepo} map={map} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
@@ -424,7 +443,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
-          <SubmoduleView parent={parent} sub={sub} submap={smLoaded} />
+          <SubmoduleView parent={parent} sub={sub} submap={smLoaded} onCreateTask={onCreateTask} />
         )}
         {tab === 'detail' && !module && !layer && !sub && selection?.kind === 'submodule' && (
           <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">

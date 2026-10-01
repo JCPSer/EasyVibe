@@ -75,7 +75,7 @@ function SeverityChip({ severity }: { severity: 'critical' | 'high' }) {
   )
 }
 
-export function IssuesList({ map, onLocate, onCreateTask, backendRepo }: { map: CodeMap; onLocate: (moduleId: string) => void; onCreateTask: (d: TaskDraft) => void; backendRepo?: string | null }) {
+export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, scopeName }: { map: CodeMap; onLocate: (moduleId: string) => void; onCreateTask: (d: TaskDraft) => void; backendRepo?: string | null; /** M4-1.5：选区收敛——模块/子模块选中时只显示该模块的问题 */ scopeId?: string; scopeName?: string }) {
   // 改进#6：问题卡"自动修复"一键直达（测试员路径优化：5 点击→2 点击）
   const [quickBusy, setQuickBusy] = useState<string | null>(null)
   const [quickDone, setQuickDone] = useState<string | null>(null)
@@ -120,14 +120,16 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo }: { map: 
       .catch(() => toast('创建任务失败（需要本地后端在线）', 'error'))
       .finally(() => setQuickBusy(null))
   }
-  const issues = collectIssues(map)
+  // 选区收敛：有 scope 时只留该模块的问题（架构级问题属全局，收敛视图下不混入）
+  const all = collectIssues(map)
+  const issues = scopeId ? all.filter((i) => i.moduleId === scopeId) : all
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-[15px] font-bold text-slate-800">问题清单</h2>
+        <h2 className="text-[15px] font-bold text-slate-800">{scopeName ? `${scopeName} 的问题` : '问题清单'}</h2>
         <p className="mt-1 text-[11px] text-slate-400">
-          共 {issues.length} 项 · 按严重度排序，同档按影响面（被依赖数）排序
+          {scopeName ? `选区收敛 · 该模块 ${issues.length} 项` : `共 ${issues.length} 项`} · 按严重度排序，同档按影响面（被依赖数）排序
         </p>
       </div>
 
