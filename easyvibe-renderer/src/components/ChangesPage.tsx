@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Copy, History, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
-import { absTime, aggregateByModule, parseDiffStat } from '@/lib/diffStat'
+import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/lib/diffStat'
 import type { CodeMap } from '@/types/map'
 
 // M4-3 变更记录整页（按 ui-mockups/变更记录原型.png 施工）：
@@ -105,7 +105,12 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
     )
   }, [selStat, map])
   const approvals = sel && approvalsFor?.taskId === sel.id ? approvalsFor.list : []
-  const duration = sel ? Math.max(0, Date.parse(sel.updatedAt) - Date.parse(sel.createdAt)) : 0
+  const duration = (() => {
+    if (!sel) return 0
+    const end = toMs(sel.updatedAt)
+    const start = toMs(sel.createdAt)
+    return end !== null && start !== null ? Math.max(0, end - start) : 0
+  })()
   const durText = duration <= 0 ? '—' : duration < 60000 ? `${Math.round(duration / 1000)} 秒` : `${Math.floor(duration / 60000)} 分钟 ${Math.round((duration % 60000) / 1000)} 秒`
 
   if (!backendRepo) {

@@ -355,6 +355,7 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
         std::env::var("EASYVIBE_SUBMAP_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-module-submap-prompt.md".into()),
     )
     .unwrap_or_else(|_| st.submap_prompt.to_string());
+    ensure_agent_available(&st)?;
     let prompt = template
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
         .replace("<MODULE_ID>", &module_id)
@@ -371,6 +372,7 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    ensure_agent_available(&st)?;
     // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
     // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
     let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
@@ -438,8 +440,8 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
 /// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
-    if *st.llm_mode == LlmMode::Anthropic && std::env::var("EASYVIBE_LLM_API_KEY").is_err() {
-        return Err(ApiError::BadRequest("未配置 EASYVIBE_LLM_API_KEY".into()).into());
+    if *st.llm_mode == LlmMode::Anthropic {
+        ensure_agent_available(&st)?;
     }
     let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
 
@@ -507,6 +509,21 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
             Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "sessionId": session.session_id, "mode": "agent" }))).into_response())
         }
     }
+}
+
+/// CLI agent 可执行预检：spawn 路径的鉴权由 claude 自身配置（~/.claude/settings.json 的 env
+/// 或进程环境变量）负责，与本进程的 EASYVIBE_LLM_API_KEY 无关——旧守卫把"DB 已配 key"
+/// 的合法场景误判为未配置（chat 直调走 DB，patrol/reinduce 走 CLI spawn，两条链路配置源不同）。
+fn ensure_agent_available(st: &AppState) -> Result<(), ApiError> {
+    let cmd = &*st.agent_command;
+    let name = cmd.rsplit('/').next().unwrap_or(cmd);
+    let on_path = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
+        .unwrap_or(false);
+    if !on_path && !std::path::Path::new(cmd).is_file() {
+        return Err(ApiError::BadRequest(format!("未找到 CLI agent `{cmd}`——请先安装并加入 PATH")));
+    }
+    Ok(())
 }
 
 /// 健康历史：巡检运行列表（域 2 的第一个读接口）

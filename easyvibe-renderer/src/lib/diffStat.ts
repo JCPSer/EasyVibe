@@ -81,11 +81,22 @@ export function aggregateByModule(
   return [...byModule.values()].sort((a, b) => b.adds + b.dels - (a.adds + a.dels))
 }
 
+/** ISO 或 epoch 秒/毫秒 → 毫秒；无法解析返回 null（巡检 started_at / 任务时间戳均有 epoch 落库口径） */
+export function toMs(iso: string): number | null {
+  const t = Date.parse(iso)
+  if (!Number.isNaN(t)) return t
+  if (/^\d{9,13}$/.test(iso)) {
+    const n = Number(iso)
+    return n < 1e12 ? n * 1000 : n
+  }
+  return null
+}
+
 /** 相对时间："3 分钟前 / 2 小时前 / 5 天前"；无法解析返回原始串 */
 export function relTime(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return iso
+  const t = toMs(iso)
+  if (t === null) return iso
   const diff = Math.max(0, now - t)
   const min = Math.floor(diff / 60000)
   if (min < 1) return '刚刚'
@@ -101,8 +112,8 @@ export function relTime(iso: string | null | undefined, now = Date.now()): strin
 /** 绝对时间："2026-09-30 09:15"；无法解析返回原始串 */
 export function absTime(iso: string | null | undefined): string {
   if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return iso
+  const t = toMs(iso)
+  if (t === null) return iso
   const d = new Date(t)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`

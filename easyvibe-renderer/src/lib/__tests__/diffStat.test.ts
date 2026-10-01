@@ -78,4 +78,11 @@ describe('时间格式化', () => {
     expect(absTime('2026-09-30T09:15:22')).toBe('2026-09-30 09:15')
     expect(absTime(undefined)).toBe('—')
   })
+
+  it('epoch 秒/毫秒串也能解析（巡检 started_at 落库口径）', () => {
+    expect(absTime('1790871442')).toBe('2026-10-02 00:17')
+    expect(relTime('1790871442', Date.parse('2026-10-02T01:17:22'))).toBe('1 小时前')
+    expect(relTime('1790871442000', Date.parse('2026-10-02T01:17:22'))).toBe('1 小时前')
+    expect(absTime('1790871442')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+  })
 })
