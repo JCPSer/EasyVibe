@@ -4,6 +4,14 @@ import { Loader2, FileCode2 } from 'lucide-react'
 import type { SubModule } from '@/types/map'
 import { healthColor, healthLabel, SUB_W, SUB_H } from '@/lib/layout'
 
+// 腐化标记中文标签（与主图 ModuleNode 同表 + 子图内部专属）
+const SUB_FLAG_LABEL: Record<string, string> = {
+  god_object: '上帝对象', internal_circular_dep: '内部循环依赖', circular_dep: '循环依赖',
+  coupling_high: '耦合过高', layer_violation: '分层违规', single_file_module: '单文件模块',
+  file_too_large: '文件过大', part_file_coupling: '部分文件耦合', duplicated_protocol: '协议重复',
+  ref_plumbing: '引用缠绕', doc_drift: '文档漂移',
+}
+
 export type SubmoduleNodeType = Node<
   { sub?: SubModule; loading: boolean; inCount: number; outCount: number; parentName: string },
   'submodule'
@@ -69,7 +77,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
           <FileCode2 size={9} /> {sub.files.length} 文件
         </span>
         {sub.health.decay_flags.length > 0 && (
-          <span className="truncate text-red-500">{sub.health.decay_flags.join(' · ')}</span>
+          <span className="truncate text-red-500">{sub.health.decay_flags.map((f) => SUB_FLAG_LABEL[f] ?? f).join(' · ')}</span>
         )}
       </div>
     </div>
