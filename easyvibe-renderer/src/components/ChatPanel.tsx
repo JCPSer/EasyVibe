@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
+import { AnswerCards } from '@/components/AnswerCards'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
@@ -737,6 +738,9 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 )}
                 {m.role === 'assistant' && !m.content.trim() ? (
                   <span className="text-slate-400">（此条未获得回答）</span>
+                ) : m.role === 'assistant' ? (
+                  /* M4-2 答案卡片三型（对话面板原型）：有章节结构的回答拆卡渲染 */
+                  <AnswerCards content={m.content} />
                 ) : (
                   <MarkdownMessage content={m.content} />
                 )}

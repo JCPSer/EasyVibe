@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -28,6 +28,7 @@ import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
 import { WorkbenchPage } from '@/components/WorkbenchPage'
+import { ReviewPage } from '@/components/ReviewPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -1693,15 +1694,7 @@ export default function App() {
         icon={ClipboardList}
       />
     ),
-    review: (
-      <PlaceholderPage
-        title="评审"
-        milestone="M4-2"
-        description="审查 agent 的产出：计划、Diff、审查报告三道关，逐条通过或驳回，全程留痕可回溯。当前可在任务页内完成审批。"
-        action={{ label: '前往任务页审批', onClick: () => handlePageChange('tasks') }}
-        icon={ShieldCheck}
-      />
-    ),
+    review: <ReviewPage backendRepo={backendRepo} map={map} />,
     changes: (
       <PlaceholderPage
         title="变更记录"
