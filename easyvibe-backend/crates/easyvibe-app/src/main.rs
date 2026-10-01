@@ -1208,10 +1208,15 @@ async fn main() {
         std::fs::create_dir_all(&dir).unwrap_or_else(|e| eprintln!("日志目录创建失败 {dir}: {e}"));
         let appender = tracing_appender::rolling::daily(&dir, "easyvibe.log");
         let (nb, guard) = tracing_appender::non_blocking(appender);
-        tracing_subscriber::fmt()
-            .with_env_filter("info")
-            .with_writer(nb)
-            .with_ansi(false)
+        // 双写：文件（按天滚动，排障事实源）+ stderr（D5-2 桌面壳 pipe_child_logs
+        // 转发 sidecar 日志用——壳日志与后端日志汇流到一处，只看一个流）
+        use tracing_subscriber::prelude::*;
+        let file_layer = tracing_subscriber::fmt::layer().with_writer(nb).with_ansi(false);
+        let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr).with_ansi(false);
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("info"))
+            .with(file_layer)
+            .with(stderr_layer)
             .init();
         guard
     };

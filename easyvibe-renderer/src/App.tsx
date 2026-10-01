@@ -31,6 +31,7 @@ import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
+import { initUpdater } from '@/lib/updater'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
@@ -1195,6 +1196,11 @@ export default function App() {
   const [reloadTick, setReloadTick] = useState(0)
   // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
   const [serverVersion, setServerVersion] = useState<string | null>(null)
+
+  // D5-2：桌面壳自动更新（仅 Tauri 环境生效，浏览器 no-op）
+  useEffect(() => {
+    initUpdater()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
