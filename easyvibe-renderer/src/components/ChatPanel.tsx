@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download} from 'lucide-react'
+import type { CodeMap } from '@/types/map'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -12,6 +13,8 @@ interface ChatMessage {
   id?: number
   /** 图片附件（dataURL；仅当前会话内存，刷新后不还原） */
   images?: { name: string; dataUrl: string }[]
+  /** D9 @模块：本条用户消息显式钉住的模块 */
+  mentions?: { id: string; name: string }[]
 }
 
 interface Clarify {
@@ -22,6 +25,7 @@ interface Clarify {
 
 interface Props {
   backendRepo: string | null
+  map: CodeMap | null
   onLocateModule: (moduleId: string) => void
   /** S1：对话升级任务入口——把本轮对话组织成 TaskDraft 交给任务表单 */
   onCreateTask: (draft: TaskDraft) => void
@@ -36,7 +40,7 @@ interface ChatRestore {
 
 // 入口对话（F2 + M3-5 会话持久化）：服务端 SQLite 是会话事实源——
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -55,6 +59,49 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
   const [images, setImages] = useState<{ name: string; size: number; dataUrl: string }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // D9 @模块：显式钉住的模块（随本条消息发送，后端拼成聚焦块前置给 LLM）
+  const [mentions, setMentions] = useState<{ id: string; name: string }[]>([])
+  // @ 触发建议浮层：query=@ 后的输入，start=@ 在输入框中的下标（用于选中后删除原文 token）
+  const [suggest, setSuggest] = useState<{ query: string; start: number } | null>(null)
+  const [suggestIdx, setSuggestIdx] = useState(0)
+
+  const mentionCandidates = (query: string) => {
+    if (!map) return []
+    const q = query.toLowerCase()
+    return map.modules
+      .filter((m) => !mentions.some((x) => x.id === m.id))
+      .filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+      .slice(0, 6)
+  }
+
+  // 输入变化：检测光标前最近的 @token（中间无空格才触发）
+  const handleInputChange = (value: string, caret: number) => {
+    setInput(value)
+    const before = value.slice(0, caret)
+    const m = before.match(/@([^\s@]{0,20})$/)
+    if (m && map) {
+      setSuggest({ query: m[1], start: caret - m[1].length - 1 })
+      setSuggestIdx(0)
+    } else {
+      setSuggest(null)
+    }
+  }
+
+  const pickMention = (id: string, name: string) => {
+    if (!suggest) return
+    const ta = textareaRef.current
+    const caret = ta?.selectionStart ?? input.length
+    // 删除已输入的 @token 原文，模块以芯片形式存在（不污染消息文本）
+    const next = input.slice(0, suggest.start) + input.slice(caret)
+    setInput(next)
+    setMentions((prev) => [...prev, { id, name }])
+    setSuggest(null)
+    requestAnimationFrame(() => {
+      ta?.focus()
+      ta?.setSelectionRange(suggest.start, suggest.start)
+    })
+  }
 
   // R1 清债：加载更早一页（prepend 到消息头部）
   const loadEarlier = () => {
@@ -153,18 +200,21 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         : q
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: withAttach, refs: [], images: images.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) },
+      { role: 'user', content: withAttach, refs: [], images: images.map((i) => ({ name: i.name, dataUrl: i.dataUrl })), mentions },
     ])
     setAttachments([])
     const sendImages = images.map((i) => i.dataUrl)
     setImages([])
+    const sendMentions = mentions.map((m) => m.id)
+    setMentions([])
+    setSuggest(null)
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: withAttach, images: sendImages }),
+      body: JSON.stringify({ message: withAttach, images: sendImages, moduleRefs: sendMentions }),
       signal: ac.signal,
     })
       .then((r) => {
@@ -406,6 +456,16 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
                 {m.images?.map((im, j) => (
                   <img key={j} src={im.dataUrl} alt={im.name} className="mb-1.5 max-h-40 rounded-lg" />
                 ))}
+                {m.mentions && m.mentions.length > 0 && (
+                  <div className="mb-1 flex flex-wrap gap-1">
+                    {m.mentions.map((mm) => (
+                      <span key={mm.id} className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[9.5px]">
+                        <AtSign size={8} />
+                        {mm.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <MarkdownMessage content={m.content} />
                 {(m.role === 'assistant' || m.role === 'user') && (m.refs.length > 0 || /```mermaid/.test(m.content)) && (
                   <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
@@ -499,6 +559,19 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         )}
       </div>
 
+      {mentions.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {mentions.map((m) => (
+            <span key={m.id} className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] text-white">
+              <AtSign size={9} />
+              {m.name}
+              <button onClick={() => setMentions((prev) => prev.filter((x) => x.id !== m.id))} className="text-blue-200 hover:text-white">
+                <XIcon size={9} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {(attachments.length > 0 || images.length > 0) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {images.map((im, i) => (
@@ -537,20 +610,65 @@ export function ChatPanel({ backendRepo, onLocateModule, onCreateTask }: Props) 
         >
           <Paperclip size={14} />
         </button>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
-          rows={2}
-          placeholder={backendRepo ? '问点什么…（Enter 发送，Shift+Enter 换行）' : '需要本地后端在线'}
-          disabled={!backendRepo || sending}
-          className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300 disabled:opacity-50"
-        />
+        <div className="relative flex-1">
+          {suggest && mentionCandidates(suggest.query).length > 0 && (
+            /* D9 @模块建议浮层：@ 后输入即过滤，↑↓ 选择，Enter/Tab 选中，Esc 关闭 */
+            <div className="absolute bottom-full left-0 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+              {mentionCandidates(suggest.query).map((m, i) => (
+                <button
+                  key={m.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    pickMention(m.id, m.name)
+                  }}
+                  onMouseEnter={() => setSuggestIdx(i)}
+                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left ${i === suggestIdx ? 'bg-blue-50' : 'bg-white'}`}
+                >
+                  <AtSign size={10} className="shrink-0 text-blue-400" />
+                  <span className="truncate text-[11.5px] font-medium text-slate-700">{m.name}</span>
+                  <span className="ml-auto shrink-0 font-mono text-[9.5px] text-slate-400">{m.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+            onKeyDown={(e) => {
+              const cands = suggest ? mentionCandidates(suggest.query) : []
+              if (suggest && cands.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSuggestIdx((i) => (i + 1) % cands.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSuggestIdx((i) => (i - 1 + cands.length) % cands.length)
+                  return
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault()
+                  pickMention(cands[suggestIdx].id, cands[suggestIdx].name)
+                  return
+                }
+                if (e.key === 'Escape') {
+                  setSuggest(null)
+                  return
+                }
+              }
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                send()
+              }
+            }}
+            rows={2}
+            placeholder={backendRepo ? '问点什么…（@ 引用模块，Enter 发送，Shift+Enter 换行）' : '需要本地后端在线'}
+            disabled={!backendRepo || sending}
+            className="w-full flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300 disabled:opacity-50"
+          />
+        </div>
         {sending ? (
           <button
             onClick={() => abortRef.current?.abort()}

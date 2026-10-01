@@ -858,6 +858,9 @@ struct ChatHttpRequest {
     /// 图片附件：dataURL 数组（随消息发给视觉模型；不持久化原文，库中只留占位）
     #[serde(default)]
     images: Vec<String>,
+    /// D9 @模块：用户显式钉住的模块 id 列表（只作上下文提示，不参与过滤）
+    #[serde(default)]
+    module_refs: Vec<String>,
 }
 
 /// 入口对话（M2-5 + M3-5 持久化）：服务端是会话事实源——
@@ -888,8 +891,35 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
     let pairs = fold_pairs(&fresh);
 
     // 3) 问答（槽位配置 M3-1）
+    // D9 @模块：把命中的模块概要拼成聚焦块前置给 LLM（原文落库，聚焦块只在本次调用的消息头）
+    let snap_json: &serde_json::Value = &snap.json;
+    let focus_block = {
+        let mods = snap_json.get("modules").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+        let known: Vec<String> = body
+            .module_refs
+            .iter()
+            .filter(|id| mods.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(id.as_str())))
+            .cloned()
+            .collect();
+        if known.is_empty() {
+            String::new()
+        } else {
+            let lines: Vec<String> = known
+                .iter()
+                .filter_map(|id| mods.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id.as_str())))
+                .map(|m| {
+                    let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let resp = m.get("responsibility").and_then(|v| v.as_str()).unwrap_or("");
+                    let score = m.get("health").and_then(|h| h.get("score")).and_then(|v| v.as_i64()).unwrap_or(-1);
+                    format!("- {name}（{id}）：{resp}　健康分 {score}")
+                })
+                .collect();
+            format!("【本轮聚焦模块】（用户显式 @ 引用，回答请优先围绕这些模块展开）\n{}\n\n", lines.join("\n"))
+        }
+    };
+    let llm_message = format!("{focus_block}{}", body.message);
     let answer: easyvibe_ai_agent::QaAnswer = match *st.llm_mode {
-        LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &body.message, &pairs, &body.images).await?,
+        LlmMode::Stub => easyvibe_ai_agent::StubQaClient::new().ask(&snap.json, &llm_message, &pairs, &body.images).await?,
         LlmMode::Anthropic => {
             let cfg = resolve_llm(&st, &id, "chat").await;
             if cfg.api_key.is_empty() {
@@ -903,7 +933,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
             } else {
                 format!("\n\n## 对话技能（grill-me：需求有歧义时主动用选择题澄清）\n\n{skills}\n\n---\n")
             };
-            easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &body.message, &pairs, &body.images).await?
+            easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &llm_message, &pairs, &body.images).await?
         }
     };
 
@@ -1620,6 +1650,41 @@ mod tests {
         assert!(messages[0]["content"].as_str().unwrap().contains("评测提交"));
         // token 用量已记账（stub 估算为正；POST 返回累计口径）
         assert!(data["usage"]["promptTokens"].as_i64().unwrap() > 0, "记账链路应产生正用量");
+    }
+
+    #[tokio::test]
+    async fn chat_module_refs_injected_but_original_persisted() {
+        let (state, repo) = chat_state("mrefs").await;
+        let app = build_router(state);
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/chat"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({ "message": "它健康吗？", "module_refs": ["exam-core", "ghost-module"] }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "带 module_refs 的 chat 应成功");
+        // 持久化的是用户原文：聚焦块与未知 id 都不得进库（D9：聚焦只活在本轮 LLM 调用）
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/chat")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let messages = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["messages"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let last_user = messages.iter().rev().find(|m| m["role"] == "user").unwrap();
+        let content = last_user["content"].as_str().unwrap();
+        assert_eq!(content, "它健康吗？");
+        assert!(!content.contains("聚焦模块"), "聚焦块不得落库");
+        assert!(!content.contains("ghost-module"), "未知模块 id 不得落库");
     }
 
     #[tokio::test]

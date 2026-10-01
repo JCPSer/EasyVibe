@@ -423,7 +423,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         {tab === 'issues' && <IssuesList map={map} onLocate={(id) => onLocateModule(id)} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
         {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
         <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
-          <ChatPanel backendRepo={backendRepo} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
+          <ChatPanel backendRepo={backendRepo} map={map} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
         </div>
         {/* 常驻挂载 + CSS 隐藏：切页签不重分析、不丢结果（试用反馈#2——此前每次切换都重新调 LLM 浪费 token） */}
         <div className={tab === 'suggest' ? 'h-full' : 'hidden h-full'}>
