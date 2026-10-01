@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, MonitorCog, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -27,6 +27,7 @@ import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailP
 import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
+import { WorkbenchPage } from '@/components/WorkbenchPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -1682,15 +1683,7 @@ export default function App() {
     ),
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
-    workbench: (
-      <PlaceholderPage
-        title="开发工作台"
-        milestone="M4-2"
-        description="你的 agent 驾驶舱：多会话列表、执行计划进度、内联审批与变更影响面——派活、监督、审批在一个视图闭环。"
-        action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
-        icon={MonitorCog}
-      />
-    ),
+    workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} onLocateModule={() => handlePageChange('map')} />,
     todo: (
       <PlaceholderPage
         title="我的待办"

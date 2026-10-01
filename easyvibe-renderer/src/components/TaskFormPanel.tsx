@@ -45,6 +45,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
         source: draft.source,
         context: draft.context,
         trust,
+        conversation_id: draft.conversation_id ?? null,
       }),
     })
       .then((r) => {

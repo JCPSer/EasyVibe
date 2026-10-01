@@ -7,6 +7,8 @@ export interface TaskDraft {
   acceptance: string
   source: 'module' | 'concern' | 'layer' | 'manual'
   context: Record<string, unknown>
+  /** M4-2：任务←→会话关联（对话升级路径自动带上） */
+  conversation_id?: string
 }
 
 // 指哪打哪的上下文组织器：把模块职责/边界/问题/相关违规边组装成任务草稿（M3-2）

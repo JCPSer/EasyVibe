@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign} from 'lucide-react'
+import { onTaskEvent } from '@/lib/growthBus'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -23,24 +24,50 @@ interface Clarify {
   why?: string
 }
 
+// M4-2 多会话：AionUI 运行时摘要精简版（后端 conversation_summary 产出）
+export interface ConversationSummary {
+  id: string
+  title: string | null
+  repo: string
+  updatedAt: string
+  messageCount: number
+  usage: { promptTokens: number; completionTokens: number }
+  runtime: { state: 'idle' | 'running' | 'waiting_confirmation'; pendingConfirmations: number; runningTasks: number }
+}
+
+interface PendingApproval {
+  taskId: string
+  title: string
+  gate: string | null
+}
+
+const GATE_LABEL: Record<string, string> = { plan: '① 计划审批', diff: '② Diff 审批', report: '③ 审查报告' }
+
 interface Props {
   backendRepo: string | null
   map: CodeMap | null
   onLocateModule: (moduleId: string) => void
   /** S1：对话升级任务入口——把本轮对话组织成 TaskDraft 交给任务表单 */
   onCreateTask: (draft: TaskDraft) => void
+  /** M4-2 工作台嵌入模式：隐藏会话切换器（左侧栏自带）与部分头部按钮 */
+  embedded?: boolean
+  /** M4-2：当前会话变化通知（工作台据此加载该会话的任务/影响面） */
+  onConvChange?: (id: string | null) => void
 }
 
 interface ChatRestore {
   summary: string | null
+  conversation?: { id: string; title: string | null }
   messages: { id: number; role: string; content: string }[]
   hasMore: boolean
+  pendingApprovals?: PendingApproval[]
   usage: { promptTokens: number; completionTokens: number }
 }
 
-// 入口对话（F2 + M3-5 会话持久化）：服务端 SQLite 是会话事实源——
+// 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
+// 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -65,6 +92,203 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
   // @ 触发建议浮层：query=@ 后的输入，start=@ 在输入框中的下标（用于选中后删除原文 token）
   const [suggest, setSuggest] = useState<{ query: string; start: number } | null>(null)
   const [suggestIdx, setSuggestIdx] = useState(0)
+
+  // ---- M4-2 多会话状态 ----
+  const [convs, setConvs] = useState<ConversationSummary[]>([])
+  const [convId, setConvId] = useState<string | null>(null) // null = 后端回落（最近活跃）
+  const [convMenuOpen, setConvMenuOpen] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameVal, setRenameVal] = useState('')
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([])
+  const [decided, setDecided] = useState<Record<string, 'approved' | 'rejected'>>({})
+
+  const convQ = convId ? `?conv=${encodeURIComponent(convId)}` : ''
+  const convBody = convId ? { conv: convId } : {}
+
+  const loadConvs = useCallback(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${backendRepo}/conversations`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: ConversationSummary[] } | null) => {
+        if (d?.data) setConvs(d.data)
+      })
+      .catch(() => {})
+  }, [backendRepo])
+
+  const refreshPending = useCallback(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${backendRepo}/chat${convId ? `?conv=${encodeURIComponent(convId)}&limit=1` : '?limit=1'}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: ChatRestore } | null) => {
+        if (d?.data?.pendingApprovals) setPendingApprovals(d.data.pendingApprovals)
+      })
+      .catch(() => {})
+  }, [backendRepo, convId])
+
+  // 会话列表 + 审批数随任务事件实时刷新（AionUI：页签上永远看得到"谁在等你批准"）
+  useEffect(() => onTaskEvent(() => { loadConvs(); refreshPending() }), [loadConvs, refreshPending])
+
+  const createConv = useCallback(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${backendRepo}/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ConversationSummary }) => {
+        setConvId(d.data.id)
+        setConvMenuOpen(false)
+        loadConvs()
+        onConvChange?.(d.data.id)
+      })
+      .catch(() => toast('新建会话失败', 'error'))
+  }, [backendRepo, loadConvs])
+
+  const switchConv = useCallback((id: string | null) => {
+    setConvId(id)
+    setConvMenuOpen(false)
+    setClarify(null)
+    setPendingApprovals([])
+    setDecided({})
+    onConvChange?.(id)
+  }, [onConvChange])
+
+  const renameConv = useCallback(() => {
+    if (!backendRepo || !convId || !renameVal.trim()) return
+    fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(convId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: renameVal.trim() }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        setRenaming(false)
+        loadConvs()
+      })
+      .catch(() => toast('重命名失败', 'error'))
+  }, [backendRepo, convId, renameVal, loadConvs])
+
+  const deleteConv = useCallback(() => {
+    if (!backendRepo || !convId) return
+    if (!window.confirm('删除该会话？（其消息与关联任务留痕一并删除，不可恢复）')) return
+    fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(convId)}`, { method: 'DELETE' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        setConvId(null)
+        loadConvs()
+      })
+      .catch((e) => toast(String(e).includes('400') ? '每个仓库至少保留一个会话' : '删除失败', 'error'))
+  }, [backendRepo, convId, loadConvs])
+
+  // 内联审批：选项即按钮，提交后原地变"✓ 已回复"（AionUI PermissionRequestPanel 模式）
+  const decide = useCallback(
+    (p: PendingApproval, decision: 'approved' | 'rejected') => {
+      if (!backendRepo) return
+      fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(p.taskId)}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status))
+          setDecided((prev) => ({ ...prev, [p.taskId + ':' + (p.gate ?? '')]: decision }))
+          setPendingApprovals((prev) => prev.filter((x) => x.taskId !== p.taskId))
+          loadConvs()
+        })
+        .catch(() => toast('审批操作失败', 'error'))
+    },
+    [backendRepo, loadConvs],
+  )
+
+  // R1 清债：加载更早一页（prepend 到消息头部）
+  const loadEarlier = () => {
+    if (!backendRepo || !messages.length || loadingMore) return
+    setLoadingMore(true)
+    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}before=${messages[0].id}&limit=50`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ChatRestore }) => {
+        setHasMore(d.data.hasMore)
+        setMessages((prev) => [
+          ...d.data.messages.map((m) => ({ id: m.id, role: m.role as ChatMessage['role'], content: m.content, refs: [] })),
+          ...prev,
+        ])
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false))
+  }
+
+  // 恢复会话（历史从域 2 读；R1 起分页——首屏最近一页）
+  // stale 保护：快速切换仓库/会话时，旧 fetch 返回不得覆盖新会话
+  useEffect(() => {
+    if (!backendRepo) return
+    let stale = false
+    setMessages([])
+    loadConvs()
+    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}limit=50`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ChatRestore }) => {
+        if (stale) return
+        setUsage(d.data.usage)
+        setHasMore(d.data.hasMore)
+        setPendingApprovals(d.data.pendingApprovals ?? [])
+        setDecided({})
+        if (d.data.conversation?.id) {
+          setConvId(d.data.conversation.id)
+          onConvChange?.(d.data.conversation.id)
+        }
+        setMessages(
+          d.data.messages.map((m) => ({
+            id: m.id,
+            role: m.role as ChatMessage['role'],
+            content: m.content,
+            refs: [],
+          })),
+        )
+        setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
+      })
+      .catch(() => {
+        /* 后端不在线：保持空会话，发送时会有错误提示 */
+      })
+    return () => {
+      stale = true
+    }
+  }, [backendRepo, convId])
+
+  const addFiles = (files: FileList | null) => {
+    if (!files) return
+    for (const f of Array.from(files)) {
+      if (f.type.startsWith('image/')) {
+        if (images.length >= 2) {
+          toast('图片最多 2 张', 'error')
+          continue
+        }
+        if (f.size > 1.5 * 1024 * 1024) {
+          toast(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`, 'error')
+          continue
+        }
+        const reader = new FileReader()
+        reader.onload = () => setImages((prev) => [...prev, { name: f.name, size: f.size, dataUrl: String(reader.result ?? '') }])
+        reader.readAsDataURL(f)
+      } else {
+        if (attachments.length >= 3) {
+          toast('文本附件最多 3 个', 'error')
+          continue
+        }
+        if (f.size > 50 * 1024) {
+          toast(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`, 'error')
+          continue
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          const content = String(reader.result ?? '')
+          setAttachments((prev) => [...prev, { name: f.name, size: f.size, content }])
+        }
+        reader.readAsText(f)
+      }
+    }
+    if (fileRef.current) fileRef.current.value = ''
+  }
 
   const mentionCandidates = (query: string) => {
     if (!map) return []
@@ -103,88 +327,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
     })
   }
 
-  // R1 清债：加载更早一页（prepend 到消息头部）
-  const loadEarlier = () => {
-    if (!backendRepo || !messages.length || loadingMore) return
-    setLoadingMore(true)
-    fetch(`/api/repos/${backendRepo}/chat?before=${messages[0].id}&limit=50`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data: ChatRestore }) => {
-        setHasMore(d.data.hasMore)
-        setMessages((prev) => [
-          ...d.data.messages.map((m) => ({ id: m.id, role: m.role as ChatMessage['role'], content: m.content, refs: [] })),
-          ...prev,
-        ])
-      })
-      .catch(() => {})
-      .finally(() => setLoadingMore(false))
-  }
-
-  // 恢复会话（M3-5：历史从域 2 读；R1 起分页——首屏最近一页）
-  // stale 保护：快速切换仓库时，旧 fetch 返回不得覆盖新会话（审查 🟡2）
-  useEffect(() => {
-    if (!backendRepo) return
-    let stale = false
-    setMessages([])
-    fetch(`/api/repos/${backendRepo}/chat?limit=50`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data: ChatRestore }) => {
-        if (stale) return
-        setUsage(d.data.usage)
-        setHasMore(d.data.hasMore)
-        setMessages(
-          d.data.messages.map((m) => ({
-            id: m.id,
-            role: m.role as ChatMessage['role'],
-            content: m.content,
-            refs: [],
-          })),
-        )
-        setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
-      })
-      .catch(() => {
-        /* 后端不在线：保持空会话，发送时会有错误提示 */
-      })
-    return () => {
-      stale = true
-    }
-  }, [backendRepo])
-
-  const addFiles = (files: FileList | null) => {
-    if (!files) return
-    for (const f of Array.from(files)) {
-      if (f.type.startsWith('image/')) {
-        if (images.length >= 2) {
-          toast('图片最多 2 张', 'error')
-          continue
-        }
-        if (f.size > 1.5 * 1024 * 1024) {
-          toast(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`, 'error')
-          continue
-        }
-        const reader = new FileReader()
-        reader.onload = () => setImages((prev) => [...prev, { name: f.name, size: f.size, dataUrl: String(reader.result ?? '') }])
-        reader.readAsDataURL(f)
-      } else {
-        if (attachments.length >= 3) {
-          toast('文本附件最多 3 个', 'error')
-          continue
-        }
-        if (f.size > 50 * 1024) {
-          toast(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`, 'error')
-          continue
-        }
-        const reader = new FileReader()
-        reader.onload = () => {
-          const content = String(reader.result ?? '')
-          setAttachments((prev) => [...prev, { name: f.name, size: f.size, content }])
-        }
-        reader.readAsText(f)
-      }
-    }
-    if (fileRef.current) fileRef.current.value = ''
-  }
-
   const send = () => {
     const q = input.trim()
     if (!q || sending || !backendRepo) return
@@ -214,7 +356,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: withAttach, images: sendImages, moduleRefs: sendMentions }),
+      body: JSON.stringify({ message: withAttach, images: sendImages, moduleRefs: sendMentions, ...convBody }),
       signal: ac.signal,
     })
       .then((r) => {
@@ -231,6 +373,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
           ...(d.data.compaction ? [{ role: 'system' as const, content: d.data.compaction, refs: [] }] : []),
         ])
         setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
+        loadConvs()
       })
       .catch((e) => {
         if (ac.signal.aborted) {
@@ -251,7 +394,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
   const compact = () => {
     if (!backendRepo || compacting) return
     setCompacting(true)
-    fetch(`/api/repos/${backendRepo}/chat/compact`, { method: 'POST' })
+    fetch(`/api/repos/${backendRepo}/chat/compact${convQ}`, { method: 'POST' })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -266,14 +409,17 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
       .finally(() => setCompacting(false))
   }
 
-  // 新对话：清空服务端会话（消息/摘要/计数归零）
+  // 清空当前会话（消息/摘要/计数归零，会话行保留）
   const reset = () => {
     if (!backendRepo || sending) return
-    fetch(`/api/repos/${backendRepo}/chat/reset`, { method: 'POST' })
+    fetch(`/api/repos/${backendRepo}/chat/reset${convQ}`, { method: 'POST' })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setMessages([])
         setUsage({ promptTokens: 0, completionTokens: 0 })
+        setPendingApprovals([])
+        setDecided({})
+        loadConvs()
       })
       .catch(() => toast('重置失败（需要本地后端在线）', 'error'))
   }
@@ -292,15 +438,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
   const exportAndClear = () => {
     exportChat()
     setTimeout(() => {
-      if (!window.confirm('已导出。清空当前对话？（清空后不可恢复，视图文件不受影响）')) return
-      fetch(`/api/repos/${backendRepo}/chat/reset`, { method: 'POST' })
-        .then((r) => {
-          if (!r.ok) throw new Error(String(r.status))
-          setMessages([])
-          setUsage({ promptTokens: 0, completionTokens: 0 })
-          toast('对话已清空（归档文件已下载）')
-        })
-        .catch(() => toast('清空失败（需要本地后端在线）', 'error'))
+      if (!window.confirm('已导出。清空当前会话？（清空后不可恢复，视图文件不受影响）')) return
+      reset()
     }, 400)
   }
 
@@ -341,6 +480,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
       acceptance: '',
       source: 'manual',
       context: { inject: { conversation: summary, refs } },
+      conversation_id: convId ?? undefined,
     })
   }
 
@@ -372,13 +512,110 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
       .catch(() => toast('存视图失败（需要本地后端在线）', 'error'))
   }
 
+  const currentConv = convs.find((c) => c.id === convId)
+  const displayTitle = currentConv?.title ?? (convId ? '会话' : '默认会话')
+
   return (
     <div className="flex h-full flex-col">
+      {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担） */}
+      {!embedded && (
+        <div className="relative mb-2">
+          <button
+            onClick={() => setConvMenuOpen((v) => !v)}
+            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left hover:border-blue-300"
+          >
+            {currentConv?.runtime.state === 'running' ? (
+              <Loader2 size={12} className="shrink-0 animate-spin text-amber-500" />
+            ) : currentConv && currentConv.runtime.pendingConfirmations > 0 ? (
+              <AlertTriangle size={12} className="shrink-0 text-amber-500" />
+            ) : (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-slate-300" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{displayTitle}</span>
+            {currentConv && currentConv.runtime.pendingConfirmations > 0 && (
+              <span className="rounded-full bg-red-500 px-1.5 text-[9.5px] font-bold leading-4 text-white">
+                {currentConv.runtime.pendingConfirmations}
+              </span>
+            )}
+            <ChevronDown size={12} className="shrink-0 text-slate-400" />
+          </button>
+          {convMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setConvMenuOpen(false)} />
+              <div className="glass absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 p-1.5 shadow-xl anim-scale-in">
+                {convs.map((c) => (
+                  <div key={c.id} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                      onClick={() => switchConv(c.id === convId ? null : c.id)}
+                    >
+                      {c.runtime.state === 'running' ? (
+                        <Loader2 size={11} className="shrink-0 animate-spin text-amber-500" />
+                      ) : c.runtime.pendingConfirmations > 0 ? (
+                        <AlertTriangle size={11} className="shrink-0 text-amber-500" />
+                      ) : (
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+                      )}
+                      <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === convId ? 'font-bold text-blue-700' : 'text-slate-600'}`}>
+                        {c.title ?? '未命名会话'}
+                      </span>
+                      {c.runtime.pendingConfirmations > 0 && (
+                        <span className="rounded-full bg-red-500 px-1.5 text-[9px] font-bold leading-4 text-white">{c.runtime.pendingConfirmations}</span>
+                      )}
+                      <span className="tnum shrink-0 text-[9.5px] text-slate-300">{c.messageCount}条</span>
+                    </button>
+                    {c.id === convId && (
+                      <button onClick={() => { setRenaming(true); setRenameVal(c.title ?? '') }} className="shrink-0 rounded p-0.5 text-slate-300 hover:text-blue-500" title="重命名">
+                        <Pencil size={10} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {convs.length === 0 && <p className="px-2 py-1.5 text-[11px] text-slate-400">还没有会话，发第一条消息即创建</p>}
+                <button
+                  onClick={createConv}
+                  className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+                >
+                  <Plus size={11} /> 新建会话
+                </button>
+              </div>
+            </>
+          )}
+          {renaming && (
+            <div className="absolute left-0 right-0 top-full z-50 mt-1 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+              <input
+                autoFocus
+                value={renameVal}
+                onChange={(e) => setRenameVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') renameConv()
+                  if (e.key === 'Escape') setRenaming(false)
+                }}
+                placeholder="会话名…"
+                className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none focus:border-blue-300"
+              />
+              <button onClick={renameConv} className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-bold text-white">存</button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[10px] text-slate-400">
+        <span className="tnum text-[10px] text-slate-400">
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
         </span>
         <div className="flex flex-wrap items-center justify-end gap-1">
+          {convId && !embedded && (
+            <button
+              onClick={deleteConv}
+              disabled={!backendRepo}
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+              title="删除当前会话"
+            >
+              <XIcon size={10} />
+              删会话
+            </button>
+          )}
           <button
             onClick={exportAndClear}
             disabled={!backendRepo || messages.length === 0}
@@ -407,18 +644,50 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
             {compacting ? '压缩中…' : '压缩上下文'}
           </button>
           <button
-            onClick={reset}
+            onClick={createConv}
             disabled={!backendRepo || sending}
             className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-            title="新对话：清空本会话（消息、摘要、token 计数归零）"
+            title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
           >
             <RotateCcw size={10} />
-            新对话
+            新会话
           </button>
         </div>
       </div>
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto">
+        {/* M4-2 内联审批卡：等待中的审批门（AionUI：选项即按钮，决策后原地留痕） */}
+        {pendingApprovals.map((p) => (
+          <div key={p.taskId + ':' + (p.gate ?? '')} className="anim-msg-in flex justify-start">
+            <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold leading-4 text-amber-800">
+                <AlertTriangle size={11} />
+                审批请求 <span className="rounded-full bg-white/80 px-1.5 text-[9px] font-bold text-amber-600">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
+              </p>
+              <p className="mt-1 text-[11.5px] leading-5 text-slate-700">{p.title}</p>
+              {decided[p.taskId + ':' + (p.gate ?? '')] ? (
+                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600">
+                  <CheckCircle2 size={11} /> 已{decided[p.taskId + ':' + (p.gate ?? '')] === 'approved' ? '通过' : '驳回'}
+                </p>
+              ) : (
+                <div className="mt-1.5 flex gap-2">
+                  <button
+                    onClick={() => decide(p, 'approved')}
+                    className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"
+                  >
+                    通过
+                  </button>
+                  <button
+                    onClick={() => decide(p, 'rejected')}
+                    className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50"
+                  >
+                    驳回
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
         {hasMore && (
           <div className="flex justify-center">
             <button
@@ -430,7 +699,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
             </button>
           </div>
         )}
-        {messages.length === 0 && (
+        {messages.length === 0 && pendingApprovals.length === 0 && (
           <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
             基于语义代码地图提问：
             <br />
@@ -443,11 +712,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
         )}
         {messages.map((m, i) =>
           m.role === 'system' ? (
-            <div key={i} className="flex justify-center">
+            <div key={i} className="anim-msg-in flex justify-center">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] text-slate-400">{m.content}</span>
             </div>
           ) : (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`anim-msg-in flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[11.5px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
@@ -528,7 +797,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
         )}
         {/* S1 grill-me 澄清卡：选择题形态，点选即回答 */}
         {clarify && (
-          <div className="flex justify-start">
+          <div className="anim-msg-in flex justify-start">
             <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <p className="text-[11px] font-semibold leading-4 text-amber-800">
                 {clarify.question}
@@ -555,7 +824,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
           </div>
         )}
         {sending && (
-          <div className="flex justify-start">
+          <div className="anim-msg-in flex justify-start">
             <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-400">
               <Loader2 size={12} className="animate-spin" /> 正在查询地图…
             </div>
