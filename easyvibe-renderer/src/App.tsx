@@ -350,36 +350,6 @@ function FilterButton({ active, onClick, label, activeClass }: { active: boolean
   )
 }
 
-function ArchHealthCard({ map }: { map: CodeMap }) {
-  const archColor = healthColor(map.health.score)
-  return (
-    <div
-      className="flex items-center gap-2.5 rounded-xl border bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur"
-      style={{ borderColor: `${archColor}66` }}
-      title={map.health.review_note}
-    >
-      <Activity size={15} style={{ color: archColor }} />
-      <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">架构健康</div>
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-[16px] font-bold leading-5" style={{ color: archColor }}>
-            {map.health.score}
-          </span>
-          <span className="text-[10px] text-slate-400">/ 100 · {map.health.coupling}</span>
-        </div>
-      </div>
-      {map.health.decay_flags.length > 0 && (
-        <div className="ml-1 flex max-w-[200px] flex-wrap gap-1">
-          {map.health.decay_flags.map((f) => (
-            <span key={f} className="rounded-full bg-red-50 px-1.5 py-px text-[9px] text-red-600">
-              {f}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // 选中模块时的横向工具栏（F1a）
 function ModuleToolbar({
@@ -641,8 +611,13 @@ function Canvas({
         setSubmapSessions((prev) => {
           const hit = Object.entries(prev).find(([, sid]) => sid === evt.sessionId)
           if (hit && evt.status === 'failed') {
-            setSubmapErrors((e) => ({ ...e, [hit[0]]: '分析会话失败（agent 未能完成内部结构分析）。可重试"深入分析"；多次失败请检查 LLM 配置。' }))
+            setSubmapErrors((e) => ({ ...e, [hit[0]]: '分析会话失败（agent 未能完成内部结构分析）。可重试「深入分析」；多次失败请检查 LLM 配置。' }))
             setSubmaps((p) => ({ ...p, [hit[0]]: 'error' }))
+            setSubmapSessions((prev) => {
+              const n = { ...prev }
+              delete n[hit![0]]
+              return n
+            })
           }
           return prev
         })
@@ -755,10 +730,12 @@ function Canvas({
         .then((d) => setSubmaps((p) => ({ ...p, [id]: d })))
         .catch(() => {
           // R4：失败保留展开态并标记 error（容器内显示重试），不再无声消失
-          setSubmaps((p) => ({ ...p, [id]: 'error' }))
+          // M4-1.5 修：分析会话进行中（已启动未失败）时 404 只是产物未到——保持 loading，
+          // 否则"分析中"秒变"错误"再跳回，用户以为失败了（试用实弹抓到）
+          setSubmaps((p) => (submapSessions[id] ? p : { ...p, [id]: 'error' }))
         })
     }
-  }, [submaps, backendRepo])
+  }, [submaps, backendRepo, submapSessions])
 
   const retrySubmap = useCallback((id: string) => {
     setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
@@ -774,8 +751,9 @@ function Canvas({
       fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
         .then(async (r) => {
           if (!r.ok) throw new Error(String(r.status))
-          const sess = (await r.json()) as { sessionId: string }
-          setSubmapSessions((prev) => ({ ...prev, [id]: sess.sessionId }))
+          const sess = (await r.json()) as { sessionId?: string; session_id?: string }
+          const sid = sess.sessionId ?? sess.session_id ?? ''
+          setSubmapSessions((prev) => ({ ...prev, [id]: sid }))
           setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
           let n = 0
           const t = window.setInterval(() => {
@@ -790,16 +768,28 @@ function Canvas({
               // 超时必须显式告之——此前静默停轮询，界面永远"分析中"
               setSubmapErrors((prev) => ({
                 ...prev,
-                [id]: '分析超时（4 分钟未产出内部结构）。可能是 agent 执行缓慢或失败，请重试"深入分析"。',
+                [id]: '分析超时（4 分钟未产出内部结构）。可能是 agent 执行缓慢或失败，请重试「深入分析」。',
               }))
               setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
+              setSubmapSessions((prev) => {
+                const n = { ...prev }
+                delete n[id]
+                return n
+              })
               return
             }
             retrySubmap(id)
           }, 6000)
         })
-        .catch(() => {
-          setSubmapErrors((prev) => ({ ...prev, [id]: '分析启动失败（后端未接受请求，请确认后端在线后重试）。' }))
+        .catch(async (e) => {
+          // 409=单会话纪律（另一个分析/归纳在跑）——说人话，不甩锅给"后端未接受"
+          let msg = '分析启动失败（请确认后端在线后重试）。'
+          try {
+            const body = await (e as Response)?.json?.()
+            if (body?.code === 'CONFLICT' || /conflict|活动会话/.test(String(body?.error ?? '')))
+              msg = '已有分析/归纳会话在进行（单会话纪律）。等它完成后会自动解锁，无需重复点击。'
+          } catch { /* 保持默认文案 */ }
+          setSubmapErrors((prev) => ({ ...prev, [id]: msg }))
           setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
         })
     },
@@ -939,15 +929,14 @@ function Canvas({
             style={{ width: 200, height: 130 }}
           />
 
-          {/* 右上角：架构健康 + 图例 */}
+          {/* 右上角：图例（M4-1.5 去挤：架构健康主视觉已入头部卡，原 ArchHealthCard 信息重复，撤下） */}
           <Panel position="top-right" className="flex flex-col gap-2">
-            <ArchHealthCard map={map} />
             <Legend violations={violations} />
           </Panel>
 
           {/* 顶部中央：选中模块的横向工具栏（F1a）；mt 让出头部卡片高度（展开简介时更高），窄屏不遮挡 */}
           {selModule && (
-            <Panel position="top-center" style={{ marginTop: headerExpanded ? 200 : 110 }}>
+            <Panel position="top-center" style={{ marginTop: headerExpanded ? 215 : 125 }}>
               <ModuleToolbar
                 moduleName={selModule.name}
                 expanded={expandedIds.includes(selModule.id)}
