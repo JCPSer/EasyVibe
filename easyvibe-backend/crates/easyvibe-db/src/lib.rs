@@ -101,6 +101,15 @@ pub struct FinishPatrolRun {
     pub completion_tokens: Option<i64>,
 }
 
+/// M4-3 健康看板：单次巡检的模块分聚合（趋势图"模块平均"线 + 巡检记录表的数据面）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunModuleAvg {
+    pub run_id: String,
+    pub module_avg: i64,
+    pub module_count: i64,
+}
+
 pub trait HealthRepository: Send + Sync {
     fn create_run(&self, run: &NewPatrolRun) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn finish_run(&self, fin: &FinishPatrolRun) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
@@ -118,6 +127,17 @@ pub trait HealthRepository: Send + Sync {
         repo: &str,
         module_id: &str,
         limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<ModuleHealthRow>, ApiError>> + Send;
+    /// M4-3：近 limit 次巡检各自的模块平均分（JOIN 聚合，一次查询；无模块行的 run 不出现在结果里）
+    fn list_run_averages(
+        &self,
+        repo: &str,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<RunModuleAvg>, ApiError>> + Send;
+    /// M4-3：最近一次成功巡检的模块明细（健康看板"最差模块排行"；按分数升序）
+    fn list_latest_run_modules(
+        &self,
+        repo: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ModuleHealthRow>, ApiError>> + Send;
 }
 
@@ -208,6 +228,40 @@ impl HealthRepository for SqliteHealthRepository {
         .bind(repo)
         .bind(module_id)
         .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_run_averages(&self, repo: &str, limit: i64) -> Result<Vec<RunModuleAvg>, ApiError> {
+        let rows = sqlx::query_as::<_, (String, i64, i64)>(
+            "SELECT r.id, CAST(ROUND(AVG(h.score)) AS INTEGER), COUNT(*)
+             FROM patrol_runs r JOIN module_health_history h ON h.run_id = r.id
+             WHERE r.repo = ?
+             GROUP BY r.id ORDER BY r.started_at DESC LIMIT ?",
+        )
+        .bind(repo)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows
+            .into_iter()
+            .map(|(run_id, module_avg, module_count)| RunModuleAvg { run_id, module_avg, module_count })
+            .collect())
+    }
+
+    async fn list_latest_run_modules(&self, repo: &str) -> Result<Vec<ModuleHealthRow>, ApiError> {
+        let rows = sqlx::query_as::<_, ModuleHealthRowSql>(
+            "SELECT h.* FROM module_health_history h
+             WHERE h.run_id = (
+                 SELECT id FROM patrol_runs WHERE repo = ? AND status = 'succeeded'
+                 ORDER BY started_at DESC LIMIT 1
+             )
+             ORDER BY h.score ASC",
+        )
+        .bind(repo)
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;
@@ -885,7 +939,7 @@ mod tests {
             source: "concern".into(), context: "{}".into(), status: "pending".into(),
             trust: "manual".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
-            created_at: "1".into(), updated_at: "1".into(),
+            created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
         };
         repo.create(&t).await.unwrap();
         repo.update_status("task-1", "running", None).await.unwrap();
@@ -960,6 +1014,7 @@ mod tests {
             modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
             status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None, created_at: "1".into(), updated_at: "1".into(),
+            conversation_id: None,
         };
         repo.create(&mk("task-run", "running")).await.unwrap();
         repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();
@@ -1022,5 +1077,65 @@ mod tests {
         let history = repo.list_module_history("demo", "order-service", 10).await.unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].score, 62);
+    }
+
+    #[tokio::test]
+    async fn run_averages_and_latest_modules() {
+        // M4-3 健康看板数据面：每次巡检的模块平均 + 最近一次成功巡检的模块排行
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteHealthRepository::new(db.pool().clone());
+
+        let mk_run = |id: &str, started: &str, status: &str, arch: Option<i64>| {
+            let repo = SqliteHealthRepository::new(db.pool().clone());
+            let id = id.to_string();
+            let started = started.to_string();
+            let status = status.to_string();
+            async move {
+                repo.create_run(&NewPatrolRun { id: id.clone(), repo: "demo".into(), started_at: started, model: "stub".into() }).await.unwrap();
+                repo.finish_run(&FinishPatrolRun { id, finished_at: now(), status, arch_score: arch, error: None, prompt_tokens: None, completion_tokens: None }).await.unwrap();
+            }
+        };
+        let mk_module = |run_id: &str, module_id: &str, score: i64| {
+            ModuleHealthRow {
+                run_id: run_id.into(), module_id: module_id.into(), name: Some(module_id.into()),
+                score, coupling: None, complexity: None, churn: None,
+                decay_flags: "[]".into(), review_note: None, concerns: "[]".into(),
+            }
+        };
+        let insert_module = |row: &ModuleHealthRow| {
+            let repo = SqliteHealthRepository::new(db.pool().clone());
+            let row = row.clone();
+            async move { repo.insert_module_health(&row).await.unwrap() }
+        };
+
+        mk_run("run-old", "2026-09-01T09:00:00", "succeeded", Some(60)).await;
+        mk_run("run-mid", "2026-09-15T09:00:00", "succeeded", Some(65)).await;
+        mk_run("run-latest", "2026-09-30T09:00:00", "succeeded", Some(72)).await;
+        mk_run("run-failed", "2026-09-30T21:00:00", "failed", None).await;
+
+        insert_module(&mk_module("run-old", "m1", 60)).await;
+        insert_module(&mk_module("run-old", "m2", 80)).await;
+        insert_module(&mk_module("run-mid", "m1", 65)).await;
+        insert_module(&mk_module("run-mid", "m2", 75)).await;
+        insert_module(&mk_module("run-latest", "m1", 62)).await;
+        insert_module(&mk_module("run-latest", "m2", 66)).await;
+        insert_module(&mk_module("run-latest", "m3", 90)).await;
+
+        let avgs = repo.list_run_averages("demo", 10).await.unwrap();
+        assert_eq!(avgs.len(), 3, "failed 且无模块行的 run 不参与平均");
+        assert_eq!(avgs[0].run_id, "run-latest", "按 started_at 倒序");
+        assert_eq!(avgs[0].module_avg, 73, "(62+66+90)/3 = 72.67 → ROUND = 73");
+        assert_eq!(avgs[0].module_count, 3);
+        assert_eq!(avgs[1].module_avg, 70);
+        assert_eq!(avgs[2].module_avg, 70, "(60+80)/2");
+
+        let latest = repo.list_latest_run_modules("demo").await.unwrap();
+        assert_eq!(latest.len(), 3);
+        assert_eq!(latest[0].module_id, "m1", "按分数升序（最差在前）");
+        assert_eq!(latest[0].score, 62);
+        assert_eq!(latest[2].score, 90);
+
+        // 边界：从未成功巡检 → 空表而非报错
+        assert!(repo.list_latest_run_modules("nope").await.unwrap().is_empty());
     }
 }

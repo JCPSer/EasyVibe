@@ -86,6 +86,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
+        .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
         .route("/repos/{id}/chat", get(get_chat).post(chat))
         .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
         .route("/repos/{id}/conversations/{cid}", axum::routing::put(rename_conversation).delete(delete_conversation))
@@ -515,6 +516,41 @@ async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) ->
     Ok(Json(serde_json::json!({ "success": true, "data": runs })).into_response())
 }
 
+/// M4-3 健康看板数据面：近 20 次巡检（含各自模块平均分）+ 最近一次成功巡检的模块明细。
+/// 一次聚合查询代替前端 N×M 次 health-history 轮询（N 模块 × M 次巡检）。
+async fn get_health_dashboard(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    use easyvibe_db::HealthRepository as _;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let runs = st.health_repo.list_runs(&id, 20).await?;
+    let avgs = st.health_repo.list_run_averages(&id, 20).await?;
+    let avg_of: std::collections::HashMap<String, (i64, i64)> = avgs
+        .iter()
+        .map(|a| (a.run_id.clone(), (a.module_avg, a.module_count)))
+        .collect();
+    let runs_json: Vec<serde_json::Value> = runs
+        .iter()
+        .map(|r| {
+            let (module_avg, module_count) = avg_of.get(&r.id).copied().unwrap_or((0, 0));
+            serde_json::json!({
+                "id": r.id,
+                "startedAt": r.started_at,
+                "finishedAt": r.finished_at,
+                "status": r.status,
+                "model": r.model,
+                "archScore": r.arch_score,
+                "moduleAvg": module_avg,
+                "moduleCount": module_count,
+            })
+        })
+        .collect();
+    let latest_modules = st.health_repo.list_latest_run_modules(&id).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": { "runs": runs_json, "latestModules": latest_modules },
+    }))
+    .into_response())
+}
+
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
 
 // ---------- M3-1：配置体系（backend-design §10） ----------
@@ -852,6 +888,7 @@ async fn list_tasks(
             "acceptance": t.acceptance, "source": t.source,
             "status": t.status, "trust": t.trust, "error": t.error,
             "gate": t.gate, "sessionId": t.session_id,
+            "conversationId": t.conversation_id,
             "result": t.result.as_deref().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok()),
             "createdAt": t.created_at, "updatedAt": t.updated_at,
         }))

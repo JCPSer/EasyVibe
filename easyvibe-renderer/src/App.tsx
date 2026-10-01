@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -29,6 +29,9 @@ import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
 import { WorkbenchPage } from '@/components/WorkbenchPage'
 import { ReviewPage } from '@/components/ReviewPage'
+import { DriftPage } from '@/components/DriftPage'
+import { HealthPage } from '@/components/HealthPage'
+import { ChangesPage } from '@/components/ChangesPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -1695,31 +1698,9 @@ export default function App() {
       />
     ),
     review: <ReviewPage backendRepo={backendRepo} map={map} />,
-    changes: (
-      <PlaceholderPage
-        title="变更记录"
-        milestone="M4-3"
-        description="这个仓库被 EasyVibe 改动过的每一次留痕：改了什么、涉及哪些模块、由哪个任务产生——可回放、可回溯。"
-        icon={History}
-      />
-    ),
-    drift: (
-      <PlaceholderPage
-        title="漂移洞察"
-        milestone="M4-3"
-        description="代码在变，地图有没有掉队：每个仓库落后多少提交、哪些模块已漂移、何时该重新归纳——保鲜状态的仪表盘。"
-        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
-        icon={Radar}
-      />
-    ),
-    health: (
-      <PlaceholderPage
-        title="健康看板"
-        milestone="M4-3"
-        description="这个仓库的体检报告：架构与模块健康分的趋势、最差模块排行、每次巡检的记录与结论。"
-        icon={HeartPulse}
-      />
-    ),
+    changes: <ChangesPage backendRepo={backendRepo} map={map} />,
+    drift: <DriftPage />,
+    health: <HealthPage backendRepo={backendRepo} map={map} />,
     modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,
     deps: (
       <PlaceholderPage
