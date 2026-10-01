@@ -104,10 +104,16 @@ impl LlmClient for AnthropicClient {
             .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| ApiError::Internal(format!("LLM client 构建失败: {e}")))?;
+        // 认证头双发：Anthropic 官方与多数网关认 x-api-key；
+        // opencode 系网关（opencode.ai/inference、token-plan 等转发）只认 Authorization: Bearer。
+        // 两者并存对官方 API 无副作用（多余头被忽略），对 passthrough 代理原样透传。
         let mut http_req = client
             .post(format!("{}/v1/messages", self.base_url))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01");
+        if !self.api_key.is_empty() {
+            http_req = http_req.header("authorization", format!("Bearer {}", self.api_key));
+        }
         for (k, v) in &self.extra_headers {
             http_req = http_req.header(k, v);
         }
