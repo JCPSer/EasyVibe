@@ -87,6 +87,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
+        .route("/repos/{id}/git/status", get(get_git_status))
+        .route("/repos/{id}/git/log", get(get_git_log))
+        .route("/repos/{id}/git/commit", axum::routing::post(post_git_commit))
+        .route("/repos/{id}/git/pull", axum::routing::post(post_git_pull))
+        .route("/repos/{id}/git/push", axum::routing::post(post_git_push))
+        .route("/repos/{id}/git/discard", axum::routing::post(post_git_discard))
         .route("/repos/{id}/chat", get(get_chat).post(chat))
         .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
         .route("/repos/{id}/conversations/{cid}", axum::routing::put(rename_conversation).delete(delete_conversation))
@@ -569,6 +575,68 @@ async fn get_health_dashboard(State(st): State<AppState>, Path(id): Path<String>
         "data": { "runs": runs_json, "latestModules": latest_modules },
     }))
     .into_response())
+}
+
+// ---------- M4-4 Git 工作树 ----------
+
+async fn get_git_status(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let s = git::status(&repo.root).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "branch": s.branch, "upstream": s.upstream, "ahead": s.ahead, "behind": s.behind,
+            "files": s.files.iter().map(|f| serde_json::json!({
+                "status": f.status.to_string(), "path": f.path, "orig": f.orig, "adds": f.adds, "dels": f.dels,
+            })).collect::<Vec<_>>(),
+        },
+    }))
+    .into_response())
+}
+
+async fn get_git_log(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let limit = q.get("limit").and_then(|l| l.parse::<i64>().ok()).unwrap_or(30).clamp(1, 100);
+    let rows = git::log(&repo.root, limit).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
+async fn post_git_commit(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let message = body["message"].as_str().unwrap_or_default();
+    let short = git::commit_all(&repo.root, message).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "shortHash": short } })).into_response())
+}
+
+async fn post_git_pull(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    git::pull(&repo.root).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+async fn post_git_push(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    git::push(&repo.root).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+async fn post_git_discard(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let path = body["path"].as_str().ok_or_else(|| ApiError::BadRequest("缺少 path".into()))?;
+    git::discard(&repo.root, path).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
 }
 
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
@@ -1439,6 +1507,7 @@ impl IntoResponse for AppError {
 
 mod task_exec;
 mod freshness;
+mod git;
 
 /// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
 /// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
