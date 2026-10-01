@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, LayoutGrid, MonitorCog, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Boxes, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, MonitorCog, ClipboardList, ShieldCheck, History, Radar, HeartPulse, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -26,6 +26,7 @@ import { SubmoduleNode, type SubmoduleNodeType } from '@/components/SubmoduleNod
 import { DetailPanel, type Selection, type PanelTab } from '@/components/DetailPanel'
 import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
+import { ModulesPage } from '@/components/ModulesPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -298,32 +299,40 @@ function buildFlow(
   return { nodes, edges }
 }
 
+// M4-1.5 陪审团：图例默认收起为角落小条（此前大卡片压在画布黄金区），点击展开
 function Legend({ violations }: { violations: number }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="space-y-1.5 rounded-xl border border-slate-200 bg-white/95 px-3.5 py-3 text-[11px] text-slate-600 shadow-sm backdrop-blur">
-      <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">图例</div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#10b981' }} /> Healthy（≥75）
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#f59e0b' }} /> Warning（60–74）
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#ef4444' }} /> Error（&lt;60）
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block w-5 border-t-2 border-slate-400" /> Dependency
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block w-5 border-t-2 border-dashed border-red-500" />
-        <span className="flex items-center gap-1">
-          <AlertTriangle size={11} className="text-red-500" /> 逆向依赖 violation（{violations}）
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="inline-block w-5 border-t-2 border-dashed border-orange-500" />
-        <span className="flex items-center gap-1 text-orange-600">内部循环依赖（子图）</span>
-      </div>
+    <div className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-[11px] text-slate-600 shadow-sm backdrop-blur">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600">
+        <Info size={11} /> 图例{open ? ' ▴' : ' ▾'}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5 anim-fade-in-fast">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#10b981' }} /> Healthy（≥75）
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#f59e0b' }} /> Warning（60–74）
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#ef4444' }} /> Error（&lt;60）
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-5 border-t-2 border-slate-400" /> Dependency
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-5 border-t-2 border-dashed border-red-500" />
+            <span className="flex items-center gap-1">
+              <AlertTriangle size={11} className="text-red-500" /> 逆向依赖 violation（{violations}）
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-5 border-t-2 border-dashed border-orange-500" />
+            <span className="flex items-center gap-1 text-orange-600">内部循环依赖（子图）</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -854,8 +863,23 @@ function Canvas({
   }, [viewRequest, openView, onViewRequestConsumed])
 
   useEffect(() => {
-    const t = setTimeout(() => fitView({ padding: 0.12, duration: 300 }), 60)
+    const t = setTimeout(() => {
+      // M4-1.5 叙事重排（陪审团）：进图先给诊断——存在显著风险时聚焦最红的模块，
+      // 让用户第一眼看到"哪里最疼"；健康项目才 fit 全景
+      const worst = [...mergedMap.modules].sort((a, b) => a.health.score - b.health.score)[0]
+      const risky = !!worst && (worst.health.score < 60 || violations > 0)
+      if (risky) {
+        const node = nodes.find((n) => n.id === worst!.id)
+        if (node) {
+          const w = node.measured?.width ?? node.width ?? 220
+          setCenter(node.position.x + w / 2, node.position.y + 70, { zoom: 1.0, duration: 450 })
+          return
+        }
+      }
+      fitView({ padding: 0.12, duration: 300 })
+    }, 60)
     return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitView, map])
 
   const onNodeClick = useCallback((_e: unknown, node: Node) => {
@@ -883,7 +907,7 @@ function Canvas({
   const selModule = toolbarModuleId ? map.modules.find((m) => m.id === toolbarModuleId) : undefined
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50">
+    <div className="flex h-full w-full overflow-hidden bg-slate-50">
       {/* 中央画布 */}
       <div className="relative flex-1">
         <ReactFlow
@@ -992,6 +1016,23 @@ function Canvas({
                 <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">架构地图</span>
                 <span className="text-[10px] text-slate-300">|</span>
                 <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo}</h1>
+                {/* M4-1.5 叙事重排（陪审团）：健康分立为画布内主视觉——先给诊断，再给地图 */}
+                <button
+                  onClick={() => {
+                    setTab('issues')
+                    onPanelOpenChange(true)
+                  }}
+                  className="ml-3 flex items-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50 pl-1.5 pr-2 py-0.5 hover:border-blue-200 hover:bg-blue-50/60"
+                  title="架构健康综合评分（点击在右栏查看全部问题）"
+                >
+                  <span className="tnum text-[20px] font-black leading-6" style={{ color: healthColor(map.health.score) }}>
+                    {map.health.score}
+                  </span>
+                  <span className="flex flex-col items-start leading-none">
+                    <span className="text-[9px] font-semibold text-slate-400">架构健康</span>
+                    {map.health.score < 75 && <span className="mt-0.5 text-[9px] font-semibold text-red-500">有问题 · 查看 →</span>}
+                  </span>
+                </button>
               </div>
               <button
                 onClick={() => setHeaderExpanded((v) => !v)}
@@ -1513,7 +1554,7 @@ export default function App() {
           <>
             {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
             <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
-            <div className="absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+            <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 p-2 shadow-xl">
             <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
@@ -1656,7 +1697,7 @@ export default function App() {
       <PlaceholderPage
         title="开发工作台"
         milestone="M4-2"
-        description="多会话 agent 面板（会话列表 + 计划进度 + 内联审批 + 影响面）将在 M4-2 落地，见 ui-mockups/开发工作台原型.png。届时任务、审批、对话在此闭环。"
+        description="你的 agent 驾驶舱：多会话列表、执行计划进度、内联审批与变更影响面——派活、监督、审批在一个视图闭环。"
         action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
         icon={MonitorCog}
       />
@@ -1665,7 +1706,7 @@ export default function App() {
       <PlaceholderPage
         title="我的待办"
         milestone="M4-2"
-        description="我发起的任务的运行态聚合（运行中 / 等待审批 / 失败），带徽标提醒。设计见 ui-mockups/我的待办原型.png。"
+        description="你发起的任务都跑到哪一步了：运行中、等待你审批、失败重试——聚合一处，红点提醒。"
         action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
         icon={ClipboardList}
       />
@@ -1674,7 +1715,7 @@ export default function App() {
       <PlaceholderPage
         title="评审"
         milestone="M4-2"
-        description="审批中心整页（三道关进度 + 双栏 Diff + 模块聚合影响面），按 ui-mockups/审批中心原型.png 实现。当前可在任务页内完成审批。"
+        description="审查 agent 的产出：计划、Diff、审查报告三道关，逐条通过或驳回，全程留痕可回溯。当前可在任务页内完成审批。"
         action={{ label: '前往任务页审批', onClick: () => handlePageChange('tasks') }}
         icon={ShieldCheck}
       />
@@ -1683,7 +1724,7 @@ export default function App() {
       <PlaceholderPage
         title="变更记录"
         milestone="M4-3"
-        description="任务 diff 留痕时间线 + 回放入口 + 详情侧栏，按 ui-mockups/变更记录原型.png 实现。数据已全程留痕在任务系统。"
+        description="这个仓库被 EasyVibe 改动过的每一次留痕：改了什么、涉及哪些模块、由哪个任务产生——可回放、可回溯。"
         icon={History}
       />
     ),
@@ -1691,7 +1732,7 @@ export default function App() {
       <PlaceholderPage
         title="漂移洞察"
         milestone="M4-3"
-        description="git 落后度排序、地图保鲜、重新归纳提醒，按 ui-mockups/漂移洞察原型.png 实现。当前地图新鲜度提示在地图页头部。"
+        description="代码在变，地图有没有掉队：每个仓库落后多少提交、哪些模块已漂移、何时该重新归纳——保鲜状态的仪表盘。"
         action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={Radar}
       />
@@ -1700,24 +1741,16 @@ export default function App() {
       <PlaceholderPage
         title="健康看板"
         milestone="M4-3"
-        description="KPI 卡 + 架构级/模块平均双线趋势 + 模块健康排行 + 巡检记录表。巡检数据已在域 2 落库，顶栏可导出 Markdown 健康报告。"
+        description="这个仓库的体检报告：架构与模块健康分的趋势、最差模块排行、每次巡检的记录与结论。"
         icon={HeartPulse}
       />
     ),
-    modules: (
-      <PlaceholderPage
-        title="模块目录"
-        milestone="M4-4"
-        description="以模块为行的表格视图：一览全部模块的职责、健康分与文件归属（兼作画布的无障碍列表模式）。"
-        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
-        icon={Boxes}
-      />
-    ),
+    modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,
     deps: (
       <PlaceholderPage
         title="依赖关系"
         milestone="M4-4"
-        description="以边为中心的视角：边类型、方向违例、强度排序。"
+        description="换个角度看依赖：全部模块间依赖按类型、强度与违规排序——谁被依赖最多、哪里在逆向调用。"
         action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={Waypoints}
       />
@@ -1726,14 +1759,14 @@ export default function App() {
       <PlaceholderPage
         title="Git 工作树"
         milestone="M4-3"
-        description="分支与远程同步状态、按模块聚合的变更文件（diff 统计/暂存/撤销）、提交与最近提交历史。按 ui-mockups/Git工作树原型.png 实现。"
+        description="当前仓库的 git 状态：分支与远程同步、未提交的变更（按模块聚合）、提交历史——提交前先看影响面。"
         action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={GitBranch}
       />
     ),
     'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,
-    'kb-decisions': <PlaceholderPage title="决策记录" milestone="M4-4" description="巡检 review_note 与任务留痕的决策视角，P3 骨架。" icon={ScrollText} />,
-    'kb-apis': <PlaceholderPage title="接口目录" milestone="M4-4" description="关键入口（key_entries）聚合的接口视角，P3 骨架。" icon={Plug} />,
+    'kb-decisions': <PlaceholderPage title="决策记录" milestone="M4-4" description="这个仓库做过的重要技术决策及其来龙去脉。" icon={ScrollText} />,
+    'kb-apis': <PlaceholderPage title="接口目录" milestone="M4-4" description="全部关键入口（路由/函数/任务）的索引：谁对外提供什么能力。" icon={Plug} />,
   }
 
   return (
@@ -1744,7 +1777,7 @@ export default function App() {
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
       {overlay === 'views' && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
-          <div className="flex h-full w-[460px] flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
               <span className="text-[12.5px] font-bold text-slate-700">我的视图</span>
               <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
@@ -1767,7 +1800,7 @@ export default function App() {
       )}
       {overlay === 'suggest' && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
-          <div className="flex h-full w-[460px] flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
               <span className="text-[12.5px] font-bold text-slate-700">智能优化建议</span>
               <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">

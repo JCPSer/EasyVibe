@@ -220,21 +220,22 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
       </div>
 
       <div className="rounded-lg border p-3" style={{ borderColor: `${color}55`, background: `${color}0d` }}>
+        {/* M4-1.5 陪审团硬缺陷：三元素挤一行压字断行——两行布局 */}
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold" style={{ color }}>
-            层健康（聚合） · {avg}/100
+            层健康（聚合） · <span className="tnum">{avg}</span>/100
           </span>
           <button
             onClick={() => onCreateTask(buildLayerTask(map, layer.id))}
-            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
             title="指哪打哪：以本层为上下文发起治理任务"
           >
             <Wrench size={10} /> 发起治理
           </button>
-          <span className="text-[10.5px] text-slate-400">
-            {mods.length} 模块 · 逆向依赖 {violations.length} 条
-          </span>
         </div>
+        <p className="mt-1 text-[10.5px] text-slate-400">
+          {mods.length} 模块 · 逆向依赖 <span className="tnum">{violations.length}</span> 条
+        </p>
         <p className="mt-2 flex items-start gap-1.5 text-[10.5px] leading-4 text-slate-500">
           <Info size={11} className="mt-0.5 shrink-0 text-slate-400" />
           层健康是成员模块分数的聚合参考，并非 LLM 独立评估；LLM 评估仅模块级与架构级两级。
@@ -387,7 +388,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
   const detailLabel = module ? '模块详情' : layer ? '架构层详情' : sub ? '子模块详情' : '选中详情'
 
   return (
-    <aside className="flex shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
+    <aside className="anim-panel-in flex h-full shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
         <div className="flex gap-1">
           {/* M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页 */}

@@ -226,7 +226,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
         setClarify(d.data.clarify)
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: d.data.reply, refs: d.data.refs },
+          { role: 'assistant', content: d.data.reply.trim() || '（未获得回答——请重试）', refs: d.data.refs },
           // auto-compact 留痕（§10a："上下文已压缩：82%→34%"系统消息）
           ...(d.data.compaction ? [{ role: 'system' as const, content: d.data.compaction, refs: [] }] : []),
         ])
@@ -449,7 +449,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
           ) : (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[92%] rounded-lg px-3 py-2 text-[11.5px] leading-5 ${
+                className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[11.5px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >
@@ -466,7 +466,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
                     ))}
                   </div>
                 )}
-                <MarkdownMessage content={m.content} />
+                {m.role === 'assistant' && !m.content.trim() ? (
+                  <span className="text-slate-400">（此条未获得回答）</span>
+                ) : (
+                  <MarkdownMessage content={m.content} />
+                )}
                 {(m.role === 'assistant' || m.role === 'user') && (m.refs.length > 0 || /```mermaid/.test(m.content)) && (
                   <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
                     {m.refs.map((id) => (

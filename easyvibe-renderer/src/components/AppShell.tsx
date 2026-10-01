@@ -92,7 +92,7 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       {/* 顶栏：项目选择器 + 全局动作（App 注入） */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3">
+      <header className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3">
         <span className="flex items-center gap-1.5 pr-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
           <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>

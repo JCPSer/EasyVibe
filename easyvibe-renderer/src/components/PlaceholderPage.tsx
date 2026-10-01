@@ -10,7 +10,8 @@ interface Props {
   icon?: LucideIcon
 }
 
-export function PlaceholderPage({ title, milestone, description, action, icon: Icon = Construction }: Props) {
+// milestone 不再外露给用户（评审裁决：没做完的东西不挂在嘴边），保留入参兼容
+export function PlaceholderPage({ title, description, action, icon: Icon = Construction }: Props) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
@@ -18,7 +19,7 @@ export function PlaceholderPage({ title, milestone, description, action, icon: I
       </span>
       <h2 className="text-[15px] font-bold text-slate-700">{title}</h2>
       <p className="max-w-md text-[12px] leading-6 text-slate-400">{description}</p>
-      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-400">{milestone} 交付</span>
+      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-400">规划中</span>
       {action && (
         <button
           onClick={action.onClick}

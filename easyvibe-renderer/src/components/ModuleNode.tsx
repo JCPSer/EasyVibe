@@ -47,7 +47,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
 
   return (
     <div
-      className="rounded-xl border bg-white shadow-sm transition-shadow"
+      className="lift rounded-xl border bg-white shadow-sm transition-shadow"
       style={{
         width: NODE_W,
         height: NODE_H,

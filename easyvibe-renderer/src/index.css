@@ -89,3 +89,62 @@
 .react-flow__edge-textwrapper {
   pointer-events: none !important;
 }
+
+/* ============ M4-1.5 设计地基（陪审团评审后落地，docs/design-tokens.md） ============ */
+
+/* 四级字阶纪律：12 / 13 / 15 / 20，正文行高 1.5（新代码遵守；存量随触随迁） */
+/* 数字右对齐等宽：统计/评分/token 计数 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+/* 代码型内容等宽：端点/模块 id/commit hash */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 阴影层级（此前全产品 box-shadow: none——层级先立住，玻璃后上） */
+.elev-1 { box-shadow: 0 1px 2px rgb(15 23 42 / 0.05); }
+.elev-2 { box-shadow: 0 2px 8px -2px rgb(15 23 42 / 0.08), 0 1px 2px rgb(15 23 42 / 0.04); }
+.elev-3 { box-shadow: 0 8px 24px -6px rgb(15 23 42 / 0.14), 0 2px 6px -2px rgb(15 23 42 / 0.06); }
+
+/* 液态玻璃（仅 chrome 层：顶栏/抽屉/下拉；画布与长文区禁用——陪审团裁决）。
+   降级：不支持 backdrop-filter 的环境退化为高不透明白（跨平台纪律） */
+.glass {
+  background: rgb(255 255 255 / 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background: rgb(255 255 255 / 0.94); }
+}
+
+/* 最小动效集（苹果式：快起慢停、有方向、解释空间关系） */
+@keyframes ev-panel-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes ev-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes ev-fade-up {
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes ev-scale-in {
+  from { transform: scale(0.98); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.anim-panel-in { animation: ev-panel-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-drawer-in { animation: ev-drawer-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.anim-msg-in { animation: ev-fade-up 120ms ease-out both; }
+.anim-scale-in { animation: ev-scale-in 150ms ease-out both; }
+.anim-fade-in-fast { animation: ev-fade-in 150ms ease-out both; }
+
+/* hover 微浮起：可点击性的即时确认（卡片/主按钮） */
+.lift { transition: transform 150ms ease, box-shadow 150ms ease; }
+.lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgb(15 23 42 / 0.12);
+}
