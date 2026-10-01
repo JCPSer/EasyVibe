@@ -484,9 +484,12 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                 .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &st.agent_command, &st.agent_args)
                 .await?;
             // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
+            // run_id 用时间戳独立生成，不复用 session_id——会话计数器在后端重启后归零，
+            // 会与历史 patrol_runs 行主键碰撞导致落库失败（实弹：UNIQUE constraint failed）
             let st2 = st.clone();
             let repo2 = repo.clone();
-            let session_id = session.session_id.clone();
+            let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            let run_id_task = run_id.clone();
             let model = st.agent_command.to_string();
             tokio::spawn(async move {
                 loop {
@@ -496,7 +499,7 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                     let result = async {
                         let snap = st2.map_service.load_map(&repo2).await?;
                         st2.patrol_service
-                            .record_from_map(&session_id, &repo2.id, &model, &snap.json, s.status == easyvibe_api_types::SessionStatus::Succeeded, None)
+                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, s.status == easyvibe_api_types::SessionStatus::Succeeded, None)
                             .await
                     }
                     .await;
@@ -506,7 +509,7 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                     break;
                 }
             });
-            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "sessionId": session.session_id, "mode": "agent" }))).into_response())
+            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "sessionId": session.session_id, "runId": run_id, "mode": "agent" }))).into_response())
         }
     }
 }
