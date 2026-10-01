@@ -103,24 +103,52 @@ pub fn build_router(state: AppState) -> Router {
         .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
 
-    Router::new()
+    let router = Router::new()
         .nest("/api", api)
         .route("/ws", get(ws_handler))
+        // D5：桌面壳（Tauri v2 WebView）固定源。跨源请求带此 Origin 时放行
+        // （CORS 层同时只回这一个源的 Access-Control-Allow-Origin）；
+        // evil 页面无法伪造 Origin，Y6 对其它 cross-site 的拦截不受影响。
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::AllowOrigin::exact(
+                    TAURI_ORIGIN.parse().expect("合法 origin"),
+                ))
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::DELETE])
+                .allow_headers(tower_http::cors::Any),
+        )
         // Y6 清债：跨站请求防护—— evil 页面可对 127.0.0.1 发 simple POST（无 CORS 拦截）。
-        // 现代浏览器带 Sec-Fetch-Site 头：cross-site 一律拒（health 放行供连通探测）
+        // 现代浏览器带 Sec-Fetch-Site 头：cross-site 一律拒（health 放行供连通探测）；
+        // 桌面壳 Origin 一律放（WS 握手与 preflight 都带 Origin，无 Sec-Fetch 维度可依赖）。
         .layer(axum::middleware::from_fn(|req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
             let (parts, body) = req.into_parts();
             let is_health = parts.uri.path() == "/api/health";
+            let is_tauri = parts.headers.get("origin").and_then(|v| v.to_str().ok()) == Some(TAURI_ORIGIN);
             let cross_site = parts.headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) == Some("cross-site");
-            if cross_site && !is_health {
+            if cross_site && !is_health && !is_tauri {
                 let mut resp = axum::http::Response::new(axum::body::Body::from("cross-site request blocked"));
                 *resp.status_mut() = axum::http::StatusCode::FORBIDDEN;
                 return Ok::<_, std::convert::Infallible>(resp);
             }
             Ok::<_, std::convert::Infallible>(next.run(axum::http::Request::from_parts(parts, body)).await)
         }))
-        .with_state(state)
+        .with_state(state);
+
+    // D5：桌面壳同源托管——EASYVIBE_STATIC_DIR 指向渲染器构建产物（dist）时，
+    // / 与未命中路径回落到静态资源；前端 fetch('/api/...') 与 /ws 全部同源，
+    // 桌面 WebView 直接加载 http://127.0.0.1:{port}，CORS/跨站问题整体消失。
+    match std::env::var("EASYVIBE_STATIC_DIR").ok().filter(|d| !d.is_empty()) {
+        Some(dir) => {
+            use tower_http::services::ServeDir;
+            router.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true))
+        }
+        None => router,
+    }
 }
+
+/// D5：Tauri v2 生产 WebView 的固定源（WKWebView 自定义协议映射为 http://tauri.localhost）。
+/// 后端只信任这一个跨站源；前端在壳内以 http://127.0.0.1:{EASYVIBE_PORT} 直连。
+const TAURI_ORIGIN: &str = "http://tauri.localhost";
 
 /// Y7：/api/health 已有 version 字段——前端在 WS 重连（全量重同步点）时比对
 /// 首次记录的版本，变化即提示"后端已更新，刷新页面"。此处仅加注释锚点，比对在前端。
@@ -1188,11 +1216,14 @@ async fn main() {
         guard
     };
 
-    // 仓库注册：从 EASYVIBE_REPO 环境变量读取（逗号分隔的多工作区预留），M2-1 先支持一个
+    // 仓库注册：从 EASYVIBE_REPO 环境变量读取（逗号分隔的多仓库）。D5：桌面壳场景允许为空
+    //（用户尚未在壳内添加仓库时后端照常启动，前端引导添加）——空则零仓库起步。
     let repo_roots: Vec<std::path::PathBuf> = std::env::var("EASYVIBE_REPO")
-        .expect("请设置 EASYVIBE_REPO 指向代码仓库根目录（可逗号分隔多个）")
+        .unwrap_or_default()
         .split(',')
-        .map(|s| s.trim().into())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(Into::into)
         .collect();
     let repos: Vec<_> = repo_roots.iter().map(|p| repo_from_root(p)).collect();
     for r in &repos {
@@ -1456,9 +1487,11 @@ async fn main() {
         });
     }
 
-    let addr = "127.0.0.1:7101";
+    // D5：端口可由桌面壳覆盖（开发 7101 / 桌面壳 7151，避免双开冲突）
+    let port: u16 = std::env::var("EASYVIBE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(7101);
+    let addr = format!("127.0.0.1:{port}");
     info!("EasyVibe backend listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("绑定 7101 失败");
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap_or_else(|e| panic!("绑定 {addr} 失败: {e}"));
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -1685,6 +1718,38 @@ mod tests {
         assert_eq!(content, "它健康吗？");
         assert!(!content.contains("聚焦模块"), "聚焦块不得落库");
         assert!(!content.contains("ghost-module"), "未知模块 id 不得落库");
+    }
+
+    #[tokio::test]
+    async fn y6_blocks_cross_site_but_allows_tauri_origin() {
+        let (state, repo) = chat_state("y6").await;
+        let app = build_router(state);
+        // evil 页面：cross-site 且无白名单 Origin → 403
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::get("/api/repos")
+                    .header("sec-fetch-site", "cross-site")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN, "跨站请求应被 Y6 拦截");
+        // 桌面壳：Origin 白名单 → 放行（evil 页面无法伪造 Origin）
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::get("/api/repos")
+                    .header("sec-fetch-site", "cross-site")
+                    .header("origin", TAURI_ORIGIN)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "桌面壳 Origin 应豁免 Y6");
+        let _ = repo;
     }
 
     #[tokio::test]

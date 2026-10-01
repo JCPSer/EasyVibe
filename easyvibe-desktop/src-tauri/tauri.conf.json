@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EasyVibe",
+  "version": "0.1.0",
+  "identifier": "com.easyvibe.app",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "bash ../scripts/sync-desktop.sh",
+    "devUrl": "http://127.0.0.1:7151"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": []
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "externalBin": ["binaries/easyvibe-backend"],
+    "resources": ["resources/prompts/", "resources/dist/"]
+  }
+}

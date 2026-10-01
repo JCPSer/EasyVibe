@@ -1,0 +1,20 @@
+[package]
+name = "easyvibe-desktop"
+version = "0.1.0"
+description = "EasyVibe desktop shell（Tauri v2）：内嵌 easyvibe-backend sidecar，同源托管渲染器"
+authors = ["EasyVibe"]
+edition = "2021"
+
+[lib]
+name = "easyvibe_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tokio = { version = "1", features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
