@@ -397,12 +397,15 @@ pub struct TaskRow {
     pub base_head: Option<String>,      // 变更归因：任务启动时的 git HEAD（0008）
     pub created_at: String,
     pub updated_at: String,
+    pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
 }
 
 pub trait TaskRepository: Send + Sync {
     fn create(&self, t: &TaskRow) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn list(&self, repo: &str, limit: i64) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
+    /// M4-2：会话关联任务（工作台影响面/待审批聚合）
+    fn list_by_conversation(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Option<TaskRow>, ApiError>> + Send;
     fn set_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn set_gate(&self, id: &str, gate: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
@@ -431,23 +434,24 @@ struct TaskRowSql {
     modules: String, acceptance: String, source: String, context: String,
     status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>,
     prompt_tokens: Option<i64>, completion_tokens: Option<i64>, result: Option<String>, base_head: Option<String>, created_at: String, updated_at: String,
+    pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at }
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at, conversation_id: r.conversation_id,}
     }
 }
 
 impl TaskRepository for SqliteTaskRepository {
     async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, result, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, result, created_at, updated_at, conversation_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
         .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
-        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at)
+        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at).bind(&t.conversation_id)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -459,6 +463,12 @@ impl TaskRepository for SqliteTaskRepository {
             .bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
+    }
+
+    async fn list_by_conversation(&self, conversation_id: &str) -> Result<Vec<TaskRow>, ApiError> {
+        let rows = sqlx::query_as::<_, TaskRowSql>("SELECT * FROM tasks WHERE conversation_id = ? ORDER BY created_at DESC")
+            .bind(conversation_id).fetch_all(&self.pool).await.map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn list(&self, repo: &str, limit: i64) -> Result<Vec<TaskRow>, ApiError> {
@@ -585,6 +595,7 @@ pub struct ConversationRow {
     pub completion_tokens: i64,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,6 +651,15 @@ pub trait ConversationRepository: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// 清空会话（保留会话行，消息与摘要重置——"新对话"按钮的原料）
     fn reset(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    // ---- M4-2 多会话 ----
+    /// 该仓库全部会话（最近活跃在前）
+    fn list_by_repo(&self, repo: &str) -> impl std::future::Future<Output = Result<Vec<ConversationRow>, ApiError>> + Send;
+    /// 新建命名会话（id 由调用方生成）
+    fn create(&self, id: &str, repo: &str, title: Option<&str>) -> impl std::future::Future<Output = Result<ConversationRow, ApiError>> + Send;
+    fn rename(&self, conversation_id: &str, title: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 删除会话（先删消息，FK 无级联）
+    fn delete(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    fn count_messages(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<i64, ApiError>> + Send;
 }
 
 pub struct SqliteConversationRepository {
@@ -656,6 +676,7 @@ impl SqliteConversationRepository {
 struct ConversationRowSql {
     id: String, repo: String, summary: Option<String>, compacted_before: i64,
     prompt_tokens: i64, completion_tokens: i64, created_at: String, updated_at: String,
+    title: Option<String>,   // M4-2 多会话：用户可命名
 }
 
 impl From<ConversationRowSql> for ConversationRow {
@@ -664,6 +685,7 @@ impl From<ConversationRowSql> for ConversationRow {
             id: r.id, repo: r.repo, summary: r.summary, compacted_before: r.compacted_before,
             prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens,
             created_at: r.created_at, updated_at: r.updated_at,
+            title: r.title,
         }
     }
 }
@@ -689,13 +711,13 @@ fn now_secs() -> String {
 
 impl ConversationRepository for SqliteConversationRepository {
     async fn get_or_create(&self, repo: &str) -> Result<ConversationRow, ApiError> {
-        let id = format!("chat:{repo}");
-        if let Some(row) = sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE id = ?")
-            .bind(&id)
-            .fetch_optional(&self.pool).await.map_err(db_err)?
-        {
+        // M4-2 多会话：默认会话 = 该仓库最近活跃的会话（旧行为一仓一会话时即唯一会话），无则建 "chat:{repo}"
+        if let Some(row) = sqlx::query_as::<_, ConversationRowSql>(
+            "SELECT * FROM conversations WHERE repo = ? ORDER BY updated_at DESC LIMIT 1",
+        ).bind(repo).fetch_optional(&self.pool).await.map_err(db_err)? {
             return Ok(row.into());
         }
+        let id = format!("chat:{repo}");
         let now = now_secs();
         sqlx::query("INSERT INTO conversations (id, repo, created_at, updated_at) VALUES (?, ?, ?, ?)")
             .bind(&id).bind(repo).bind(&now).bind(&now)
@@ -703,6 +725,41 @@ impl ConversationRepository for SqliteConversationRepository {
         Ok(sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE id = ?")
             .bind(&id)
             .fetch_one(&self.pool).await.map_err(db_err)?.into())
+    }
+
+    async fn list_by_repo(&self, repo: &str) -> Result<Vec<ConversationRow>, ApiError> {
+        Ok(sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE repo = ? ORDER BY updated_at DESC")
+            .bind(repo).fetch_all(&self.pool).await.map_err(db_err)?.into_iter().map(Into::into).collect())
+    }
+
+    async fn create(&self, id: &str, repo: &str, title: Option<&str>) -> Result<ConversationRow, ApiError> {
+        let now = now_secs();
+        sqlx::query("INSERT INTO conversations (id, repo, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+            .bind(id).bind(repo).bind(title).bind(&now).bind(&now)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(sqlx::query_as::<_, ConversationRowSql>("SELECT * FROM conversations WHERE id = ?")
+            .bind(id).fetch_one(&self.pool).await.map_err(db_err)?.into())
+    }
+
+    async fn rename(&self, conversation_id: &str, title: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+            .bind(title).bind(now_secs()).bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn delete(&self, conversation_id: &str) -> Result<(), ApiError> {
+        sqlx::query("DELETE FROM conversation_messages WHERE conversation_id = ?").bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        sqlx::query("DELETE FROM conversations WHERE id = ?").bind(conversation_id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn count_messages(&self, conversation_id: &str) -> Result<i64, ApiError> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = ?")
+            .bind(conversation_id).fetch_one(&self.pool).await.map_err(db_err)?;
+        Ok(row.0)
     }
 
     async fn append_message(&self, conversation_id: &str, role: &str, content: &str, tokens: i64) -> Result<i64, ApiError> {

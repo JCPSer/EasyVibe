@@ -625,6 +625,7 @@ mod tests {
             error: None,
             session_id: None,
             gate: None,
+            conversation_id: None,
             prompt_tokens: None,
             completion_tokens: None,
             result: None,

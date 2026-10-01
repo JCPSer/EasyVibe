@@ -87,6 +87,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
         .route("/repos/{id}/chat", get(get_chat).post(chat))
+        .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
+        .route("/repos/{id}/conversations/{cid}", axum::routing::put(rename_conversation).delete(delete_conversation))
         .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
         .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
         .route("/repos/{id}/views", get(list_views).post(save_view))
@@ -785,6 +787,9 @@ struct CreateTaskRequest {
     context: serde_json::Value,
     #[serde(default)]
     trust: String, // manual / auto
+    /// M4-2：任务←→会话关联（对话升级/工作台聚合）
+    #[serde(default)]
+    conversation_id: Option<String>,
 }
 
 async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateTaskRequest>) -> Result<Response, AppError> {
@@ -814,6 +819,7 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         error: None,
         session_id: None,
         gate: None,
+        conversation_id: body.conversation_id,
         prompt_tokens: None,
         completion_tokens: None,
         result: None,
@@ -827,9 +833,17 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
     Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "success": true, "data": { "id": task_id } }))).into_response())
 }
 
-async fn list_tasks(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+async fn list_tasks(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
     use easyvibe_db::TaskRepository as _;
-    let tasks = st.task_repo.list(&id, 50).await?;
+    // M4-2：?conv=<id> 时会话级过滤（工作台影响面/计划进度）
+    let tasks = match q.get("conv") {
+        Some(cid) => st.task_repo.list_by_conversation(cid).await?,
+        None => st.task_repo.list(&id, 50).await?,
+    };
     let items: Vec<serde_json::Value> = tasks
         .into_iter()
         .map(|t| serde_json::json!({
@@ -889,8 +903,9 @@ fn fold_pairs(messages: &[ConversationMessageRow]) -> Vec<(String, String)> {
 /// 摘要必带会话状态（§11 🟡6）：compact_stub/compact_with_llm 的结构化段落保证。
 /// 调用方约定：auto 路径（chat 第 5 步）必须吞错降级——压缩绝不可打断已成功的对话（审查 🔴）；
 /// 手动路径（compact_chat）传播错误，那里没有已落库的回答可损失。
-async fn maybe_compact(st: &AppState, repo_id: &str, budget: i64, threshold: i64, force: bool) -> Result<Option<String>, ApiError> {
-    let conv = st.conversation_repo.get_or_create(repo_id).await?;
+async fn maybe_compact(st: &AppState, repo_id: &str, conv_id: Option<&str>, budget: i64, threshold: i64, force: bool) -> Result<Option<String>, ApiError> {
+    // M4-2：压缩按会话（缺省=该仓库最近活跃会话）
+    let conv = resolve_conv(st, repo_id, conv_id).await?;
     let fresh = st.conversation_repo.list_uncompacted(&conv.id).await?;
     // 触发口径 = 真实装配口径：未压缩窗口 + 既有摘要（摘要自身增长也会再触发，护栏闭环）
     let total: i64 = fresh.iter().map(|m| m.tokens).sum::<i64>()
@@ -931,23 +946,110 @@ async fn maybe_compact(st: &AppState, repo_id: &str, budget: i64, threshold: i64
 
 /// 恢复对话（R1 分页：?before=<id>&limit=50——切换页签/重启/刷新均恢复；
 /// hasMore 为真时前端给"加载更早"入口，不再全表读）
+
+/// M4-2 多会话：解析目标会话（缺省=该仓库最近活跃的会话）
+async fn resolve_conv(st: &AppState, repo: &str, conv: Option<&str>) -> Result<easyvibe_db::ConversationRow, ApiError> {
+    match conv {
+        Some(cid) => {
+            let rows = st.conversation_repo.list_by_repo(repo).await?;
+            rows.into_iter().find(|c| c.id == cid).ok_or_else(|| ApiError::NotFound(format!("会话 {cid} 不存在于仓库 {repo}")))
+        }
+        None => st.conversation_repo.get_or_create(repo).await,
+    }
+}
+
+/// 会话摘要（AionUI TConversationRuntimeSummary 精简版）：state + pending 审批数 + 消息数
+async fn conversation_summary(st: &AppState, c: &easyvibe_db::ConversationRow) -> serde_json::Value {
+    let tasks = st.task_repo.list_by_conversation(&c.id).await.unwrap_or_default();
+    let pending = tasks.iter().filter(|t| t.status == "awaiting_approval").count();
+    let running = tasks.iter().filter(|t| t.status == "running" || t.status == "pending").count();
+    let msg_count = st.conversation_repo.count_messages(&c.id).await.unwrap_or(0);
+    serde_json::json!({
+        "id": c.id, "title": c.title, "repo": c.repo,
+        "createdAt": c.created_at, "updatedAt": c.updated_at,
+        "messageCount": msg_count,
+        "usage": { "promptTokens": c.prompt_tokens, "completionTokens": c.completion_tokens },
+        "runtime": {
+            "state": if running > 0 { "running" } else if pending > 0 { "waiting_confirmation" } else { "idle" },
+            "pendingConfirmations": pending,
+            "runningTasks": running,
+        },
+    })
+}
+
+async fn list_conversations(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let convs = st.conversation_repo.list_by_repo(&id).await?;
+    let mut items = Vec::new();
+    for c in &convs {
+        items.push(conversation_summary(&st, c).await);
+    }
+    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct CreateConversationRequest {
+    #[serde(default)]
+    title: Option<String>,
+}
+
+async fn create_conversation(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateConversationRequest>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let cid = format!("chat:{id}:{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let conv = st.conversation_repo.create(&cid, &id, body.title.as_deref()).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": conversation_summary(&st, &conv).await })).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct RenameConversationRequest {
+    title: String,
+}
+
+async fn rename_conversation(State(st): State<AppState>, Path((id, cid)): Path<(String, String)>, Json(body): Json<RenameConversationRequest>) -> Result<Response, AppError> {
+    if body.title.trim().is_empty() {
+        return Err(AppError(ApiError::BadRequest("会话名不能为空".into())));
+    }
+    resolve_conv(&st, &id, Some(&cid)).await?;
+    st.conversation_repo.rename(&cid, body.title.trim()).await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
+async fn delete_conversation(State(st): State<AppState>, Path((id, cid)): Path<(String, String)>) -> Result<Response, AppError> {
+    resolve_conv(&st, &id, Some(&cid)).await?;
+    let convs = st.conversation_repo.list_by_repo(&id).await?;
+    if convs.len() <= 1 {
+        return Err(AppError(ApiError::BadRequest("每个仓库至少保留一个会话".into())));
+    }
+    st.conversation_repo.delete(&cid).await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
 async fn get_chat(
     State(st): State<AppState>,
     Path(id): Path<String>,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
-    let conv = st.conversation_repo.get_or_create(&id).await?;
+    // M4-2 多会话：?conv=<id> 选择会话（缺省=最近活跃）
+    let conv = resolve_conv(&st, &id, q.get("conv").map(|v| v.as_str())).await?;
     let before = q.get("before").and_then(|v| v.parse::<i64>().ok());
     let limit: i64 = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 200);
     let messages = st.conversation_repo.list_messages(&conv.id, before, limit).await?;
     let has_more = messages.len() as i64 == limit;
+    // 内联审批数据源：该会话关联任务中等待审批的门（AionUI 内联审批卡模式）
+    let pending_approvals: Vec<serde_json::Value> = st.task_repo.list_by_conversation(&conv.id).await.unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.status == "awaiting_approval")
+        .map(|t| serde_json::json!({ "taskId": t.id, "title": t.title, "gate": t.gate }))
+        .collect();
     Ok(Json(serde_json::json!({
         "success": true,
         "data": {
+            "conversation": { "id": conv.id, "title": conv.title },
             "summary": conv.summary,
             "messages": messages,
             "hasMore": has_more,
+            "pendingApprovals": pending_approvals,
             "usage": { "promptTokens": conv.prompt_tokens, "completionTokens": conv.completion_tokens },
         }
     }))
@@ -963,6 +1065,9 @@ struct ChatHttpRequest {
     /// D9 @模块：用户显式钉住的模块 id 列表（只作上下文提示，不参与过滤）
     #[serde(default)]
     module_refs: Vec<String>,
+    /// M4-2 多会话：目标会话 id（缺省=该仓库最近活跃会话）
+    #[serde(default)]
+    conv: Option<String>,
 }
 
 /// 入口对话（M2-5 + M3-5 持久化）：服务端是会话事实源——
@@ -975,7 +1080,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
     let snap = st.map_service.load_map(&repo).await?;
     // 会话写串行化（审查 🟡1）：持锁覆盖 落库→装配→compact 全段
     let _guard = st.chat_lock.lock().await;
-    let conv = st.conversation_repo.get_or_create(&id).await?;
+    let conv = resolve_conv(&st, &id, body.conv.as_deref()).await?;
 
     // 1) 用户消息落库（会话持久化：历史不再只活在前端 state）
     let persisted = if body.images.is_empty() {
@@ -1051,7 +1156,7 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
     //    回答已落库，绝不能让第 5 步把本轮问答变成 500）
     let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
     let threshold = resolve_adv_i64(&st, &id, "adv.compactThreshold", DEFAULT_COMPACT_THRESHOLD).await;
-    let compaction_trace = match maybe_compact(&st, &id, budget, threshold, false).await {
+    let compaction_trace = match maybe_compact(&st, &id, body.conv.as_deref(), budget, threshold, false).await {
         Ok(t) => t,
         Err(e) => {
             tracing::warn!("[chat] {} auto-compact 失败（不阻断对话）: {e}", id);
@@ -1079,19 +1184,27 @@ async fn chat(State(st): State<AppState>, Path(id): Path<String>, Json(body): Js
 }
 
 /// 手动压缩（§10a：对话界面"压缩上下文"按钮；自动阈值兜底之外的主动手段）
-async fn compact_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+async fn compact_chat(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let _guard = st.chat_lock.lock().await;
     let budget = resolve_adv_i64(&st, &id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
-    let trace = maybe_compact(&st, &id, budget, 0, true).await?;
+    let trace = maybe_compact(&st, &id, q.get("conv").map(|v| v.as_str()), budget, 0, true).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": { "compacted": trace.is_some(), "trace": trace } })).into_response())
 }
 
 /// 新对话：清空消息与摘要（会话行保留，token 计数归零）
-async fn reset_chat(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+async fn reset_chat(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let _guard = st.chat_lock.lock().await;
-    let conv = st.conversation_repo.get_or_create(&id).await?;
+    let conv = resolve_conv(&st, &id, q.get("conv").map(|v| v.as_str())).await?;
     st.conversation_repo.reset(&conv.id).await?;
     Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
@@ -1827,6 +1940,87 @@ mod tests {
         assert_eq!(content, "它健康吗？");
         assert!(!content.contains("聚焦模块"), "聚焦块不得落库");
         assert!(!content.contains("ghost-module"), "未知模块 id 不得落库");
+    }
+
+    #[tokio::test]
+    async fn conversations_multi_create_chat_scope() {
+        let (state, repo) = chat_state("multiconv").await;
+        let app = build_router(state);
+        let get = |path: String| {
+            let app = app.clone();
+            async move {
+                app.oneshot(axum::http::Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap()
+            }
+        };
+        // 初始：每仓库一个默认会话
+        let resp = get(format!("/api/repos/{repo}/conversations")).await;
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let list = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(list["data"].as_array().unwrap().len(), 0, "会话懒创建：初始应为 0");
+
+        // 新建第二个会话
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/conversations"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"title":"重构专项"}"#.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let created = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        let cid = created["data"]["id"].as_str().unwrap().to_string();
+        assert_eq!(created["data"]["title"], "重构专项");
+        assert_eq!(created["data"]["runtime"]["state"], "idle");
+
+        // 向新会话发消息：不影响默认会话
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/chat"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({ "message": "只在新会话里", "conv": cid }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let resp = get(format!("/api/repos/{repo}/chat?conv={cid}")).await;
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let d = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(d["data"]["messages"].as_array().unwrap().len(), 2, "新会话应有问答两条");
+        assert_eq!(d["data"]["conversation"]["title"], "重构专项");
+
+        // 缺省会话 = 最近活跃（M4-2 语义）：不带 conv 的 /chat 应回到刚聊过的会话
+        let resp = get(format!("/api/repos/{repo}/chat")).await;
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let d = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(d["data"]["conversation"]["id"], cid, "缺省应回落到最近活跃的会话");
+        assert_eq!(d["data"]["messages"].as_array().unwrap().len(), 2);
+
+        // 重命名生效
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::put(format!("/api/repos/{repo}/conversations/{cid}"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"title":"改名了"}"#.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let resp = get(format!("/api/repos/{repo}/conversations")).await;
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let list = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        // 缺省回落不新建会话：列表仍只有手工创建的那一个（懒创建纪律）
+        assert_eq!(list["data"].as_array().unwrap().len(), 1);
+        assert!(list["data"].as_array().unwrap().iter().any(|c| c["title"] == "改名了"));
     }
 
     #[tokio::test]
