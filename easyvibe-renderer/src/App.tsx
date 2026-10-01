@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -30,6 +30,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
+import { downloadHealthReport } from '@/lib/healthReport'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
@@ -496,21 +497,27 @@ function Canvas({
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   const [panelOpen, setPanelOpen] = useState(true)
-  // 改进#4：右栏可调宽（340–560）
+  // 改进#4：右栏可调宽（默认 340–560；对话页签放宽到 720，D1-C）
+  const [tab, setTab] = useState<PanelTab>('issues')
   const [panelWidth, setPanelWidth] = useState(340)
+  const handleTabChange = useCallback((t: PanelTab) => {
+    setTab(t)
+    // 离开对话页签时若宽度超出默认上限，收回（避免宽栏压窄其他页签内容）
+    if (t !== 'chat') setPanelWidth((w) => Math.min(w, 560))
+  }, [])
   const startPanelDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startW = panelWidth
-    const onMove = (ev: MouseEvent) => setPanelWidth(Math.min(560, Math.max(340, startW + (startX - ev.clientX))))
+    const maxW = tab === 'chat' ? 720 : 560
+    const onMove = (ev: MouseEvent) => setPanelWidth(Math.min(maxW, Math.max(340, startW + (startX - ev.clientX))))
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [panelWidth])
-  const [tab, setTab] = useState<PanelTab>('issues')
+  }, [panelWidth, tab])
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [submaps, setSubmaps] = useState<Record<string, SubMap | 'loading' | 'error'>>({})
@@ -1036,6 +1043,16 @@ function Canvas({
                     {patrolling ? '巡检中…' : '巡检'}
                   </button>
                 )}
+                {map && (
+                  <button
+                    onClick={() => downloadHealthReport(map)}
+                    className="ml-1 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                    title="导出架构健康报告（Markdown，零 token 成本）"
+                  >
+                    <FileDown size={10} />
+                    导出
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1070,7 +1087,7 @@ function Canvas({
           map={map}
           selection={selection}
           tab={tab}
-          onTabChange={setTab}
+          onTabChange={handleTabChange}
           submaps={submaps}
           backendRepo={backendRepo}
           onCreateTask={(d) => setTaskDraft(d)}
