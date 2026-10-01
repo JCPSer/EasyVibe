@@ -378,7 +378,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask }: Pr
         <span className="text-[10px] text-slate-400">
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <button
             onClick={exportAndClear}
             disabled={!backendRepo || messages.length === 0}

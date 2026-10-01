@@ -44,7 +44,7 @@ const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, subm
 const ALL_PAGES: Set<PageId> = new Set([
   'map', 'modules', 'deps', 'drift', 'health',
   'workbench', 'tasks', 'todo', 'review', 'changes',
-  'kb-docs', 'kb-decisions', 'kb-apis', 'settings',
+  'kb-docs', 'kb-decisions', 'kb-apis', 'settings', 'git',
 ])
 
 interface Filters {
@@ -1261,7 +1261,7 @@ export default function App() {
         const p = get('ui.page')
         if (typeof p === 'string' && (ALL_PAGES as Set<string>).has(p)) setPage(p as PageId)
         const w = get('ui.panelWidth')
-        if (typeof w === 'number' && Number.isFinite(w)) setPanelWidth(Math.min(720, Math.max(340, w)))
+        if (typeof w === 'number' && Number.isFinite(w)) setPanelWidth(Math.min(560, Math.max(340, w)))
         const po = get('ui.panelOpen')
         if (typeof po === 'boolean') setPanelOpen(po)
       })
@@ -1286,6 +1286,16 @@ export default function App() {
     },
     [saveUiPref],
   )
+
+  // 抽屉 Esc 关闭（真人测试 Bug#2：全屏遮罩层 Esc 无效，用户第一反应是"卡住了"）
+  useEffect(() => {
+    if (!overlay) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOverlay(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [overlay])
 
   useEffect(() => {
     let cancelled = false
@@ -1500,7 +1510,10 @@ export default function App() {
           <span className="text-slate-300">▾</span>
         </button>
         {repoPanelOpen && (
-          <div className="absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          <>
+            {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
+            <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
+            <div className="absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
             <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
@@ -1537,6 +1550,7 @@ export default function App() {
               打开本地仓库…
             </button>
           </div>
+          </>
         )}
       </div>
       <div className="ml-auto flex items-center gap-1.5">
@@ -1618,10 +1632,9 @@ export default function App() {
                       setGuideDismissed(true)
                       localStorage.setItem('ev.m4.guide', '1')
                     }}
-                    className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-slate-600"
-                    title="知道了"
+                    className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
                   >
-                    <X size={12} />
+                    知道了
                   </button>
                 </div>
               )
@@ -1634,7 +1647,7 @@ export default function App() {
     tasks: (
       <div className="h-full overflow-y-auto p-5">
         <h2 className="mb-3 text-[15px] font-bold text-slate-800">任务</h2>
-        <TaskPanel backendRepo={backendRepo} onCreateTask={(d) => setTaskDraft(d)} />
+        <TaskPanel backendRepo={backendRepo} onCreateTask={(d) => setTaskDraft(d)} emptyAction={{ label: '去地图看看', onClick: () => handlePageChange('map') }} />
       </div>
     ),
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
@@ -1679,6 +1692,7 @@ export default function App() {
         title="漂移洞察"
         milestone="M4-3"
         description="git 落后度排序、地图保鲜、重新归纳提醒，按 ui-mockups/漂移洞察原型.png 实现。当前地图新鲜度提示在地图页头部。"
+        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={Radar}
       />
     ),
@@ -1694,7 +1708,8 @@ export default function App() {
       <PlaceholderPage
         title="模块目录"
         milestone="M4-4"
-        description="以模块为行的表格视图（职责/健康分/files glob），兼任画布的无障碍列表模式。"
+        description="以模块为行的表格视图：一览全部模块的职责、健康分与文件归属（兼作画布的无障碍列表模式）。"
+        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={Boxes}
       />
     ),
@@ -1703,7 +1718,17 @@ export default function App() {
         title="依赖关系"
         milestone="M4-4"
         description="以边为中心的视角：边类型、方向违例、强度排序。"
+        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
         icon={Waypoints}
+      />
+    ),
+    git: (
+      <PlaceholderPage
+        title="Git 工作树"
+        milestone="M4-3"
+        description="分支与远程同步状态、按模块聚合的变更文件（diff 统计/暂存/撤销）、提交与最近提交历史。按 ui-mockups/Git工作树原型.png 实现。"
+        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
+        icon={GitBranch}
       />
     ),
     'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,
@@ -1731,7 +1756,7 @@ export default function App() {
                 backendRepo={backendRepo}
                 onOpenView={(ids) => {
                   setOverlay(null)
-                  setPage('map')
+                  handlePageChange('map')
                   setViewRequest(ids)
                 }}
                 validModuleIds={new Set(map.modules.map((m) => m.id))}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Loader2, Wrench, RefreshCw, Lightbulb } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import type { Suggestion } from '@/lib/taskContext'
@@ -54,11 +54,7 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
       })
   }
 
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backendRepo])
-
+  // M4-1 真人测试 Bug#5：打开抽屉即自动烧 token 分析——改为用户显式点击开始
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -78,18 +74,32 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
               停止
             </button>
           )}
-          <button
-            onClick={load}
-            disabled={loading || !backendRepo}
-            className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-          >
-            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} /> {loading ? '分析中' : '刷新'}
-          </button>
+          {items !== null && (
+            <button
+              onClick={load}
+              disabled={loading || !backendRepo}
+              className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+            >
+              <RefreshCw size={10} className={loading ? 'animate-spin' : ''} /> {loading ? '分析中' : '刷新'}
+            </button>
+          )}
         </div>
       </div>
 
       {!backendRepo && <p className="py-6 text-center text-[11.5px] text-slate-400">需要本地后端在线</p>}
       {error && <p className="py-6 text-center text-[11.5px] text-red-500">建议生成失败：{error}</p>}
+      {/* M4-1 Bug#5：显式开始——分析消耗 LLM token，用户点头才开始 */}
+      {backendRepo && items === null && !loading && !error && (
+        <div className="flex flex-col items-center gap-2 py-10">
+          <p className="text-[11.5px] text-slate-400">分析将调用 LLM 扫描全图，找出优化机会（约 1 分钟，有 token 成本）。</p>
+          <button
+            onClick={load}
+            className="flex items-center gap-1 rounded-lg bg-blue-600 px-4 py-2 text-[12px] font-semibold text-white hover:bg-blue-700"
+          >
+            <Lightbulb size={12} /> 开始分析
+          </button>
+        </div>
+      )}
       {loading && items === null && (
         <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-slate-400">
           <Loader2 size={14} className="animate-spin" /> 正在分析地图…（结果会保留，切页签不会重分析）

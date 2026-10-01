@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  GitBranch,
   Map as MapIcon,
   Boxes,
   Waypoints,
@@ -31,6 +32,7 @@ export type PageId =
   | 'todo'
   | 'review'
   | 'changes'
+  | 'git'
   | 'kb-docs'
   | 'kb-decisions'
   | 'kb-apis'
@@ -55,6 +57,7 @@ export const NAV: { group: string; items: { id: PageId; label: string; icon: typ
       { id: 'todo', label: '我的待办', icon: ClipboardList },
       { id: 'review', label: '评审', icon: ShieldCheck },
       { id: 'changes', label: '变更记录', icon: History },
+      { id: 'git', label: 'Git', icon: GitBranch },
     ],
   },
   {
@@ -78,8 +81,14 @@ interface Props {
 }
 
 export function AppShell({ page, onPageChange, badges, topBar, children }: Props) {
-  // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）
-  const [collapsed, setCollapsed] = useState(false)
+  // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）；折叠选择持久化（真人测试建议#5）
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && localStorage.getItem('ev.nav.collapsed') === '1')
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      localStorage.setItem('ev.nav.collapsed', v ? '0' : '1')
+      return !v
+    })
+  }
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       {/* 顶栏：项目选择器 + 全局动作（App 注入） */}
@@ -137,7 +146,7 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
               {!collapsed && <span>设置</span>}
             </button>
             <button
-              onClick={() => setCollapsed((v) => !v)}
+              onClick={toggleCollapsed}
               title={collapsed ? '展开导航' : '收起导航'}
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 hover:text-slate-500 ${collapsed ? 'justify-center px-0' : ''}`}
             >

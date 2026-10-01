@@ -31,6 +31,8 @@ interface Props {
   backendRepo: string | null
   /** D3 拍板：驳回即终局 + "复制为新任务"（不重开旧任务，守一任务一条河） */
   onCreateTask?: (draft: TaskDraft) => void
+  /** M4-1 真人测试建议#3：空态主行动（如"去地图看看"） */
+  emptyAction?: { label: string; onClick: () => void }
 }
 
 const GATE_LABEL: Record<string, string> = { plan: '① 计划审批', diff: '② Diff 审批', report: '③ 审查报告' }
@@ -46,7 +48,7 @@ const STATUS_STYLE: Record<string, { cls: string; label: string }> = {
 }
 
 // 任务列表 + 审批操作（审批中心的数据面；Diff 可视化按审批中心原型是 M3-4 后续增强）
-export function TaskPanel({ backendRepo, onCreateTask }: Props) {
+export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -159,7 +161,20 @@ export function TaskPanel({ backendRepo, onCreateTask }: Props) {
           <Loader2 size={14} className="animate-spin" /> 加载任务…
         </div>
       )}
-      {tasks?.length === 0 && !loadError && <p className="py-6 text-center text-[11.5px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>}
+      {/* 空态 = 说明 + 主行动（验收清单⑪） */}
+      {tasks?.length === 0 && !loadError && (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <p className="text-[11.5px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>
+          {emptyAction && (
+            <button
+              onClick={emptyAction.onClick}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              {emptyAction.label}
+            </button>
+          )}
+        </div>
+      )}
       {tasks?.length === 0 && loadError && (
         <div className="py-6 text-center">
           <p className="text-[11.5px] text-red-500">任务列表加载失败（需要本地后端在线）</p>

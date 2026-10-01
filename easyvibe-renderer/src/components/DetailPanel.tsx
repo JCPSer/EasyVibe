@@ -108,6 +108,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
       </div>
 
       <div className="rounded-lg border p-3" style={{ borderColor: `${color}55`, background: `${color}0d` }}>
+        {/* M4-1 真人测试 Bug#3：原 justify-between 三元素挤一行，按钮压住指标文案——改两行布局 */}
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold" style={{ color }}>
             {healthLabel(mod.health.score)} · {mod.health.score}/100
@@ -119,10 +120,10 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
           >
             <Wrench size={10} /> 发起修复
           </button>
-          <span className="text-[10.5px] text-slate-400">
-            coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
-          </span>
         </div>
+        <p className="mt-1 text-[10.5px] text-slate-400">
+          coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
+        </p>
         {backendRepo && <HealthTrend backendRepo={backendRepo} moduleId={mod.id} />}
         {mod.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{mod.health.review_note}</p>}
       </div>

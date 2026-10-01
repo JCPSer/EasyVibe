@@ -3,6 +3,22 @@ import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { FileCode2 } from 'lucide-react'
 import type { Module } from '@/types/map'
 import { healthColor, healthLabel, NODE_W, NODE_H } from '@/lib/layout'
+// M4-1 真人测试 Bug#4：decay_flags 是内部英文 id，直接渲染用户看不懂——统一中文标签
+const FLAG_LABEL: Record<string, string> = {
+  god_module: '上帝模块',
+  god_object: '上帝对象',
+  coupling_high: '耦合过高',
+  circular_dep: '循环依赖',
+  internal_circular_dep: '内部循环依赖',
+  layer_violation: '分层违规',
+  layering_mismatch: '分层错位',
+  responsibility_overlap: '职责重叠',
+  duplicated_protocol: '协议重复',
+  ref_plumbing: '引用缠绕',
+  closure_staleness_workaround: '过期兼容',
+  doc_drift: '文档漂移',
+}
+
 
 export type ModuleNodeType = Node<{ module: Module; inCount: number; outCount: number }, 'module'>
 
@@ -72,6 +88,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
         </div>
       </div>
 
+
       {mod.health.decay_flags.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {mod.health.decay_flags.slice(0, 3).map((f) => (
@@ -79,7 +96,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
               key={f}
               className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-[9px] leading-4 text-red-600"
             >
-              {f}
+              {FLAG_LABEL[f] ?? f}
             </span>
           ))}
         </div>
