@@ -1552,6 +1552,13 @@ export default function App() {
               commitsSinceMap: msg.data.commitsSinceMap,
             })
           }
+          if (msg.name === 'task.contractAlert') {
+            // L2 过程预警：任务执行中哨兵抓到的新增越界——比终态红线早 N 分钟到达
+            const d = msg.data
+            if (d?.repo !== backendRepo) return
+            toast(`影响面预警：任务 ${d.taskId} 正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'error')
+            if (document.hidden) notifySystem('EasyVibe · 影响面预警', `任务 ${d.taskId} 正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
+          }
           if (msg.name === 'task.contractViolated') {
             // R2 裂缝#3：auto/supervised 任务无审批关——越界经 WS 主动送达（与审批通知同双通道）
             const d = msg.data

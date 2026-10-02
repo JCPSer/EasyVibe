@@ -220,6 +220,8 @@ impl TaskExecutor {
                 m.insert(task.id.clone(), baseline);
             }
         }
+        // L2 哨兵原料：合约边界 + 基线（过程巡检用；终态采集另有权威计算）
+        let contract = contract_patterns_from_context(&task.context);
         let prompt = {
             let h = self.harness.read().await;
             assemble_task_prompt(&h.framework_transparent, &task)
@@ -241,11 +243,39 @@ impl TaskExecutor {
                 let task_id = task.id.clone();
                 let repo_name = task.repo.clone();
                 let repo_root = repo.root.clone();
+                let contract = contract.clone();
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     let trust_manual = trust_manual;
+                    // L2 哨兵状态：已上报越界集合 + 巡检节拍器
+                    let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
+                    let sentry_every = std::cmp::max(1, sentry_interval().as_secs() / 2) as u32;
+                    let mut tick: u32 = 0;
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        tick += 1;
+                        // L2 过程预警：周期巡检基线后的新增变更，越界即推 WS（哨兵预警 ≠ 终态红线判定）
+                        if !contract.is_empty() && tick % sentry_every == 0 {
+                            let baseline = this.baselines.lock().ok().and_then(|m| m.get(&task_id).cloned()).unwrap_or_default();
+                            let base = base_head_from_task(&this.task_repo, &task_id).await;
+                            let candidates: Vec<String> = changed_files(&repo_root, base.as_deref()).await
+                                .into_iter()
+                                .filter(|p| !baseline.contains(p))
+                                .filter(|p| !p.starts_with(".easyvibe/") && !p.starts_with(".claude/"))
+                                .filter(|p| !path_within_contract(p, &contract))
+                                .collect();
+                            let fresh = new_violators(&candidates, &mut reported);
+                            if !fresh.is_empty() {
+                                warn!("[task-exec] 任务 {} 过程越界预警：{}", task_id, fresh.join("、"));
+                                if let Some(tx) = &this.events {
+                                    let _ = tx.send(crate::BusEvent::TaskContractAlert {
+                                        repo: repo_name.clone(),
+                                        task_id: task_id.clone(),
+                                        files: fresh,
+                                    });
+                                }
+                            }
+                        }
                         match this.session_manager.status_of_session(&session_id).await {
                             Some(s)
                                 if !matches!(
@@ -546,6 +576,25 @@ pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
     serde_json::from_str(payload)
         .ok()
         .or_else(|| easyvibe_ai_agent::extract_json(payload).ok())
+}
+
+/// L2 哨兵：从当前越界候选中剔出**未上报过**的新文件（幂等——同一文件只预警一次，
+/// 已上报集合随任务生命周期累计）。纯函数便于测试。
+pub fn new_violators(candidates: &[String], reported: &mut std::collections::HashSet<String>) -> Vec<String> {
+    let fresh: Vec<String> = candidates.iter().filter(|p| !reported.contains(*p)).cloned().collect();
+    reported.extend(fresh.iter().cloned());
+    fresh
+}
+
+/// L2 哨兵巡检间隔（秒）：默认 15s——够快能拦住"越界写一大片"的趋势，
+/// 又不至于让 git 调用频率喧宾夺主（env 可调）。
+fn sentry_interval() -> std::time::Duration {
+    std::env::var("EASYVIBE_CONTRACT_SENTRY_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(15))
 }
 
 /// N26：任务槽会话超时（env 可调）——任务执行是自由 coding，40-60 分钟常态；
@@ -1054,6 +1103,18 @@ mod tests {
             v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("EASYVIBE-RESULT")),
             "缺 RESULT 行必须亮警告: {v}"
         );
+    }
+
+    #[test]
+    fn sentry_violators_are_incremental_and_idempotent() {
+        // L2 哨兵：只报新越界文件，重复巡检同一文件不重复预警（幂等）
+        let mut reported = std::collections::HashSet::new();
+        let c1 = vec!["stray/a.ts".to_string(), "stray/b.ts".to_string()];
+        assert_eq!(new_violators(&c1, &mut reported), c1, "首报全量");
+        assert!(new_violators(&c1, &mut reported).is_empty(), "重复巡检不重复报");
+        let c2 = vec!["stray/a.ts".to_string(), "stray/c.ts".to_string()];
+        assert_eq!(new_violators(&c2, &mut reported), vec!["stray/c".to_string() + ".ts"], "只报新增");
+        assert_eq!(reported.len(), 3);
     }
 
     #[tokio::test]

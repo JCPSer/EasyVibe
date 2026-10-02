@@ -67,6 +67,8 @@ pub enum BusEvent {
     TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
     /// R2 裂缝#3：影响面合约越界（auto/supervised 无审批关，必须主动送达）
     TaskContractViolated { repo: String, task_id: String, files: Vec<String> },
+    /// L2 过程预警：任务执行中哨兵巡检到的新增越界（预警 ≠ 终态红线判定）
+    TaskContractAlert { repo: String, task_id: String, files: Vec<String> },
     /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
     Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
     /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
@@ -1460,6 +1462,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                 },
                 BusEvent::TaskContractViolated { repo, task_id, files } => WsMessage {
                     name: "task.contractViolated".into(),
+                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
+                },
+                BusEvent::TaskContractAlert { repo, task_id, files } => WsMessage {
+                    name: "task.contractAlert".into(),
                     data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
                 },
                 BusEvent::Freshness { repo, status, latest_commit_at, commits_since_map } => WsMessage {
