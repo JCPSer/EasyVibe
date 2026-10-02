@@ -32,10 +32,26 @@ pub struct SessionManager {
     by_id: Arc<RwLock<HashMap<String, SessionStatusChanged>>>,  // session_id -> 状态（终态归属用，审查 🔴1）
     /// session_id -> stdout 捕获（M4-1 产物归档采集的原料；单会话 ≤1MB 封顶）
     outputs: Arc<RwLock<HashMap<String, Arc<std::sync::Mutex<String>>>>>,
+    /// P0（审查后端#1）：session_id -> 终止信号。主动 kill 与超时 kill 都经此通道，
+    /// 由看门任务 select 接收后 start_kill——child 句柄不外泄，避免共享可变状态。
+    killers: Arc<RwLock<HashMap<String, Arc<tokio::sync::Notify>>>>,
     counter: AtomicU64,
     events: SessionEventSender,
     /// agent 过程直播：stdout 逐行广播（改进#2）
     output_tx: Arc<tokio::sync::broadcast::Sender<SessionOutput>>,
+    /// 会话超时（秒）：超时未终态 → 杀进程判 Failed。环境可调（EASYVIBE_SESSION_TIMEOUT_SECS），默认 30 分钟。
+    timeout: std::time::Duration,
+}
+
+/// 会话超时：覆盖归纳/巡检/子图分析/任务执行全部 spawn 路径（审查后端#1——agent 挂死 =
+/// 写互斥永占 + 任务 permit 泄漏 + 重试循环空转）。agent 正常执行都在分钟级，30 分钟为宽限。
+fn session_timeout() -> std::time::Duration {
+    std::env::var("EASYVIBE_SESSION_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(30 * 60))
 }
 
 impl SessionManager {
@@ -45,9 +61,46 @@ impl SessionManager {
             active: Default::default(),
             by_id: Default::default(),
             outputs: Default::default(),
+            killers: Default::default(),
             counter: AtomicU64::new(0),
             events,
             output_tx: Arc::new(output_tx),
+            timeout: session_timeout(),
+        })
+    }
+
+    /// 主动终止会话（P0 审查后端#1）：kill 信号 → 看门任务 select 命中 → start_kill → 判 Failed。
+    /// 仅活动会话可 kill；已终态返回 409。
+    pub async fn kill(&self, session_id: &str) -> Result<(), ApiError> {
+        let Some(s) = self.by_id.read().await.get(session_id).cloned() else {
+            return Err(ApiError::NotFound(format!("会话 {session_id} 不存在")));
+        };
+        if !matches!(s.status, SessionStatus::Starting | SessionStatus::Running) {
+            return Err(ApiError::Conflict(format!("会话 {session_id} 已终态（{:?}）", s.status)));
+        }
+        let notify = self.killers.read().await.get(session_id).cloned();
+        match notify {
+            Some(n) => {
+                n.notify_one();
+                Ok(())
+            }
+            None => Err(ApiError::Conflict(format!("会话 {session_id} 无终止通道（外部注册会话不支持 kill）"))),
+        }
+    }
+
+    /// 测试专用：显式超时常数（env 在并行测试下变异是竞态，不走 EASYVIBE_SESSION_TIMEOUT_SECS）
+    #[cfg(test)]
+    pub fn new_with_timeout(events: SessionEventSender, timeout: std::time::Duration) -> Arc<Self> {
+        let (output_tx, _) = tokio::sync::broadcast::channel(512);
+        Arc::new(Self {
+            active: Default::default(),
+            by_id: Default::default(),
+            outputs: Default::default(),
+            killers: Default::default(),
+            counter: AtomicU64::new(100), // 与 new() 的计数器错开，避免测试间 session id 冲突
+            events,
+            output_tx: Arc::new(output_tx),
+            timeout,
         })
     }
 
@@ -56,10 +109,18 @@ impl SessionManager {
         self.output_tx.subscribe()
     }
 
-    /// 会话 stdout（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料；无捕获返回 None
+    /// 会话 stdout（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料；无捕获返回 None。
+    /// 注意：只读不取——缓冲在 take_output 消费前一直保留（契约：终态后随时可读）。
     pub async fn output_of(&self, session_id: &str) -> Option<String> {
         let buf = self.outputs.read().await.get(session_id)?.clone();
         Some(buf.lock().map(|s| s.clone()).unwrap_or_default())
+    }
+
+    /// 消费式领取 stdout 缓冲（领取即从表移除——SessionManager 内存只增不减债务的消解点：
+    /// 任务执行器终态采集走这里；无人消费的历史缓冲由 map 容量自然受限于会话数，1MB/会话封顶）
+    pub async fn take_output(&self, session_id: &str) -> Option<String> {
+        let buf = self.outputs.write().await.remove(session_id)?;
+        Some(buf.lock().map(|mut s| std::mem::take(&mut *s)).unwrap_or_default())
     }
 
     pub async fn status_of(&self, repo_id: &str) -> Option<SessionStatusChanged> {
@@ -147,6 +208,10 @@ impl SessionManager {
         let out_output_tx = self.output_tx.clone();
         let err_output_tx = self.output_tx.clone();
         let out_session_id = session_id.clone();
+        // P0：终止通道（主动 kill / 超时共用）——notify 幂等，重复 kill 无副作用
+        let kill_notify = Arc::new(tokio::sync::Notify::new());
+        self.killers.write().await.insert(session_id.clone(), kill_notify.clone());
+        let timeout = self.timeout;
 
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
@@ -157,6 +222,7 @@ impl SessionManager {
         let events = self.events.clone();
         let active = self.active.clone();
         let by_id = self.by_id.clone();
+        let killers = self.killers.clone();
         let repo = repo_id.to_string();
         let session_id_task = session_id.clone();
         tokio::spawn(async move {
@@ -223,15 +289,38 @@ impl SessionManager {
                     }
                 }
             });
-            let _ = tokio::join!(out_task, err_task);
-            let status = match child.wait().await {
-                Ok(exit) if exit.success() => SessionStatus::Succeeded,
-                Ok(_exit) => SessionStatus::Failed,
-                Err(e) => {
+            // P0 审查后端#1：wait 与 主动kill / 超时 三者竞速——任一命中先杀进程再判终态。
+            // 顺序必须是 select 在前 join 在后：join 等管道 EOF，而 EOF 依赖子进程死亡——
+            // 若先 join 后 select，kill/超时永远轮不到，形成死锁（本次实弹教训）。
+            enum Outcome {
+                Killed(&'static str),
+                Exited(std::io::Result<std::process::ExitStatus>),
+            }
+            let outcome = tokio::select! {
+                _ = kill_notify.notified() => Outcome::Killed("用户主动终止"),
+                _ = tokio::time::sleep(timeout) => Outcome::Killed("会话超时（agent 挂死防线）"),
+                s = child.wait() => Outcome::Exited(s),
+            };
+            let status = match outcome {
+                Outcome::Killed(reason) => {
+                    warn!("[session {session_id_task}] 被终止: {reason}");
+                    if let Err(e) = child.start_kill() {
+                        warn!("[session {session_id_task}] start_kill 失败: {e}");
+                    }
+                    let _ = child.wait().await;
+                    SessionStatus::Failed
+                }
+                Outcome::Exited(Ok(exit)) if exit.success() => SessionStatus::Succeeded,
+                Outcome::Exited(Ok(_exit)) => SessionStatus::Failed,
+                Outcome::Exited(Err(e)) => {
                     warn!("[session {session_id_task}] wait 失败: {e}");
                     SessionStatus::Failed
                 }
             };
+            // 子进程已退出：管道写端关闭，排空任务很快收尾
+            let _ = tokio::join!(out_task, err_task);
+            // 终态清理：kill 通道随会话结束回收（stdout 缓冲由消费者 take_output 领取，见 M4-1 契约）
+            killers.write().await.remove(&session_id_task);
             let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
             active.write().await.insert(repo.clone(), final_status.clone());
             by_id.write().await.insert(session_id_task.clone(), final_status.clone());
@@ -323,6 +412,39 @@ mod tests {
             })
             .await
             .is_ok());
+    }
+
+    // P0 审查后端#1：主动 kill——挂死的 agent 可被杀掉并释放写互斥
+    #[tokio::test]
+    async fn kill_active_session_terminates_and_releases_mutex() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mgr = SessionManager::new(tx);
+        let dir = std::env::temp_dir();
+        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        mgr.kill(&s.session_id).await.unwrap();
+        let evt = recv_terminal(&mut rx).await;
+        assert_eq!(evt.session_id, s.session_id);
+        assert!(matches!(evt.status, SessionStatus::Failed));
+        // 终态后再 kill → 409；互斥随终态释放（新会话可启动）
+        assert!(matches!(mgr.kill(&s.session_id).await, Err(ApiError::Conflict(_))));
+        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()]).await.is_ok());
+        // 不存在的会话 → 404
+        assert!(matches!(mgr.kill("nope").await, Err(ApiError::NotFound(_))));
+    }
+
+    // P0 审查后端#1：超时防线——agent 挂死也不会永占写互斥（无需人工 kill）
+    #[tokio::test]
+    async fn hung_agent_killed_by_timeout() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mgr = SessionManager::new_with_timeout(tx, std::time::Duration::from_millis(150));
+        let dir = std::env::temp_dir();
+        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        let evt = recv_terminal(&mut rx).await;
+        assert_eq!(evt.session_id, s.session_id);
+        assert!(matches!(evt.status, SessionStatus::Failed), "超时必须判 Failed");
+        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()]).await.is_ok(), "互斥已释放");
+        // 终态清理：首个会话的 kill 通道已回收（第二个会话自己的通道随其终态回收）
+        assert!(!mgr.killers.read().await.contains_key(&s.session_id));
     }
 
     #[tokio::test]

@@ -115,10 +115,23 @@ impl TaskExecutor {
     /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行。
     /// M4-2：驳回必须给理由（审批中心定稿），空理由 400。
     pub async fn decide(self: &Arc<Self>, task_id: &str, decision: &str, note: Option<&str>) -> Result<easyvibe_db::TaskRow, ApiError> {
+        // P0 审查后端#2：审批是状态机迁移，不是自由函数——
+        // ① decision 白名单（此前任何非 "rejected" 字符串都被当 approved）；
+        // ② 仅 awaiting_approval 可审批（此前对 pending/failed/interrupted  decide 会复活并重新 spawn，
+        //   与「驳回=终态、返工走复制新任务」的设计形成未设计旁路）。
+        if !matches!(decision, "approved" | "rejected") {
+            return Err(ApiError::BadRequest(format!("非法审批决定: {decision}（仅 approved/rejected）")));
+        }
         if decision == "rejected" && note.map(str::trim).unwrap_or_default().is_empty() {
             return Err(ApiError::BadRequest("驳回必须填写理由（留痕可追溯）".into()));
         }
         let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if task.status != "awaiting_approval" {
+            return Err(ApiError::Conflict(format!(
+                "任务当前状态 {} 不可审批（仅 awaiting_approval 可 decide——驳回返工请复制为新任务）",
+                task.status
+            )));
+        }
         let gate = task.gate.clone().unwrap_or_else(|| "plan".into());
         self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
         match (decision, gate.as_str()) {
@@ -567,7 +580,7 @@ pub async fn collect_task_result(
     task_id: &str,
     task_repo: &easyvibe_db::SqliteTaskRepository,
 ) -> Option<String> {
-    let output = session_manager.output_of(session_id).await.unwrap_or_default();
+    let output = session_manager.take_output(session_id).await.unwrap_or_default();
     let parsed = parse_result_line(&output);
     // 变更归因：优先用任务 base_head，缺省回退 HEAD（兼容旧任务与无 git）
     let base_owned = base_head_from_task(task_repo, task_id).await;
@@ -747,6 +760,64 @@ mod tests {
             v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("EASYVIBE-RESULT")),
             "缺 RESULT 行必须亮警告: {v}"
         );
+    }
+
+    #[tokio::test]
+    async fn decide_state_machine_guards() {
+        // P0 审查后端#2：decision 白名单 + 仅 awaiting_approval 可审批（复活旁路封死）
+        use easyvibe_db::{Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-decide-guard-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo_root = dir.clone();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&repo_root)]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            harness_stub("框架"),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+            4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+        );
+
+        // pending 任务不可审批（此前会复活 spawn）
+        let mut task = sample_task("pending");
+        task.repo = "ev-decide-guard-test".into();
+        task.id = "task-guard-pending".into();
+        task_repo.create(&task).await.unwrap();
+        let err = executor.decide("task-guard-pending", "approved", None).await;
+        assert!(matches!(err, Err(ApiError::Conflict(_))), "pending 任务必须 409: {err:?}");
+        assert_eq!(task_repo.get("task-guard-pending").await.unwrap().unwrap().status, "pending", "状态不得被污染");
+
+        // failed 任务不可审批（复活旁路）
+        let mut task2 = sample_task("failed");
+        task2.repo = "ev-decide-guard-test".into();
+        task2.id = "task-guard-failed".into();
+        task2.gate = Some("plan".into());
+        task_repo.create(&task2).await.unwrap();
+        let err = executor.decide("task-guard-failed", "approved", None).await;
+        assert!(matches!(err, Err(ApiError::Conflict(_))), "failed 任务必须 409");
+
+        // 非法 decision 字符串一律 400（此前会被当 approved）
+        let mut task3 = sample_task("awaiting_approval");
+        task3.repo = "ev-decide-guard-test".into();
+        task3.id = "task-guard-bad".into();
+        task3.gate = Some("diff".into());
+        task_repo.create(&task3).await.unwrap();
+        let err = executor.decide("task-guard-bad", "whatever", None).await;
+        assert!(matches!(err, Err(ApiError::BadRequest(_))), "非法 decision 必须 400: {err:?}");
+
+        // 驳回无理由仍被拒（既有纪律不回归）
+        let err = executor.decide("task-guard-bad", "rejected", None).await;
+        assert!(matches!(err, Err(ApiError::BadRequest(_))));
     }
 
     #[tokio::test]

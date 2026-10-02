@@ -1161,7 +1161,7 @@ class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Err
     if (this.state.err) {
       return (
         <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
-          <span className="font-semibold text-slate-700">画布渲染出错（已拦截白屏）</span>
+          <span className="font-semibold text-slate-700">页面渲染出错（已拦截白屏）</span>
           <span className="max-w-[420px] text-center text-slate-400">{String(this.state.err).slice(0, 200)}</span>
           <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-blue-600 hover:bg-slate-50" onClick={() => location.reload()}>
             刷新恢复
@@ -1174,8 +1174,7 @@ class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Err
 }
 
 // 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
-function InductionWaiting({ repo }: { repo: string }) {
-  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
+function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
   useEffect(() => {
     let stale = false
     const tick = () => {
@@ -1222,6 +1221,99 @@ function InductionWaiting({ repo }: { repo: string }) {
           : '后台 agent 执行中（通常数分钟，取决于仓库规模）'}
         ，完成后地图会自动出现
       </span>
+    </div>
+  )
+}
+
+// P0 对标缺口#3：系统通知惰性封装——首次需要时才申请权限；不支持的宿主静默降级
+function notifySystem(title: string, body: string) {
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body })
+  } else if (Notification.permission === 'default') {
+    void Notification.requestPermission().then((p) => {
+      if (p === 'granted') new Notification(title, { body })
+    })
+  }
+}
+
+// P0 审查前端#1：地图加载守门员——区分三种真实状态，消灭"出错也转圈"死锁：
+// · progress 显示归纳进行中 → 等待页（原行为）
+// · 加载出错（5xx/网络/后端离线） → 错误卡（重试 / 开始归纳）
+// · 从未生成且无归纳（progress 无文件） → 引导卡（开始归纳）
+function MapGate({ repo, error, onRetry }: { repo: string; error: string | null; onRetry: () => void }) {
+  const [inducing, setInducing] = useState<boolean | null>(null) // null=探测中
+  const [starting, setStarting] = useState(false)
+
+  useEffect(() => {
+    let stale = false
+    const tick = () => {
+      fetch(`/api/repos/${encodeURIComponent(repo)}/progress`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d: { data: { phase: string } | null }) => {
+          if (stale) return
+          setInducing(!!d.data && d.data.phase !== 'done')
+        })
+        .catch(() => {
+          if (!stale) setInducing(false) // progress 也拿不到 → 按出错处理
+        })
+    }
+    tick()
+    const t = window.setInterval(tick, 3000)
+    return () => {
+      stale = true
+      window.clearInterval(t)
+    }
+  }, [repo])
+
+  if (inducing === null) {
+    return (
+      <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500">
+        <Loader2 size={16} className="animate-spin" /> 正在探测仓库状态…
+      </div>
+    )
+  }
+  if (inducing) return <InductionWaiting repo={repo} />
+
+  const startInduce = async () => {
+    setStarting(true)
+    try {
+      const r = await fetch(`/api/repos/${encodeURIComponent(repo)}/reinduce`, { method: 'POST' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) {
+        toast(d?.error ?? '归纳发起失败', 'error')
+        setStarting(false)
+        return
+      }
+      setInducing(true)
+    } catch {
+      toast('归纳发起失败（需要后端在线）', 'error')
+      setStarting(false)
+    }
+  }
+
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-3 text-[13px] text-slate-500">
+      <span className="font-semibold text-slate-700">{error ? '代码地图加载失败' : '该仓库尚未生成代码地图'}</span>
+      {error && <span className="max-w-[460px] text-center text-[11px] leading-4 text-slate-400">{String(error).slice(0, 200)}</span>}
+      {!error && <span className="text-[11px] text-slate-400">发起归纳后，EasyVibe 的 agent 会扫描仓库并生成架构地图（通常数分钟）</span>}
+      <div className="flex gap-2">
+        {error && (
+          <button
+            onClick={onRetry}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <RotateCcw size={12} /> 重试
+          </button>
+        )}
+        <button
+          onClick={startInduce}
+          disabled={starting}
+          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+          {starting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 开始归纳
+        </button>
+      </div>
     </div>
   )
 }
@@ -1409,7 +1501,18 @@ export default function App() {
           }
           if (msg.name === 'task.statusChanged') {
             const d = msg.data
-            if (d?.repo === backendRepo) emitTaskEvent({ repo: d.repo, taskId: d.taskId, status: d.status, gate: d.gate })
+            if (d?.repo !== backendRepo) return
+            emitTaskEvent({ repo: d.repo, taskId: d.taskId, status: d.status, gate: d.gate })
+            // P0 对标缺口#3：审批零通知——manual 任务在计划关等批，用户不盯窗口就卡死。
+            // 系统通知（惰性申请权限）+ 页内 toast 双通道；仅窗口隐藏时弹系统通知防打扰
+            if (d?.status === 'awaiting_approval') {
+              toast('有任务等待你的审批', 'info')
+              if (document.hidden) notifySystem('EasyVibe · 待审批', `任务 ${d.taskId} 已到达审批关${d.gate ? `（${d.gate}）` : ''}`)
+            }
+            if (d?.status === 'failed') {
+              toast(`任务 ${d.taskId} 执行失败`, 'error')
+              if (document.hidden) notifySystem('EasyVibe · 任务失败', `任务 ${d.taskId} 执行失败，回应用查看详情`)
+            }
           }
         } catch {
           /* 忽略坏消息 */
@@ -1520,9 +1623,10 @@ export default function App() {
     }
   }, [backendRepo, refreshRepos])
 
-  if ((error && backendRepo) || (!map && backendRepo)) {
-    // 后端在线但地图尚未生成：归纳进行中，map.changed 会触发自动重试
-    return <InductionWaiting repo={backendRepo} />
+  // P0 审查前端#1：地图加载失败不再一律渲染"归纳中"——
+  // MapGate 用 /progress 区分"真在归纳"（等待页）与"真出错"（错误卡：重试/开始归纳）
+  if (backendRepo && (error || !map)) {
+    return <MapGate repo={backendRepo} error={error} onRetry={() => setReloadTick((t) => t + 1)} />
   }
   if (!map) {
     return (
@@ -1727,9 +1831,11 @@ export default function App() {
 
   return (
     <>
-      <AppShell page={page} onPageChange={handlePageChange} topBar={topBar}>
-        {PAGES[page]}
-      </AppShell>
+      <CanvasBoundary>
+        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar}>
+          {PAGES[page]}
+        </AppShell>
+      </CanvasBoundary>
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
       {overlay === 'views' && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>

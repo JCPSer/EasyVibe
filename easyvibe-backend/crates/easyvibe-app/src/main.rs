@@ -94,6 +94,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/git/push", axum::routing::post(post_git_push))
         .route("/repos/{id}/git/discard", axum::routing::post(post_git_discard))
         .route("/repos/{id}/git/commit-message", axum::routing::post(post_git_commit_message))
+        .route("/repos/{id}/sessions/{sid}/kill", axum::routing::post(post_session_kill))
+        .route("/repos/{id}/tasks/{tid}/kill", axum::routing::post(post_task_kill))
         .route("/repos/{id}/chat", get(get_chat).post(chat))
         .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
         .route("/repos/{id}/conversations/{cid}", axum::routing::put(rename_conversation).delete(delete_conversation))
@@ -658,7 +660,7 @@ async fn post_git_commit_message(
     Json(body): Json<CommitMessageRequest>,
 ) -> Result<Response, AppError> {
     use easyvibe_db::TaskRepository as _;
-    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let _repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
 
     let (task_ctx, footer) = match &body.task_id {
         Some(tid) => {
@@ -694,6 +696,24 @@ async fn post_git_commit_message(
         return Err(AppError(ApiError::Internal("LLM 未产出提交说明".into())));
     }
     Ok(Json(serde_json::json!({ "success": true, "data": { "message": message, "footer": footer } })).into_response())
+}
+
+/// P0 审查后端#1：终止指定会话（归纳/巡检/子图分析/任务执行同一通道）。
+/// 已终态返回 409；外部自注册会话（无终止通道）返回 409。
+async fn post_session_kill(State(st): State<AppState>, Path((id, sid)): Path<(String, String)>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    st.session_manager.kill(&sid).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+/// 按任务终止：解析任务 → 会话 → kill（任务卡的「终止」按钮走这里）
+async fn post_task_kill(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.task_repo.get(&tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
+    let sid = task.session_id.ok_or_else(|| ApiError::BadRequest(format!("任务 {tid} 无关联会话（未开始执行）")))?;
+    st.session_manager.kill(&sid).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
 }
 
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
