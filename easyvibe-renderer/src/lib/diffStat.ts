@@ -66,7 +66,7 @@ export function moduleOfFile(
   const mod = modules.find((mm) =>
     mm.files.some((g) => {
       const base = g.replace(/\*\*.*$/, '').replace(/\/$/, '')
-      return base !== '' && (path.startsWith(base + '/') || path.includes('/' + base + '/'))
+      return base !== '' && (path === base || path.startsWith(base + '/') || path.includes('/' + base + '/'))
     }),
   )
   return mod ? { id: mod.id, name: mod.name } : null

@@ -538,8 +538,10 @@ pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
 // ---------- 影响面合约（战略审查第一 P0：任务声明的模块从注释升级为确定性边界） ----------
 
 /// 路径是否落在合约 glob 范围内——与前端 moduleOfFile 同口径且**带路径段边界**：
-/// `**` 前前缀去尾斜杠后，须以 `base/` 开头（或整段包含 `/base/`）——
-/// R2 审查实锤：starts_with("src/core") 会放过 src/coreography/，前缀必须有边界。
+/// `**` 前前缀去尾斜杠后，命中条件：路径恰为 base（精确文件型 glob，如 "src/main.rs"）、
+/// 以 `base/` 开头（目录前缀）、或整段包含 `/base/`——
+/// R2 审查实锤：starts_with("src/core") 会放过 src/coreography/，前缀必须有边界；
+/// 自托管实弹（dogfood）：漏掉 path == base 会让精确文件型 glob 永不命中（回归锁死）。
 pub fn path_within_contract(path: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|g| {
         let base = match g.find("**") {
@@ -550,7 +552,7 @@ pub fn path_within_contract(path: &str, patterns: &[String]) -> bool {
         if base.is_empty() {
             return false;
         }
-        path.starts_with(&format!("{base}/")) || path.contains(&format!("/{base}/"))
+        path == base || path.starts_with(&format!("{base}/")) || path.contains(&format!("/{base}/"))
     })
 }
 
@@ -734,7 +736,9 @@ pub async fn collect_task_result(
             .await
             .into_iter()
             .filter(|p| !baseline_set.contains(p.as_str()))
-            .filter(|p| !p.starts_with(".easyvibe/"))
+            // 产品自身与 agent 脚手架的 bookkeeping（.easyvibe/ 归档/地图、.claude/ STAR 记忆）
+            // 不属于任务改动——排除出合约校验（自托管实弹：harness STAR 归档路径约定待统一，见债务登记）
+            .filter(|p| !p.starts_with(".easyvibe/") && !p.starts_with(".claude/"))
             .filter(|p| !path_within_contract(p, &contract))
             .collect()
     };
@@ -898,6 +902,10 @@ mod tests {
         assert!(!path_within_contract("README.md", &pats));
         assert!(!path_within_contract("src/coreography/data.ts", &pats), "R2 实锤：前缀必须有段边界");
         assert!(!path_within_contract("src/core_plus/x.ts", &pats), "下划线前缀同样不得误配");
+        // 精确文件型 glob（自托管实弹回归：path == base 必须命中，否则边界文件永被误报越界）
+        let file_pats = vec!["src/main.rs".to_string()];
+        assert!(path_within_contract("src/main.rs", &file_pats));
+        assert!(!path_within_contract("src/main.rs.bak", &file_pats));
         // 空合约 = 不约束（未声明模块的任务不校验）
         assert!(!path_within_contract("anything", &[]));
         // context 提取

@@ -67,6 +67,10 @@ describe('aggregateByModule', () => {
     expect(moduleOfFile('lib/src/core/deep/x.ts', mods)?.id).toBe('core')
     expect(moduleOfFile('src/coreography/data.ts', mods)).toBeNull()
     expect(moduleOfFile('src/core_plus/x.ts', mods)).toBeNull()
+    // 精确文件型 glob（自托管实弹回归：path === base 必须命中）
+    const fileMods = [{ id: 'server', name: '服务端', files: ['src/main.rs'] }]
+    expect(moduleOfFile('src/main.rs', fileMods)?.id).toBe('server')
+    expect(moduleOfFile('src/main.rs.bak', fileMods)).toBeNull()
     expect(aggregateByModule([{ path: 'src/coreography/d.ts', adds: 1, dels: 0 }], mods)[0].id).toBe('_other')
   })
 })

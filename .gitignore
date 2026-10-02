@@ -11,3 +11,4 @@ reference/
 
 # EasyVibe 自身产物（自托管测试用）
 .easyvibe/
+.claude/

@@ -1,9 +1,16 @@
 //! M4-4 Git 工作树：状态/历史查询 + 写操作（提交/拉取/推送/撤销）。
 //! 命令统一走 tokio::process + 超时；解析逻辑全部是纯函数，单测覆盖（含真 git 集成测试）。
 //! 安全：写操作只接受相对路径且禁止 `..` 越界；discard 按跟踪状态区分 checkout/clean。
+use axum::{
+    extract::{Path as AxumPath, State},
+    response::{IntoResponse, Response},
+    Json,
+};
 use easyvibe_common::ApiError;
 use std::path::Path;
 use std::time::Duration;
+
+use crate::{resolve_llm, AppError, AppState, LlmMode};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -192,6 +199,34 @@ pub async fn log(repo: &Path, limit: i64) -> Result<Vec<GitLogRow>, ApiError> {
     Ok(parse_log(&out))
 }
 
+// ---------- HTTP handlers：查询 ----------
+
+pub async fn get_git_status(State(st): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let s = status(&repo.root).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "branch": s.branch, "upstream": s.upstream, "ahead": s.ahead, "behind": s.behind,
+            "files": s.files.iter().map(|f| serde_json::json!({
+                "status": f.status.to_string(), "path": f.path, "orig": f.orig, "adds": f.adds, "dels": f.dels,
+            })).collect::<Vec<_>>(),
+        },
+    }))
+    .into_response())
+}
+
+pub async fn get_git_log(
+    State(st): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let limit = q.get("limit").and_then(|l| l.parse::<i64>().ok()).unwrap_or(30).clamp(1, 100);
+    let rows = log(&repo.root, limit).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
 // ---------- 写操作 ----------
 
 pub async fn commit_all(repo: &Path, message: &str) -> Result<String, ApiError> {
@@ -231,6 +266,98 @@ fn validate_rel_path(path: &str) -> Result<(), ApiError> {
         return Err(ApiError::BadRequest(format!("非法路径: {path}")));
     }
     Ok(())
+}
+
+// ---------- HTTP handlers：写操作 ----------
+
+pub async fn post_git_commit(
+    State(st): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let message = body["message"].as_str().unwrap_or_default();
+    let short = commit_all(&repo.root, message).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "shortHash": short } })).into_response())
+}
+
+pub async fn post_git_pull(State(st): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    pull(&repo.root).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+pub async fn post_git_push(State(st): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    push(&repo.root).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+pub async fn post_git_discard(
+    State(st): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let path = body["path"].as_str().ok_or_else(|| ApiError::BadRequest("缺少 path".into()))?;
+    discard(&repo.root, path).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+/// M4-4 提交把关台：从任务上下文 + 影响面 AI 生成提交说明（Conventional Commits 单行）。
+/// footer（EasyVibe-Task: <id>）由后端一并返回，提交时随说明写入，历史可反查任务。
+#[derive(serde::Deserialize)]
+pub(crate) struct CommitMessageRequest {
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    modules: Vec<String>,
+    #[serde(default)]
+    diff_stat: String,
+}
+
+pub async fn post_git_commit_message(
+    State(st): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<CommitMessageRequest>,
+) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let _repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+
+    let (task_ctx, footer) = match &body.task_id {
+        Some(tid) => {
+            let t = st.task_repo.get(tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
+            let summary = t.result.as_deref().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+                .and_then(|v| v["result"]["summary"].as_str().map(str::to_string));
+            let ctx = format!("任务 {}：{}\n需求描述：{}\n执行总结：{}", t.id, t.title, t.description, summary.unwrap_or_else(|| "（无）".into()));
+            (ctx, Some(format!("EasyVibe-Task: {}", t.id)))
+        }
+        None => (String::new(), None),
+    };
+
+    let message = match *st.llm_mode {
+        LlmMode::Stub => format!("chore({}): EasyVibe 汇总提交", if body.modules.is_empty() { "repo" } else { &body.modules[0] }),
+        LlmMode::Anthropic => {
+            let cfg = resolve_llm(&st, &id, "chat").await;
+            if cfg.api_key.is_empty() {
+                return Err(AppError(ApiError::BadRequest("未配置 LLM API key（设置面板或 EASYVIBE_LLM_API_KEY）".into())));
+            }
+            let system = "你是提交说明撰写助手。根据给定上下文输出一条符合 Conventional Commits 的中文提交说明：仅一行 subject（≤60 字），格式 type(scope): 描述，type 取 fix/feat/refactor/chore/docs 之一，scope 取主要模块名。只输出这一行，不要任何解释、引号或多余内容。";
+            let user = format!(
+                "改动涉及模块：{}\n任务上下文：\n{}\n变更统计（git diff --stat）：\n{}\n\n提交说明：",
+                body.modules.join("、"),
+                if task_ctx.is_empty() { "（无关联任务）" } else { &task_ctx },
+                body.diff_stat
+            );
+            let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
+            let out = easyvibe_ai_agent::LlmClient::chat(&llm, easyvibe_ai_agent::ChatRequest { system, user: &user, images: &[] }).await?;
+            out.text.trim().lines().next().unwrap_or_default().trim().to_string()
+        }
+    };
+    if message.is_empty() {
+        return Err(AppError(ApiError::Internal("LLM 未产出提交说明".into())));
+    }
+    Ok(Json(serde_json::json!({ "success": true, "data": { "message": message, "footer": footer } })).into_response())
 }
 
 #[cfg(test)]
