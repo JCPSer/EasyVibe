@@ -56,8 +56,8 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
     items: [
       { id: 'workbench', label: '开发工作台', icon: MonitorCog },
       { id: 'tasks', label: '任务', icon: ListChecks },
-      { id: 'todo', label: '我的待办', icon: ClipboardList },
-      { id: 'review', label: '评审', icon: ShieldCheck },
+      { id: 'todo', label: '任务编排', icon: ClipboardList },
+      { id: 'review', label: '任务工作流', icon: ShieldCheck },
       { id: 'changes', label: '变更记录', icon: History },
       { id: 'git', label: 'Git', icon: GitBranch },
     ],
