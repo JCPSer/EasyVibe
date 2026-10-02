@@ -151,7 +151,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
                 className={`flex-1 rounded-md py-1.5 text-[11px] font-semibold transition-colors ${
                   trust === t ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'
                 }`}
-                title={t === 'supervised' ? '风险预评估：低危直通执行，高危停在计划审批关（推荐）' : t === 'auto' ? '三道关全跳过，全程留痕' : '计划/Diff/报告三道关逐个人审'}
+                title={t === 'supervised' ? '风险预评估：低危自动过计划关，执行后停 Diff/报告两道人工关（推荐）' : t === 'auto' ? '三道关全跳过，全程留痕' : '计划/Diff/报告三道关逐个人审'}
               >
                 {t === 'supervised' ? '监督' : t === 'auto' ? '自动' : '手动'}
               </button>
@@ -165,7 +165,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
           /* S1-5：创建成功不自动消失——引导用户去任务页签跟踪审批（此前链路断在面板静默关闭） */
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-700">
-              <Check size={13} /> 任务已创建{trust === 'manual' ? '，等待计划审批' : '，自动模式直通执行'}
+              <Check size={13} /> 任务已创建{trust === 'manual' ? '，等待计划审批' : trust === 'supervised' ? '，监督模式：执行完成后将停在 Diff 审批关' : '，自动模式直通执行'}
             </p>
             <button
               onClick={() => {

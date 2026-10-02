@@ -2,7 +2,18 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { Loader2, CheckCircle2, XCircle, Clock, ShieldCheck, FileDiff, RefreshCw, Copy} from 'lucide-react'
 import { onTaskEvent, onSessionOutput } from '@/lib/growthBus'
+import { toMs } from '@/lib/diffStat'
 import type { TaskDraft } from '@/lib/taskContext'
+
+// 执行耗时：updatedAt（epoch 毫秒或 ISO）→ 人话（秒/分钟/小时分）
+function execElapsed(t: { updatedAt?: string }): string | null {
+  const ms = t.updatedAt ? toMs(t.updatedAt) : null
+  if (!ms) return null
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+  if (s < 60) return `${s} 秒`
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟`
+  return `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`
+}
 
 interface TaskResult {
   result?: { summary?: string; changed_modules?: string[] } | null
@@ -25,6 +36,7 @@ interface TaskItem {
   acceptance?: string
   result?: TaskResult | null
   createdAt: string
+  updatedAt?: string
 }
 
 interface Props {
@@ -73,6 +85,12 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
   // 改进#7：plan 关的 flagged 风险理由（supervised 高危时由后端留痕）
   const [riskNotes, setRiskNotes] = useState<Record<string, string>>({})
   const [diffLoading, setDiffLoading] = useState<string | null>(null)
+  // 盲测 P1：执行耗时 5s 跳动（黑盒期的"表"）
+  const [, setExecTick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setExecTick((v) => v + 1), 5000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -199,8 +217,8 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                   {GATE_LABEL[t.gate] ?? t.gate}
                 </span>
               )}
-              <span className={`ml-auto rounded-full px-1.5 py-px text-micro ${t.trust === 'auto' ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600'}`}>
-                {t.trust === 'auto' ? '自动' : '手动'}
+              <span className={`ml-auto rounded-full px-1.5 py-px text-micro ${t.trust === 'auto' ? 'bg-slate-100 text-slate-400' : t.trust === 'supervised' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
+                {t.trust === 'auto' ? '自动' : t.trust === 'supervised' ? '监督' : '手动'}
               </span>
             </div>
             <div className="mt-1.5 text-[12px] font-semibold leading-5 text-slate-800">{t.title}</div>
@@ -381,9 +399,13 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
             )}
             {(t.status === 'running' || t.status === 'pending') && (
               <div className="mt-1.5">
+                {/* 盲测 P1：执行期黑盒——加耗时跳动 + 最近 agent 动作行（此前只有一句"执行中"盲等 25 分钟） */}
                 <p className="flex items-center gap-1 text-micro text-blue-500">
-                  <Clock size={9} className="animate-pulse" /> agent 执行中，完成后进入下一关
+                  <Clock size={9} className="animate-pulse" /> agent 执行中{execElapsed(t) ? ` · 已用时 ${execElapsed(t)}` : ''}，完成后进入下一关
                 </p>
+                {t.sessionId && taskLines[t.sessionId]?.filter((l) => !l.startsWith('[err]')).slice(-1).map((l, i) => (
+                  <p key={i} className="mt-0.5 truncate font-mono text-micro text-slate-400" title={l}>{l.slice(0, 120)}</p>
+                ))}
                 {t.sessionId && taskLines[t.sessionId]?.filter((l) => l.startsWith('[err]')).slice(-1).map((l, i) => (
                   <p key={i} className="mt-0.5 truncate font-mono text-micro text-red-500">{l}</p>
                 ))}

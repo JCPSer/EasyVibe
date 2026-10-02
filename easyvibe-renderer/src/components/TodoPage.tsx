@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, CircleDot, Copy, Loader2, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
+import { toMs } from '@/lib/diffStat'
 import { track } from '@/lib/analytics'
 import { absTime } from '@/lib/diffStat'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -176,7 +177,11 @@ export function TodoPage({
   }
 
   const duration = (t: TodoTask) => {
-    const ms = Math.max(0, Date.parse(t.updatedAt) - Date.parse(t.createdAt))
+    // 盲测 P1：任务时间戳是 epoch 毫秒串，Date.parse 解析不出 → 曾显示"NaN 小时 NaN 分"
+    const a = toMs(t.createdAt)
+    const b = toMs(t.updatedAt)
+    if (!a || !b) return '—'
+    const ms = Math.max(0, b - a)
     if (ms <= 0) return '—'
     const min = Math.floor(ms / 60000)
     if (min < 1) return '刚刚'

@@ -99,13 +99,12 @@ impl TaskExecutor {
                         info!("[task-exec] 任务 {} 风险预评估高危，停计划关（supervised）", task.id);
                         return;
                     }
-                    self.record_approval(&task.id, "plan", "skipped", Some(&format!("监督模式风险预评估：{reason}——低危直通"))).await;
-                    for gate in ["diff", "report"] {
-                        self.record_approval(&task.id, gate, "skipped", Some("监督模式低危直通")).await;
-                    }
-                    info!("[task-exec] 任务 {} 风险预评估低危，直通执行（supervised）", task.id);
-                    // 状态机缺口修复：直通执行先把状态推进 running（此前执行期间一直 pending，
-                    // 用户以为任务没被执行——试用截图实证）
+                    // 盲测 P0 修复（docs/blind-test-2026-10-02）：低危监督此前 diff/report 两关留痕"skipped"直通，
+                    // 用户点一次"通过"后 18 个文件直接落盘——"监督与自动无法区分，核心卖点崩塌"。
+                    // 新语义：低危只自动过计划关，执行完成后必须停在 diff 关人工审 diff、
+                    // 再过报告关——三道关对监督模式真实存在（manual 是逐关前置审批，supervised 是计划关风险预评估）
+                    self.record_approval(&task.id, "plan", "skipped", Some(&format!("监督模式风险预评估：{reason}——低危，计划关自动通过"))).await;
+                    info!("[task-exec] 任务 {} 风险预评估低危，计划关自动通过；执行后停 diff 关（supervised）", task.id);
                     let _ = self.task_repo.update_status(&task.id, "running", None).await;
                     self.spawn_and_watch(task).await;
                     return;
@@ -181,7 +180,8 @@ impl TaskExecutor {
 
     /// spawn agent 并看门：终态后 manual 任务回到审批流（diff 关），auto 直接 done
     async fn spawn_and_watch(self: Arc<Self>, task: TaskRow) {
-        let trust_manual = task.trust == "manual";
+        // 盲测 P0：执行成功后需要人工把关的任务 = 非 auto（manual 全前置审批；supervised 执行后停 diff/report 关）
+        let review_after = task.trust != "auto";
         let repo = match self.map_service.find_repo(&task.repo).await {
             Some(r) => r,
             None => {
@@ -246,7 +246,7 @@ impl TaskExecutor {
                 let contract = contract.clone();
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
-                    let trust_manual = trust_manual;
+                    let review_after = review_after;
                     // L2 哨兵状态：已上报越界集合 + 巡检节拍器
                     let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
                     let sentry_every = std::cmp::max(1, sentry_interval().as_secs() / 2) as u32;
@@ -313,9 +313,10 @@ impl TaskExecutor {
                                 }
                                 let (status, gate) = if failed {
                                     ("failed", None)
-                                } else if trust_manual {
-                                    // manual：执行成功 → 回到审批流（当前 gate=diff），审批可见采集产物
-                                    ("awaiting_approval", None)
+                                } else if review_after {
+                                    // manual/supervised：执行成功 → 回到审批流（diff 关审产物；
+                                    // supervised 低危首次停此处，gate 需从 None 置为 diff）
+                                    ("awaiting_approval", Some("diff"))
                                 } else {
                                     ("done", Some("done"))
                                 };
@@ -1428,7 +1429,8 @@ mod tests {
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
             None,
         );
-        // 低危：单模块、短描述、无高危词 → 直通 done
+        // 低危（盲测 P0 新语义）：计划关自动通过，执行完成后停 diff 关等人工审批——
+        // 不再直通 done（此前 diff/report 两关留痕 skipped，监督与自动无法区分）
         let mut low = sample_task("pending");
         low.id = "task-low".into();
         low.repo = "ev-supervised-test".into();
@@ -1437,13 +1439,21 @@ mod tests {
         executor.clone().enqueue_pending(Some("ev-supervised-test")).await;
         let mut t = task_repo.get("task-low").await.unwrap().unwrap();
         for _ in 0..10 {
-            if t.status == "done" { break }
+            if t.status == "awaiting_approval" { break }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             t = task_repo.get("task-low").await.unwrap().unwrap();
         }
-        assert_eq!(t.status, "done", "低危应直通执行");
+        assert_eq!(t.status, "awaiting_approval", "低危执行完成后必须停 diff 关（盲测 P0：监督要有真审批）");
+        assert_eq!(t.gate.as_deref(), Some("diff"), "停在 diff 关");
         let aps = approvals.list_by_task("task-low").await.unwrap();
-        assert!(aps.iter().any(|a| a.decision == "skipped" && a.note.as_deref().unwrap_or("").contains("低危直通")), "低危直通须留痕带理由");
+        assert!(aps.iter().any(|a| a.decision == "skipped" && a.note.as_deref().unwrap_or("").contains("计划关自动通过")), "低危计划关自动通过须留痕带理由");
+        // diff 关通过 → 报告关；报告关通过 → done
+        executor.decide("task-low", "approved", None, Some("diff")).await.unwrap();
+        let t = task_repo.get("task-low").await.unwrap().unwrap();
+        assert_eq!((t.status.as_str(), t.gate.as_deref()), ("awaiting_approval", Some("report")), "diff 通过后停报告关");
+        executor.decide("task-low", "approved", None, Some("report")).await.unwrap();
+        let t = task_repo.get("task-low").await.unwrap().unwrap();
+        assert_eq!(t.status, "done", "报告关通过后 done");
         // 高危：多模块 + 高危词 → 停 plan 关 + flagged 留痕
         let mut high = sample_task("pending");
         high.id = "task-high".into();

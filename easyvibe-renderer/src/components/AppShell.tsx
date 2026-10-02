@@ -98,7 +98,7 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
           + 空白 mousedown → startDragging（权限已开）；双击空白 → 最大化/还原 */}
       <header
         data-tauri-drag-region
-        className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3"
+        className="glass z-20 flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 px-3"
         onMouseDown={(e) => {
           if (e.button !== 0) return
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return

@@ -1599,7 +1599,7 @@ export default function App() {
                 track(d.repo, 'ui.contractAlert.click', { taskId: d.taskId })
                 handlePageChange('review')
               },
-            })
+            }, true)
             if (document.hidden) notifySystem('EasyVibe · 影响面预警', `任务 ${d.taskId} 正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.contractViolated') {
@@ -1614,7 +1614,7 @@ export default function App() {
                 track(d.repo, 'ui.contractViolated.click', { taskId: d.taskId })
                 handlePageChange('review')
               },
-            })
+            }, true)
             if (document.hidden) notifySystem('EasyVibe · 影响面越界', `任务 ${d.taskId} 越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.statusChanged') {
