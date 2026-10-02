@@ -239,6 +239,17 @@ impl TaskExecutor {
                 let session_id = session.session_id.clone();
                 let _ = self.task_repo.set_session(&task.id, &session_id).await;
                 info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);
+                // 终端直播命脉：set_session 后立刻广播——前端此刻才拿得到 sessionId，
+                // 按它过滤 session.output；不发事件 = 前端列表停在旧快照（sessionId=null），
+                // 终端永远收不到行（2026-10-03 实弹 bug：执行中终端一直"等待 agent 输出"）
+                if let Some(tx) = &self.events {
+                    crate::publish(tx, crate::BusEvent::TaskStatus {
+                        repo: task.repo.clone(),
+                        task_id: task.id.clone(),
+                        status: "running".into(),
+                        gate: None,
+                    });
+                }
                 let this = self.clone();
                 let task_id = task.id.clone();
                 let repo_name = task.repo.clone();
