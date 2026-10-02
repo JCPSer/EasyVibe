@@ -502,6 +502,59 @@ pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
         .or_else(|| easyvibe_ai_agent::extract_json(payload).ok())
 }
 
+// ---------- 影响面合约（战略审查第一 P0：任务声明的模块从注释升级为确定性边界） ----------
+
+/// 路径是否落在合约 glob 范围内——与前端 moduleOfFile 严格同口径：
+/// 取 glob 的 `**` 前前缀、去尾斜杠，前缀匹配或路径段包含即命中。零 LLM，确定性。
+pub fn path_within_contract(path: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|g| {
+        let base = match g.find("**") {
+            Some(i) => &g[..i],
+            None => g.as_str(),
+        };
+        let base = base.trim_end_matches('/');
+        !base.is_empty() && (path.starts_with(base) || path.contains(&format!("/{base}/")))
+    })
+}
+
+/// 从任务 context 提取影响面合约（创建任务时由模块展开写入；无合约返回空 = 不约束）
+pub fn contract_patterns_from_context(context_json: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(context_json)
+        .ok()
+        .and_then(|v| v["contract"]["patterns"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| p.as_str().map(str::to_string))
+        .collect()
+}
+
+/// 工作区全部变更文件（porcelain：M/A/D/R/?? 全覆盖——diff --stat 漏未跟踪文件，
+/// 而 agent 新建文件正是最常见的越界形态）。非 git 仓库返回空。
+pub async fn changed_files(repo_root: &std::path::Path) -> Vec<String> {
+    let out = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        // -uall：未跟踪文件逐个列出（默认折叠成目录条目 "stray/"，越界检测会漏文件级路径）
+        tokio::process::Command::new("git").args(["status", "--porcelain=v1", "-uall"]).current_dir(repo_root).output(),
+    )
+    .await
+    {
+        Ok(Ok(o)) if o.status.success() => o,
+        _ => return vec![],
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let rest = l.get(3..)?.trim();
+            if rest.is_empty() {
+                return None;
+            }
+            // 重命名 "old -> new" 取新路径（与前端 parse_porcelain 同口径）
+            let p = rest.split_once(" -> ").map(|(_, to)| to.trim()).unwrap_or(rest);
+            Some(p.trim_matches('"').to_string())
+        })
+        .collect()
+}
+
 /// git 变更摘要（diff 关供料）：`git diff --stat`（已跟踪改动）+ `git status --porcelain`
 /// （未跟踪新文件）。非 git 仓库返回 None——git 是增强项不是硬依赖（设计定稿）。
 pub async fn git_change_summary(repo_root: &std::path::Path, base: Option<&str>) -> Option<String> {
@@ -595,6 +648,29 @@ pub async fn collect_task_result(
     if parsed.is_none() {
         warnings.push("agent 未输出 [EASYVIBE-RESULT] 归档行——执行可能未按协议完成，审批时请核对 diff 是否为本任务改动".into());
     }
+    // 影响面合约：越界写文件 = 红线（注入式护栏哲学——不阻断，但审批人必须看见）。
+    // 确定性校验：porcelain 全量变更文件 × 创建时展开的模块 glob，零 LLM。
+    let task_ctx = task_repo.get(task_id).await.ok().flatten().map(|t| t.context).unwrap_or_default();
+    let contract = contract_patterns_from_context(&task_ctx);
+    // 产品自身 bookkeeping（.easyvibe/ 归档/地图产物）不属于 agent 改动——排除出合约校验
+    let contract_violations: Vec<String> = if contract.is_empty() {
+        vec![]
+    } else {
+        changed_files(repo_root)
+            .await
+            .into_iter()
+            .filter(|p| !p.starts_with(".easyvibe/"))
+            .filter(|p| !path_within_contract(p, &contract))
+            .collect()
+    };
+    if !contract_violations.is_empty() {
+        let preview: Vec<String> = contract_violations.iter().take(5).cloned().collect();
+        warnings.push(format!(
+            "影响面合约：{} 个文件越出任务声明的模块边界——{}（diff 关须逐条确认或驳回）",
+            contract_violations.len(),
+            preview.join("、")
+        ));
+    }
     let mut archive = serde_json::json!({
         "taskId": task_id,
         "sessionId": session_id,
@@ -603,6 +679,7 @@ pub async fn collect_task_result(
         "diffStat": diff_stat,
         "diffFull": diff_full,
         "warnings": warnings,
+        "contractViolations": contract_violations,
         "archivedPath": serde_json::Value::Null,
     });
     let dir = repo_root.join(".easyvibe/development_docs");
@@ -733,6 +810,72 @@ mod tests {
         assert!(!h3.framework_transparent.contains("拷问"), "出厂底账透明装配仍须中和");
         assert_eq!(h3.user_entry_skills.len(), 1, "出厂底账 user_entry=grill-me");
         assert!(dir3.join("rule_development.md").exists(), "规则正文应补齐");
+    }
+
+    #[test]
+    fn contract_matcher_matches_frontend_semantics() {
+        // 影响面合约：与前端 moduleOfFile 同口径——** 前缀匹配 + 路径段包含
+        let pats = vec!["src/core/**".to_string(), "src/ui".to_string()];
+        assert!(path_within_contract("src/core/a/b.ts", &pats));
+        assert!(path_within_contract("lib/src/core/x.ts", &pats), "路径段包含命中");
+        assert!(path_within_contract("src/ui/Button.tsx", &pats));
+        assert!(!path_within_contract("src/other/c.ts", &pats));
+        assert!(!path_within_contract("README.md", &pats));
+        // 空合约 = 不约束（未声明模块的任务不校验）
+        assert!(!path_within_contract("anything", &[]));
+        // context 提取
+        let ctx = r#"{"contract":{"patterns":["a/**","b"]}}"#;
+        assert_eq!(contract_patterns_from_context(ctx), vec!["a/**".to_string(), "b".to_string()]);
+        assert!(contract_patterns_from_context("{}").is_empty());
+    }
+
+    #[tokio::test]
+    async fn contract_violations_detected_at_collection() {
+        // 影响面合约实弹：声明 allowed/**，agent 改了界内文件 + 越界新文件（未跟踪）——
+        // 未跟踪必须被 porcelain 捕获（diff --stat 会漏，新建文件恰是最常见越界形态）
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let sessions = SessionManager::new(tx);
+        let db = easyvibe_db::Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let repo = std::env::temp_dir().join("ev-contract-test");
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(repo.join("allowed")).unwrap();
+        std::fs::create_dir_all(repo.join("stray")).unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("allowed/base.txt"), "1\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        let mut task = sample_task("running");
+        task.id = "task-contract".into();
+        task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
+        task_repo.create(&task).await.unwrap();
+
+        // 界内修改 + 越界未跟踪新文件
+        std::fs::write(repo.join("allowed/base.txt"), "1\n2\n").unwrap();
+        std::fs::write(repo.join("stray/out.txt"), "oops\n").unwrap();
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract", &task_repo).await.expect("有 diff 即应采集");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let viol = v["contractViolations"].as_array().expect("必须有越界列表");
+        assert_eq!(viol.len(), 1, "allowed/base.txt 界内、stray/out.txt 越界: {viol:?}");
+        assert_eq!(viol[0].as_str().unwrap(), "stray/out.txt");
+        assert!(
+            v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("影响面合约")),
+            "warnings 必须亮红线: {v}"
+        );
+        // 界内任务零误报
+        std::fs::remove_file(repo.join("stray/out.txt")).unwrap();
+        let mut clean = sample_task("running");
+        clean.id = "task-contract-clean".into();
+        clean.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
+        task_repo.create(&clean).await.unwrap();
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", &task_repo).await.expect("有 diff 即应采集");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["contractViolations"].as_array().unwrap().is_empty(), "界内改动零误报: {v}");
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[tokio::test]

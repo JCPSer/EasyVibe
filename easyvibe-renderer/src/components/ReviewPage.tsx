@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock, Copy, ClipboardList } from 'lucide-react'
+import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock, Copy, ClipboardList, ShieldAlert } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime } from '@/lib/diffStat'
@@ -20,7 +20,7 @@ interface TaskItem {
   trust: string
   modules?: string[]
   acceptance?: string
-  result?: { diffStat?: string } | null
+  result?: { diffStat?: string; contractViolations?: string[]; warnings?: string[] } | null
 }
 
 interface Approval {
@@ -333,6 +333,22 @@ export function ReviewPage({
                     </div>
                   )}
                   {sel.acceptance && <p className="mt-1.5 text-micro leading-4 text-slate-400">验收：{sel.acceptance}</p>}
+                </div>
+              )}
+              {/* 影响面合约红线：越界文件清单（创建任务声明的模块 = 确定性边界；不拦截，审批人必见） */}
+              {(sel.result?.contractViolations?.length ?? 0) > 0 && (
+                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                  <p className="flex items-center gap-1 text-micro font-bold text-red-600">
+                    <ShieldAlert size={10} /> 影响面合约：{sel.result!.contractViolations!.length} 个文件越出声明边界
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {sel.result!.contractViolations!.slice(0, 5).map((v) => (
+                      <li key={v} className="mono truncate text-micro text-red-500">{v}</li>
+                    ))}
+                  </ul>
+                  {sel.result!.contractViolations!.length > 5 && (
+                    <p className="text-micro mt-0.5 text-red-400">等 {sel.result!.contractViolations!.length} 个</p>
+                  )}
                 </div>
               )}
             </div>

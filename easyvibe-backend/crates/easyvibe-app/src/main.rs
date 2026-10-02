@@ -993,6 +993,34 @@ struct CreateTaskRequest {
     conversation_id: Option<String>,
 }
 
+/// 影响面合约展开：声明模块 → 其 files glob 边界（地图缺失/模块未命中时静默不约束——
+/// 合约是增强护栏不是准入门槛，与"提示不拦截"哲学一致）
+async fn task_ctx_with_contract(
+    st: &AppState,
+    repo: &easyvibe_map::Repo,
+    modules: &[String],
+    mut ctx: serde_json::Value,
+) -> serde_json::Value {
+    if modules.is_empty() {
+        return ctx;
+    }
+    let Ok(snap) = st.map_service.load_map(repo).await else { return ctx };
+    let mut patterns: Vec<String> = vec![];
+    if let Some(mods) = snap.json["modules"].as_array() {
+        for mid in modules {
+            if let Some(m) = mods.iter().find(|m| m["id"].as_str() == Some(mid.as_str())) {
+                if let Some(files) = m["files"].as_array() {
+                    patterns.extend(files.iter().filter_map(|f| f.as_str().map(str::to_string)));
+                }
+            }
+        }
+    }
+    if !patterns.is_empty() {
+        ctx["contract"] = serde_json::json!({ "modules": modules, "patterns": patterns });
+    }
+    ctx
+}
+
 async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateTaskRequest>) -> Result<Response, AppError> {
     use easyvibe_db::TaskRepository as _;
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
@@ -1010,7 +1038,9 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         modules: serde_json::to_string(&body.modules).unwrap_or_else(|_| "[]".into()),
         acceptance: body.acceptance,
         source: if body.source.is_empty() { "manual".into() } else { body.source },
-        context: serde_json::to_string(&body.context).unwrap_or_else(|_| "{}".into()),
+        // 影响面合约（战略审查第一 P0）：声明的模块在创建时展开为 glob 边界写入 context——
+        // 终态采集对全部变更文件做确定性越界校验（task_exec::collect_task_result），零 LLM。
+        context: serde_json::to_string(&task_ctx_with_contract(&st, &repo, &body.modules, body.context.clone()).await).unwrap_or_else(|_| "{}".into()),
         status: "pending".into(), // M3-3：harness 执行引擎接走
         trust: match body.trust.as_str() {
             "auto" => "auto".into(),
