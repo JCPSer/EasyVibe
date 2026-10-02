@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, History, ShieldCheck } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, FileDiff, History, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/lib/diffStat'
 import type { CodeMap } from '@/types/map'
@@ -60,6 +60,20 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
   const [selected, setSelected] = useState<string | null>(null)
   // 审批记录带任务 id 快照，切换选中项时天然丢弃旧数据（避免 effect 内同步 setState）
   const [approvalsFor, setApprovalsFor] = useState<{ taskId: string; list: Approval[] } | null>(null)
+  // 回放（审查 2 欠账）：按需拉取完整 diff 原文，同审批记录的 taskId 快照模式
+  const [diffFor, setDiffFor] = useState<{ taskId: string; text: string | null; loading: boolean } | null>(null)
+
+  const loadDiff = async (taskId: string) => {
+    if (!backendRepo) return
+    setDiffFor({ taskId, text: null, loading: true })
+    try {
+      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(taskId)}/diff`)
+      const d = await r.json().catch(() => null)
+      setDiffFor({ taskId, text: d?.data?.diff ?? null, loading: false })
+    } catch {
+      setDiffFor({ taskId, text: null, loading: false })
+    }
+  }
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -354,6 +368,47 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                     ))}
                   </div>
                 )}
+
+                {/* 回放：完整 diff 原文（按需加载，首屏 400 行） */}
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-cap font-bold text-slate-400">回放</p>
+                    {diffFor?.taskId !== sel.id && (
+                      <button
+                        onClick={() => loadDiff(sel.id)}
+                        className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                      >
+                        <FileDiff size={10} /> 查看改动原文
+                      </button>
+                    )}
+                  </div>
+                  {diffFor?.taskId === sel.id &&
+                    (diffFor.loading ? (
+                      <p className="text-micro mt-2 text-slate-300">加载中…</p>
+                    ) : diffFor.text ? (
+                      <pre className="mono text-cap mt-2 max-h-72 overflow-auto rounded-md bg-slate-50 p-2.5 leading-4">
+                        {diffFor.text.split('\n').slice(0, 400).map((line, i) => (
+                          <div
+                            key={i}
+                            className={
+                              line.startsWith('+') && !line.startsWith('+++')
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : line.startsWith('-') && !line.startsWith('---')
+                                  ? 'bg-red-50 text-red-600'
+                                  : 'text-slate-600'
+                            }
+                          >
+                            {line || ' '}
+                          </div>
+                        ))}
+                        {diffFor.text.split('\n').length > 400 && (
+                          <div className="text-micro py-1 text-center text-slate-400">（仅显示前 400 行，完整内容在评审页查看）</div>
+                        )}
+                      </pre>
+                    ) : (
+                      <p className="text-micro mt-2 text-slate-300">该任务没有可回放的改动（可能未产生 diff 或尚未归档）。</p>
+                    ))}
+                </div>
               </div>
             )}
           </aside>

@@ -1843,10 +1843,10 @@ export default function App() {
         icon={ClipboardList}
       />
     ),
-    review: <ReviewPage backendRepo={backendRepo} map={map} />,
+    review: <ReviewPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
-    health: <HealthPage backendRepo={backendRepo} map={map} />,
+    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} />,
     modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,
     deps: (
       <PlaceholderPage

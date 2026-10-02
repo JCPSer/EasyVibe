@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp } from 'lucide-react'
+import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 import { absTime } from '@/lib/diffStat'
+import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
@@ -70,7 +71,16 @@ function Delta({ now, prev }: { now: number; prev: number | null }) {
   )
 }
 
-export function HealthPage({ backendRepo, map }: { backendRepo: string | null; map: CodeMap | null }) {
+export function HealthPage({
+  backendRepo,
+  map,
+  onCreateTask,
+}: {
+  backendRepo: string | null
+  map: CodeMap | null
+  /** 把关台范式：排行行内直接派单修复（TaskDraft → 全局任务表单） */
+  onCreateTask: (d: TaskDraft) => void
+}) {
   const [data, setData] = useState<Dashboard | null>(null)
   const [loading, setLoading] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -216,13 +226,23 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
           <p className="mb-2 text-[13px] font-bold text-slate-700">模块健康排行</p>
           <div className="space-y-1">
             {(data?.latestModules ?? []).slice(0, 10).map((m, i) => (
-              <div key={m.moduleId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+              <div key={m.moduleId} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
                 <span className="tnum w-4 text-micro text-slate-300">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-[12px] text-slate-600">{m.name ?? m.moduleId}</span>
+                {/* 把关台范式：健康问题就地派单（buildModuleTask 带 concern 描述与验收标准） */}
+                {map && (
+                  <button
+                    onClick={() => onCreateTask(buildModuleTask(map, m.moduleId))}
+                    className="shrink-0 rounded-md p-1 text-slate-200 transition-colors hover:bg-blue-50 hover:text-blue-600 group-hover:text-slate-300"
+                    title={`发起修复：${m.name ?? m.moduleId}`}
+                  >
+                    <Wrench size={11} />
+                  </button>
+                )}
                 <div className="relative">
                   <Ring score={m.score} size={26} />
                   <span
-                    className="tnum absolute inset-0 flex items-center justify-center text-[8px] font-bold"
+                    className="tnum absolute inset-0 flex items-center justify-center text-micro font-bold"
                     style={{ color: healthColor(m.score) }}
                   >
                     {m.score}

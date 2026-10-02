@@ -757,7 +757,7 @@ function CommitHistory({ commits, moduleList }: { commits: GitLogRow[]; moduleLi
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <span
-                    className="flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-extrabold text-white"
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-micro font-extrabold text-white"
                     style={{ backgroundColor: avatarColor(c.author) }}
                   >
                     {c.author.slice(0, 2).toUpperCase()}

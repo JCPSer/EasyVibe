@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock } from 'lucide-react'
+import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock, Copy } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import type { CodeMap } from '@/types/map'
+import type { TaskDraft } from '@/lib/taskContext'
 
 // M4-2 评审中心整页（按 ui-mockups/审批中心原型.png 施工）：
 // 左列待审批任务（徽标=待审批数）｜右列三道关进度 + 双栏 Diff（文件索引｜diff 内容）
@@ -16,6 +17,8 @@ interface TaskItem {
   status: string
   gate: string | null
   trust: string
+  modules?: string[]
+  acceptance?: string
   result?: { diffStat?: string } | null
 }
 
@@ -42,13 +45,24 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: '已驳回',
 }
 
-export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; map: CodeMap }) {
+export function ReviewPage({
+  backendRepo,
+  map,
+  onCreateTask,
+}: {
+  backendRepo: string | null
+  map: CodeMap
+  /** 把关台范式：驳回不=任务死亡——以此为基础复制新任务（D3 拍板语义） */
+  onCreateTask: (d: TaskDraft) => void
+}) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  const [approvals, setApprovals] = useState<Approval[]>([])
-  const [diffFull, setDiffFull] = useState<string | null>(null)
-  const [diffStat, setDiffStat] = useState<string | null>(null)
-  const [activeFile, setActiveFile] = useState<string | null>(null)
+  // 详情快照（ChangesPage 同模式）：切换任务时旧数据天然失效，effect 内不再有同步 setState
+  const [detailFor, setDetailFor] = useState<{ taskId: string; approvals: Approval[]; diffFull: string | null; diffStat: string | null } | null>(null)
+  // 当前选中文件的渲染期派生状态（React 官方模式：切任务即重置）
+  const [fileSel, setFileSel] = useState<{ taskId: string | null; file: string | null }>({ taskId: null, file: null })
+  const selKey = selected
+  if (fileSel.taskId !== selKey) setFileSel({ taskId: selKey, file: null })
   const [deciding, setDeciding] = useState<string | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [rejecting, setRejecting] = useState(false)
@@ -74,28 +88,29 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
   const sel = tasks?.find((t) => t.id === selected) ?? null
 
   useEffect(() => {
-    if (!backendRepo || !sel) {
-      setApprovals([])
-      setDiffFull(null)
-      setDiffStat(null)
-      setActiveFile(null)
-      return
-    }
-    fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(sel.id)}/approvals`)
+    if (!backendRepo || !sel) return
+    const tid = sel.id
+    const apply = (patch: Partial<NonNullable<typeof detailFor>>) =>
+      setDetailFor((prev) => (prev && prev.taskId === tid ? { ...prev, ...patch } : { taskId: tid, approvals: [], diffFull: null, diffStat: null, ...patch }))
+    fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(tid)}/approvals`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: Approval[] } | null) => setApprovals(d?.data ?? []))
-      .catch(() => setApprovals([]))
-    fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(sel.id)}/diff`)
+      .then((d: { data?: Approval[] } | null) => apply({ approvals: d?.data ?? [] }))
+      .catch(() => {})
+    fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(tid)}/diff`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { diff?: string | null; diffStat?: string | null } } | null) => {
-        setDiffFull(d?.data?.diff ?? null)
-        setDiffStat(d?.data?.diffStat ?? null)
-      })
-      .catch(() => {
-        setDiffFull(null)
-        setDiffStat(null)
-      })
+      .then((d: { data?: { diff?: string | null; diffStat?: string | null } } | null) =>
+        apply({ diffFull: d?.data?.diff ?? null, diffStat: d?.data?.diffStat ?? null }),
+      )
+      .catch(() => {})
+    // 过期响应防护：快照按 taskId 归属，切换后旧响应落在旧 taskId 上、渲染端不读
   }, [backendRepo, sel?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 渲染端按当前选中任务取值（快照不匹配 = 加载中）
+  const detail = sel && detailFor?.taskId === sel.id ? detailFor : null
+  const approvals = detail?.approvals ?? []
+  const diffFull = detail?.diffFull ?? null
+  const diffStat = detail?.diffStat ?? null
+  const activeFile = fileSel.taskId === selKey ? fileSel.file : null
 
   // 双栏 Diff：解析 unified diff 的文件索引
   const files = useMemo(() => {
@@ -234,6 +249,25 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                     {STATUS_LABEL[sel.status] ?? sel.status}
                   </span>
                 )}
+                {/* 把关台范式：驳回不=任务死亡——以此为基础复制新任务，原驳回记录保留可追溯 */}
+                {sel.status === 'rejected' && (
+                  <button
+                    onClick={() =>
+                      onCreateTask({
+                        title: `${sel.title}（重提）`,
+                        description: sel.description,
+                        modules: sel.modules ?? [],
+                        acceptance: sel.acceptance ?? '',
+                        source: 'manual',
+                        context: {},
+                      })
+                    }
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                    title="以本任务为模板创建新任务（原驳回记录保留）"
+                  >
+                    <Copy size={9} /> 复制为新任务
+                  </button>
+                )}
               </div>
               {/* 三道关：每关的决策状态（含报告锁态——报告门审批后锁定） */}
               <div className="mt-2 flex items-center gap-1">
@@ -275,7 +309,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                   {files.map((f) => (
                     <button
                       key={f}
-                      onClick={() => setActiveFile(f === activeFile ? null : f)}
+                      onClick={() => setFileSel((fs) => ({ taskId: selKey, file: fs.file === f ? null : f }))}
                       className={`block w-full truncate rounded px-1.5 py-1 text-left font-mono text-micro ${
                         f === activeFile ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'
                       }`}
