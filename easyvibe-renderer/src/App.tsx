@@ -40,7 +40,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, setWsCloseListener } from '@/lib/growthBus'
+import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
@@ -580,23 +580,45 @@ function Canvas({
     return () => window.removeEventListener('keydown', onKey)
   }, [filters.solo])
 
-  // 改进#2：订阅 agent 输出流，按会话保留最近 4 行
-  useEffect(
-    () =>
-      onSessionOutput((e) => {
-        setAgentLines((prev) => {
-          const cur = prev[e.sessionId] ?? []
-          return { ...prev, [e.sessionId]: [...cur.slice(-3), e.line] }
-        })
-      }),
-    [],
-  )
+  // 改进#2：订阅 agent 输出流，按会话保留最近 4 行。
+  // P1 审查 2#13 性能修复：此前每个 stdout 行都 setAgentLines → buildFlow 全量重建（布局重算+全图闪烁）。
+  // 现在两道闸：① 只接收"当前在地图上可见的子图分析会话"的行（任务执行的输出 TaskPanel 自己订阅）；
+  // ② 500ms 尾随节流合并突发（分析高峰时行率可达数行/秒）。
+  const submapSessionsRef = useRef<Record<string, string>>({})
+  const agentBufferRef = useRef<Record<string, string[]>>({})
+  const agentFlushTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    submapSessionsRef.current = submapSessions
+    // 分析结束/重试的会话：其输出行不再展示，缓冲与状态同步剪枝
+    const alive = new Set(Object.values(submapSessions))
+    agentBufferRef.current = Object.fromEntries(Object.entries(agentBufferRef.current).filter(([k]) => alive.has(k)))
+    setAgentLines((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([k]) => alive.has(k)))
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    })
+  }, [submapSessions])
+  useEffect(() => {
+    const flush = () => {
+      agentFlushTimerRef.current = undefined
+      const buf = agentBufferRef.current
+      if (Object.keys(buf).length === 0) return
+      setAgentLines({ ...buf })
+    }
+    return onSessionOutput((e) => {
+      const visible = Object.values(submapSessionsRef.current).includes(e.sessionId)
+      if (!visible) return
+      const cur = agentBufferRef.current[e.sessionId] ?? []
+      agentBufferRef.current[e.sessionId] = [...cur.slice(-3), e.line]
+      if (agentFlushTimerRef.current === undefined) {
+        agentFlushTimerRef.current = window.setTimeout(flush, 500)
+      }
+    })
+  }, [])
 
   // S2：地图保鲜——启动拉一次 + WS freshness.changed 增量（git 有新提交而地图未更新）
   useEffect(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/freshness`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    fetch(`/api/repos/${backendRepo}/freshness`)      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { status: string; commitsSinceMap?: number | null } }) => {
         setFreshness(d.data.status === 'fresh' ? null : d.data.status)
         setFreshnessInfo({ commitsSinceMap: d.data.commitsSinceMap })
@@ -1333,6 +1355,25 @@ export default function App() {
     initUpdater()
   }, [])
 
+  // P1 审查 2#16：AppShell 徽标曾是被定义却从不传入的死功能——
+  // 待审批计数实时接通：初始拉取 + WS 任务事件驱动（信息架构明写"评审（徽标）"）
+  const [pendingApprovals, setPendingApprovals] = useState(0)
+  useEffect(() => {
+    if (!backendRepo) {
+      setPendingApprovals(0)
+      return
+    }
+    const load = () =>
+      fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { data?: { status: string }[] } | null) =>
+          setPendingApprovals((d?.data ?? []).filter((t) => t.status === 'awaiting_approval').length),
+        )
+        .catch(() => {})
+    load()
+    return onTaskEvent(load)
+  }, [backendRepo])
+
   // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
   const [page, setPage] = useState<PageId>('map')
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
@@ -1832,7 +1873,7 @@ export default function App() {
   return (
     <>
       <CanvasBoundary>
-        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar}>
+        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} badges={{ review: pendingApprovals || undefined }}>
           {PAGES[page]}
         </AppShell>
       </CanvasBoundary>

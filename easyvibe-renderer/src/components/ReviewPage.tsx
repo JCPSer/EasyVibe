@@ -117,6 +117,15 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
     return hit ?? diffFull
   }, [diffFull, activeFile])
 
+  // P1 审查 2#14 性能：超大 diff 全量渲染 = 上万 DOM 节点。首屏渲染前 600 行，渐进展开。
+  const DIFF_PAGE = 600
+  // 切换文件时重置展开进度——渲染期派生状态（React 官方模式，避免 effect 内同步 setState）
+  const [diffState, setDiffState] = useState<{ src: string | null; limit: number }>({ src: null, limit: DIFF_PAGE })
+  if (diffState.src !== activeDiff) setDiffState({ src: activeDiff, limit: DIFF_PAGE })
+  const diffLimit = diffState.limit
+  const diffLines = useMemo(() => (activeDiff ? activeDiff.split('\n') : []), [activeDiff])
+  const visibleDiffLines = diffLines.slice(0, diffLimit)
+
   // 模块聚合影响面（与 WorkbenchPage 同口径）
   const impact = useMemo(() => {
     if (!diffStat) return []
@@ -280,7 +289,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                 <div className="min-w-0 flex-1 overflow-auto bg-white p-3">
                   {activeDiff ? (
                     <pre className="mono text-cap leading-4">
-                      {activeDiff.split('\n').map((line, i) => (
+                      {visibleDiffLines.map((line, i) => (
                         <div
                           key={i}
                           className={
@@ -294,6 +303,14 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                           {line || ' '}
                         </div>
                       ))}
+                      {diffLines.length > diffLimit && (
+                        <button
+                          onClick={() => setDiffState((s) => ({ ...s, limit: s.limit + DIFF_PAGE }))}
+                          className="mt-1 w-full rounded-md border border-dashed border-slate-200 py-1 text-cap font-semibold text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                        >
+                          还有 {diffLines.length - diffLimit} 行，点击加载更多
+                        </button>
+                      )}
                     </pre>
                   ) : (
                     <p className="py-8 text-center text-[11px] text-slate-400">
