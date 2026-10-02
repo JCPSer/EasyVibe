@@ -94,11 +94,13 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       {/* 自绘标题栏（multica/Electron hiddenInset 范式）：原生红绿灯悬浮左上（Overlay），
-          前端留 76px 净空。拖拽 = 整栏非交互空白 mousedown → startDragging；
-          双击空白 → 最大化/还原（系统级双击标题行为） */}
+          前端留 76px 净空。拖拽双保险：data-tauri-drag-region（Tauri 原生命中测试，免 IPC）
+          + 空白 mousedown → startDragging（权限已开）；双击空白 → 最大化/还原 */}
       <header
+        data-tauri-drag-region
         className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3"
         onMouseDown={(e) => {
+          if (e.button !== 0) return
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
           if (!isTauriRuntime()) return
           import('@tauri-apps/api/window').then((m) => m.getCurrentWindow().startDragging()).catch(() => {})
