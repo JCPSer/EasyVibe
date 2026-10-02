@@ -8,3 +8,6 @@ node_modules/
 
 # 本地参考材料（第三方仓库/文档，不入库）
 reference/
+
+# EasyVibe 自身产物（自托管测试用）
+.easyvibe/
