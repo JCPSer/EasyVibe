@@ -28,12 +28,12 @@ import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
 import { WorkbenchPage } from '@/components/WorkbenchPage'
-import { ReviewPage } from '@/components/ReviewPage'
+import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
 import { DriftPage } from '@/components/DriftPage'
 import { HealthPage } from '@/components/HealthPage'
 import { ChangesPage } from '@/components/ChangesPage'
 import { GitPage } from '@/components/GitPage'
-import { TodoPage } from '@/components/TodoPage'
+import { TaskBoardPage } from '@/components/TaskBoardPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -42,6 +42,7 @@ import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
+import { pushTerminalLine } from '@/lib/terminalBuffer'
 import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
@@ -1577,6 +1578,9 @@ export default function App() {
           }
           if (msg.name === 'session.output') {
             emitSessionOutput({ sessionId: msg.data.sessionId, line: msg.data.line })
+            // 方案 v3 §4.2：终端推送挂在常驻的 App 层（页面卸载也在攒）——
+            // 工作流页的终端缓冲因此切走再回来不丢
+            pushTerminalLine(msg.data.sessionId, msg.data.line)
           }
           if (msg.name === 'patrol.finished') {
             // R3 C1：巡检终态成为产品事件（真实模式会话 id 是 ind-N，靠事件而非前缀判定）
@@ -1919,8 +1923,8 @@ export default function App() {
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
     workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onLocateModule={() => handlePageChange('map')} />,
-    todo: <TodoPage backendRepo={backendRepo} onOpenReview={() => handlePageChange('review')} onCreateTask={openTaskDraft} />,
-    review: <ReviewPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    todo: <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => handlePageChange('review')} onCreateTask={openTaskDraft} />,
+    review: <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
     health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,

@@ -134,6 +134,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
+        .route("/repos/{id}/dev-docs", get(get_dev_docs))
         .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
@@ -936,6 +937,74 @@ async fn get_task_diff(State(st): State<AppState>, Path((id, tid)): Path<(String
         "data": { "diff": v["diffFull"], "diffStat": v["diffStat"] }
     }))
     .into_response())
+}
+
+/// 任务产物文档（方案 v3 §4.4）：扫描 .easyvibe/development_docs/**，按任务时间窗过滤。
+/// 右端规则（复审意见落地）：running/pending 任务用 now()——updatedAt 在 running 期间
+/// 不刷新，用它当右端会把执行期写出的文档全部漏掉；终态用 updatedAt+10min。
+/// excerpt 按 char 边界截 200 字（禁按字节切多字节字符）；*.json 归档与索引类
+/// （INDEX-/MEMORY-/operation-）单独归类，不进文档卡。
+async fn get_dev_docs(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let tid = q.get("taskId").cloned().unwrap_or_default();
+    let task = st.task_repo.get(&tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
+    let docs_root = repo.root.join(".easyvibe/development_docs");
+    if !docs_root.is_dir() {
+        return Ok(Json(serde_json::json!({ "success": true, "data": { "docs": [], "indices": [] } })).into_response());
+    }
+    // 任务时间戳是 epoch 毫秒串（与 toMs/try_advance_gate 同一口径）
+    let parse_ms = |s: &str| s.parse::<i64>().ok().unwrap_or(0);
+    let left = parse_ms(&task.created_at) - 10 * 60_000;
+    let right = if task.status == "running" || task.status == "pending" {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(i64::MAX)
+    } else {
+        parse_ms(&task.updated_at) + 10 * 60_000
+    };
+    let mut docs: Vec<serde_json::Value> = vec![];
+    let mut indices: Vec<serde_json::Value> = vec![];
+    let mut stack: Vec<std::path::PathBuf> = vec![docs_root.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            if !name.ends_with(".md") {
+                continue; // *.json 任务归档与 harness 文档混处（task_exec.rs collect），不进文档卡
+            }
+            let mtime_ms = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            if mtime_ms < left || mtime_ms > right {
+                continue;
+            }
+            let rel = p.strip_prefix(&repo.root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+            let is_index = name.starts_with("INDEX-") || name.starts_with("MEMORY-") || name.starts_with("operation-");
+            let item = serde_json::json!({ "name": name, "path": rel, "mtime": mtime_ms });
+            if is_index {
+                indices.push(item);
+                continue;
+            }
+            let excerpt = std::fs::read_to_string(&p)
+                .map(|s| s.chars().take(200).collect::<String>())
+                .unwrap_or_default();
+            docs.push(serde_json::json!({ "name": name, "path": rel, "mtime": mtime_ms, "excerpt": excerpt }));
+        }
+    }
+    docs.sort_by(|a, b| b["mtime"].as_i64().unwrap_or(0).cmp(&a["mtime"].as_i64().unwrap_or(0)));
+    Ok(Json(serde_json::json!({ "success": true, "data": { "docs": docs, "indices": indices } })).into_response())
 }
 
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），

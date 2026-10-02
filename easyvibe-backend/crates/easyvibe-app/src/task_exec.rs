@@ -396,6 +396,8 @@ pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
 
 /// 出厂 harness 只读底账：编译期内嵌（§12c 决策——reference/ 只是构建源，运行时唯一
 /// 生效副本是数据目录的用户可编辑层；"改哪份才生效"的二义就此消灭）
+/// 注意：内嵌的仍是 reference/ 原稿（含 .claude 路径）——换姓发生在写盘时
+/// （adapt_builtin_content），原稿保持用户参考材料原样不动
 pub const BUILTIN_HARNESS: &[(&str, &str)] = &[
     ("manifest.json", include_str!("../../../../reference/manifest.json")),
     ("inject-prompt.md", include_str!("../../../../reference/inject-prompt.md")),
@@ -403,6 +405,39 @@ pub const BUILTIN_HARNESS: &[(&str, &str)] = &[
     ("rule_bugfix.md", include_str!("../../../../reference/rule_bugfix.md")),
     ("skills/grill-me/SKILL.md", include_str!("../../../../reference/grill-me/SKILL.md")),
 ];
+
+/// harness 产物路径换姓（方案 v3 §4.4）：三种 .claude 形态 → .easyvibe 自有路径。
+/// 顺序敏感：先长后短，`<user_name>` 兜底最后；`~/.claude/hooks/` 是受保护的
+/// load 时替换锚点（task_exec.rs load_harness_from），换姓前先占位保护、最后还原。
+/// 1) `.claude/<user_name>/development_docs` → `.easyvibe/development_docs/<user>`
+///    （inject-prompt.md 的 task.json 路径，形态与 2 不同，漏换则 task.json 写回旧位置）
+/// 2) `.claude/development_docs` → `.easyvibe/development_docs`（规则正文 20+ 处）
+/// 3) 裸 `.claude/` → `.easyvibe/`（rule_development.md 附录目录树根行，复审残留）
+/// 4) `<user_name>` → 本机用户名（剩余形态兜底，取不到用 default）
+pub fn adapt_builtin_content(content: &str) -> String {
+    let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+    const HOOKS_ANCHOR: &str = "\u{1}HOOKS\u{1}";
+    content
+        .replace("~/.claude/hooks/", HOOKS_ANCHOR)
+        .replace(".claude/<user_name>/development_docs", &format!(".easyvibe/development_docs/{user}"))
+        .replace(".claude/development_docs", ".easyvibe/development_docs")
+        .replace(".claude/", ".easyvibe/")
+        .replace("<user_name>", &user)
+        .replace(HOOKS_ANCHOR, "~/.claude/hooks/")
+}
+
+/// 版本号比较（a > b）。"1.2.0" vs "1.10.0" 按段数值比较，解析失败段按 0。
+fn version_gt(a: &str, b: &str) -> bool {
+    let segs = |s: &str| s.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    let (sa, sb) = (segs(a), segs(b));
+    for i in 0..sa.len().max(sb.len()) {
+        let (x, y) = (sa.get(i).copied().unwrap_or(0), sb.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
 
 const TRANSPARENT_MODE_LINE: &str = "（透明执行模式：禁止向用户提问或要求确认；需求有歧义时按最合理假设直接执行，并在 [EASYVIBE-RESULT] 的 summary 中说明你做出的假设。）";
 
@@ -449,29 +484,71 @@ pub fn harness_dir() -> PathBuf {
     }
 }
 
-/// 出厂底账部署：缺失文件从内嵌底账补齐；**不覆盖**用户已编辑的文件（正常启动语义）。
+/// 出厂底账部署：缺失文件从内嵌底账补齐（写盘时路径换姓）；**不覆盖**用户已编辑的文件。
+/// 版本迁移：内置 manifest 版本高于磁盘 → 三份规则正文仅在"磁盘内容仍等于出厂原稿"
+/// （即用户未改动）时重写为换姓版；manifest 只抬版本号、保留用户其余字段。
 /// 恢复默认（reset）走 deploy_builtin_force。
 pub fn deploy_builtin(dir: &std::path::Path) -> Result<(), ApiError> {
+    // 版本迁移判定（manifest 版本比较）
+    let disk_ver = std::fs::read_to_string(dir.join("manifest.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["version"].as_str().map(str::to_string));
+    let builtin_ver = BUILTIN_HARNESS
+        .iter()
+        .find(|(rel, _)| *rel == "manifest.json")
+        .and_then(|(_, c)| serde_json::from_str::<serde_json::Value>(c).ok())
+        .and_then(|v| v["version"].as_str().map(str::to_string));
+    let migrate = match (&builtin_ver, &disk_ver) {
+        (Some(b), Some(d)) => version_gt(b, d),
+        // 磁盘无 manifest（首次部署）或版本不可解析：不触发迁移，走缺失补齐
+        _ => false,
+    };
+
     for (rel, content) in BUILTIN_HARNESS {
         let p = dir.join(rel);
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
         }
         if !p.exists() {
-            std::fs::write(&p, content).map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
+            std::fs::write(&p, adapt_builtin_content(content))
+                .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
+            continue;
+        }
+        if !migrate {
+            continue;
+        }
+        if *rel == "manifest.json" {
+            // 只抬版本号：磁盘 manifest 的其余字段（用户可能加过 routeRules）保留
+            if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&p).unwrap_or_default()) {
+                if let (Some(obj), Some(bv)) = (v.as_object_mut(), &builtin_ver) {
+                    obj.insert("version".into(), serde_json::Value::String(bv.clone()));
+                    if let Ok(s) = serde_json::to_string_pretty(&v) {
+                        let _ = std::fs::write(&p, s);
+                    }
+                }
+            }
+            continue;
+        }
+        // 规则正文：磁盘仍等于出厂原稿 = 未改动 → 重写为换姓版；已改动则保留用户版
+        let disk = std::fs::read_to_string(&p).unwrap_or_default();
+        if disk == *content {
+            std::fs::write(&p, adapt_builtin_content(content))
+                .map_err(|e| ApiError::Internal(format!("harness 换姓重写失败 {}: {e}", p.display())))?;
         }
     }
     Ok(())
 }
 
-/// 恢复默认：全量覆盖用户层（与 deploy_builtin 的"缺失才补"语义相反）
+/// 恢复默认：全量覆盖用户层（与 deploy_builtin 的"缺失才补"语义相反）；同样写盘时换姓
 pub fn deploy_builtin_force(dir: &std::path::Path) -> Result<(), ApiError> {
     for (rel, content) in BUILTIN_HARNESS {
         let p = dir.join(rel);
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
         }
-        std::fs::write(&p, content).map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
+        std::fs::write(&p, adapt_builtin_content(content))
+            .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
     }
     Ok(())
 }
@@ -1590,5 +1667,85 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(7)).await;
         let t = task_repo.get("task-conflict").await.unwrap().unwrap();
         assert_eq!(t.status, "pending", "retry 重扫撞上持续互斥，任务应排队而非假活");
+    }
+
+    // ---------- 方案 v3 §4.4：路径换姓 + 版本迁移 ----------
+
+    #[test]
+    fn adapt_renames_all_three_claude_forms() {
+        let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+        // 形态 1：inject-prompt.md 的 task.json 路径（user_name 在 development_docs 之前）
+        let s1 = adapt_builtin_content(".claude/<user_name>/development_docs/task_260928_x.json");
+        assert_eq!(s1, format!(".easyvibe/development_docs/{user}/task_260928_x.json"), "形态1换姓");
+        // 形态 2：规则正文的产物路径（20+ 处）
+        let s2 = adapt_builtin_content(".claude/development_docs/<user_name>/1_requirements_matrix/x.md");
+        assert_eq!(s2, format!(".easyvibe/development_docs/{user}/1_requirements_matrix/x.md"), "形态2换姓");
+        // 形态 3：附录目录树的裸 .claude/ 根行（复审残留）
+        let s3 = adapt_builtin_content(".claude/\n├── development_docs/");
+        assert_eq!(s3, ".easyvibe/\n├── development_docs/", "形态3换姓");
+        // hooks 锚点保护：load 时替换链（load_harness_from）依赖 ~/.claude/hooks/ 原样存在
+        let s4 = adapt_builtin_content("cat ~/.claude/hooks/rule_development.md");
+        assert_eq!(s4, "cat ~/.claude/hooks/rule_development.md", "hooks 锚点不得换姓");
+    }
+
+    #[test]
+    fn version_gt_semantics() {
+        assert!(version_gt("1.2.0", "1.1.0"));
+        assert!(version_gt("2.0.0", "1.10.0"), "数值段比较，非字典序");
+        assert!(!version_gt("1.2.0", "1.2.0"));
+        assert!(!version_gt("1.1.0", "1.2.0"));
+        assert!(!version_gt("1.2", "1.2.0"), "缺段按 0，相等");
+    }
+
+    #[test]
+    fn deploy_migrates_unmodified_rules_but_keeps_user_edits() {
+        let dir = std::env::temp_dir().join("ev-harness-migrate-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 预置"旧版部署"：manifest 1.1.0 + 三份规则正文 = 出厂原稿（含 .claude）
+        let builtin_ver = |s: &str| {
+            BUILTIN_HARNESS.iter().find(|(r, _)| *r == "manifest.json").map(|(_, c)| {
+                serde_json::from_str::<serde_json::Value>(c).unwrap()["version"].as_str().unwrap().to_string()
+            }).unwrap_or_else(|| s.into())
+        };
+        let builtin_version = builtin_ver("");
+        // 模拟磁盘上的旧 manifest：内置版本降一段，其余字段照抄
+        let old_manifest = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../reference/manifest.json")).unwrap()
+            .replace(&format!("\"version\": \"{builtin_version}\""), "\"version\": \"1.0.0\"");
+        std::fs::write(dir.join("manifest.json"), &old_manifest).unwrap();
+        let rd = BUILTIN_HARNESS.iter().find(|(r, _)| *r == "rule_development.md").unwrap().1;
+        let rb = BUILTIN_HARNESS.iter().find(|(r, _)| *r == "rule_bugfix.md").unwrap().1;
+        std::fs::write(dir.join("rule_development.md"), rd).unwrap();
+        std::fs::write(dir.join("rule_bugfix.md"), rb).unwrap();
+        // 用户编辑过的文件：加一行批注（内容不等于出厂原稿）
+        std::fs::write(dir.join("inject-prompt.md"), format!("{}\n\n用户自定义补充", BUILTIN_HARNESS.iter().find(|(r, _)| *r == "inject-prompt.md").unwrap().1)).unwrap();
+
+        deploy_builtin(&dir).unwrap();
+
+        // 未改动的规则正文：重写为换姓版
+        let new_rd = std::fs::read_to_string(dir.join("rule_development.md")).unwrap();
+        assert!(!new_rd.contains(".claude/"), "未改动文件必须完成换姓");
+        assert!(new_rd.contains(".easyvibe/development_docs"), "换姓目标路径");
+        // 用户编辑过的文件：原样保留
+        let kept = std::fs::read_to_string(dir.join("inject-prompt.md")).unwrap();
+        assert!(kept.contains("用户自定义补充"), "用户编辑不得被迁移覆盖");
+        // manifest：版本被抬到内置版，其余字段保留
+        let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(m["version"].as_str().unwrap(), builtin_version, "manifest 版本抬升");
+        assert!(m["routeRules"].is_array(), "manifest 其余字段保留");
+    }
+
+    #[test]
+    fn deploy_no_migrate_when_versions_equal() {
+        let dir = std::env::temp_dir().join("ev-harness-nomigrate-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 磁盘版本 = 内置版本 → 即使文件还是旧内容也不重写（防无限迁移循环）
+        deploy_builtin(&dir).unwrap(); // 首次：缺失补齐（已是换姓版）
+        let rd_before = std::fs::read_to_string(dir.join("rule_development.md")).unwrap();
+        deploy_builtin(&dir).unwrap(); // 第二次：版本相等，不动
+        let rd_after = std::fs::read_to_string(dir.join("rule_development.md")).unwrap();
+        assert_eq!(rd_before, rd_after, "版本相等时不得重写");
     }
 }

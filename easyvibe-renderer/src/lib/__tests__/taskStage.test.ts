@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+import { stageOf } from '../taskStage'
+
+// 五阶段映射（方案 v3 §4.1 验收 #6）：全 (status, gate) 组合覆盖。
+// 核心纪律：status 优先——failed 残留 gate 值不得制造假阶段（复审意见）。
+
+describe('stageOf', () => {
+  it('计划关：manual 任务 spawn 前停在此，①②同体', () => {
+    expect(stageOf('awaiting_approval', 'plan')).toBe(0)
+  })
+
+  it('实施中：running 直通③，①②不算 now', () => {
+    expect(stageOf('running', null)).toBe(2)
+    expect(stageOf('running', 'plan'), 'supervised 低危 running 可能残留 plan gate').toBe(2)
+  })
+
+  it('diff 关与 report 关分属④⑤', () => {
+    expect(stageOf('awaiting_approval', 'diff')).toBe(3)
+    expect(stageOf('awaiting_approval', 'report')).toBe(4)
+  })
+
+  it('done 是全完成态', () => {
+    expect(stageOf('done', 'done')).toBe('done')
+  })
+
+  it('status 优先：failed 残留 gate 值不制造假阶段', () => {
+    // update_status 不清 gate——failed 任务可能带着 gate=diff
+    expect(stageOf('failed', 'diff')).toBe('error')
+    expect(stageOf('failed', 'plan')).toBe('error')
+  })
+
+  it('未启动/驳回/中断是灰态', () => {
+    expect(stageOf('pending', null)).toBe('error')
+    expect(stageOf('rejected', 'diff')).toBe('error')
+    expect(stageOf('interrupted', null)).toBe('error')
+  })
+
+  it('未知 status/gate 兜底灰态，不崩溃不造假', () => {
+    expect(stageOf('weird', null)).toBe('error')
+    expect(stageOf('awaiting_approval', 'nonsense')).toBe('error')
+  })
+})
