@@ -192,7 +192,12 @@ impl SessionManager {
                     status: SessionStatus::Failed,
                 })
                 .await;
-                return Err(ApiError::Internal(format!("spawn {command} 失败: {e}")));
+                let hint = if e.kind() == std::io::ErrorKind::NotFound {
+                    format!("——未找到 CLI agent `{command}`（GUI 启动的进程 PATH 极薄，后端启动时会解析绝对路径；仍失败请安装 agent 或设置 EASYVIBE_AGENT_CMD 为绝对路径）")
+                } else {
+                    String::new()
+                };
+                return Err(ApiError::Internal(format!("spawn {command} 失败: {e}{hint}")));
             }
         };
 

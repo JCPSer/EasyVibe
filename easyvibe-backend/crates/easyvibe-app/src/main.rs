@@ -567,6 +567,42 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
     }
 }
 
+/// CLI agent 命令解析为绝对路径。GUI 启动（Finder/Dock/Tauri sidecar）的进程 PATH 极薄，
+/// 裸命令名 spawn 直接 ENOENT——桌面壳实弹三任务全灭于此。三级查找：
+/// ① 自身含路径且存在 → 原样；② 当前进程 PATH；③ 登录 shell PATH（用户交互环境才是真相）；
+/// ④ 常见安装位兜底（含实测的 Kimi npm-global 位）。
+fn resolve_agent_command(cmd: &str) -> String {
+    let as_path = std::path::Path::new(cmd);
+    if as_path.components().count() > 1 && as_path.is_file() {
+        return cmd.to_string();
+    }
+    if let Some(p) = std::env::var("PATH").ok().as_deref().map(|dirs| {
+        dirs.split(':').map(str::trim).filter(|d| !d.is_empty()).map(|d| format!("{d}/{cmd}")).find(|p| std::path::Path::new(p).is_file())
+    }).flatten() {
+        return p;
+    }
+    if let Ok(out) = std::process::Command::new("bash").args(["-lc", &format!("command -v {cmd}")]).output() {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if out.status.success() && !p.is_empty() && std::path::Path::new(&p).is_file() {
+            return p;
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    for cand in [
+        format!("{home}/.claude/local/{cmd}"),
+        format!("{home}/.local/bin/{cmd}"),
+        format!("{home}/.npm-global/bin/{cmd}"),
+        format!("/opt/homebrew/bin/{cmd}"),
+        format!("/usr/local/bin/{cmd}"),
+        format!("{home}/Library/Application Support/kimi-desktop/daimon-share/daimon/npm-global/bin/{cmd}"),
+    ] {
+        if std::path::Path::new(&cand).is_file() {
+            return cand;
+        }
+    }
+    cmd.to_string()
+}
+
 /// CLI agent 可执行预检：spawn 路径的鉴权由 claude 自身配置（~/.claude/settings.json 的 env
 /// 或进程环境变量）负责，与本进程的 EASYVIBE_LLM_API_KEY 无关——旧守卫把"DB 已配 key"
 /// 的合法场景误判为未配置（chat 直调走 DB，patrol/reinduce 走 CLI spawn，两条链路配置源不同）。
@@ -1776,6 +1812,11 @@ async fn main() {
     // 钩子把无人值守任务带偏成访谈模式）；skip-permissions 授予 Bash 等工具（实弹验证发现
     // headless 下 Bash 默认被拒，agent 只能"分析后成功退出"什么都不写）。
     let agent_command = std::env::var("EASYVIBE_AGENT_CMD").unwrap_or_else(|_| "claude".into());
+    // GUI 启动的进程 PATH 极薄（launchd 只有 /usr/bin:/bin:...），裸命令名 spawn 必败——
+    // 实测桌面壳三个任务全部"spawn claude 失败: No such file or directory"。
+    // 启动时把命令解析成绝对路径：PATH 直查 → 登录 shell PATH → 常见安装位兜底。
+    let agent_command = resolve_agent_command(&agent_command);
+    info!("[boot] agent CLI 解析为: {agent_command}");
     let agent_args: Vec<String> = std::env::var("EASYVIBE_AGENT_ARGS")
         .unwrap_or_else(|_| "-p --bare --dangerously-skip-permissions".into())
         .split_whitespace()
@@ -2674,6 +2715,13 @@ mod tests {
         // 仓储直读兜底
         let summary = state.event_repo.summary(&repo).await.unwrap();
         assert_eq!(summary.iter().find(|r| r.name == "ui.contractAlert.click").unwrap().count, 1);
+    }
+    #[test]
+    fn agent_command_resolves_to_absolute_path() {
+        // 桌面壳实弹回归（hover-client 三任务"spawn claude 失败"）：GUI 薄 PATH 下必须解析出绝对路径
+        let p = resolve_agent_command("claude");
+        assert!(std::path::Path::new(&p).is_file(), "claude 必须解析为真实存在的绝对路径，实际: {p}");
+        assert_eq!(resolve_agent_command("/bin/echo"), "/bin/echo", "已含路径且存在的命令原样返回");
     }
 }
 
