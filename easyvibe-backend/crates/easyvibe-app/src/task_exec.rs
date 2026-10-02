@@ -337,7 +337,11 @@ impl TaskExecutor {
                 });
             }
             Err(ApiError::Conflict(_)) => {
-                warn!("[task-exec] 任务 {} 遇到写互斥，排队延迟重试", task.id);
+                // R3 P0-1：execute 已把状态置 running，写互斥（归纳/巡检进行中）是临时态——
+                // 必须退回 pending，否则 retry 循环只扫 pending，任务假活 running 至重启
+                // （N25 幽灵在 permits 满路径防过、此处漏掉；348-358 曾留有同款意图的死代码）
+                warn!("[task-exec] 任务 {} 遇到写互斥，退回 pending 排队延迟重试", task.id);
+                let _ = self.task_repo.update_status(&task.id, "pending", None).await;
                 let this = self.clone();
                 let repo = task.repo.clone();
                 tokio::spawn(async move {
@@ -347,18 +351,7 @@ impl TaskExecutor {
             }
             Err(e) => {
                 warn!("[task-exec] 任务 {} spawn 失败: {e}", task.id);
-                if matches!(e, ApiError::Conflict(_)) {
-                    // 写互斥（归纳/巡检进行中）是临时态：退回 pending 排队，5s 后由 retry 捞起
-                    let _ = self.task_repo.update_status(&task.id, "pending", None).await;
-                    let this = self.clone();
-                    let repo = task.repo.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        this.enqueue_pending(Some(&repo)).await;
-                    });
-                } else {
-                    let _ = self.task_repo.update_status(&task.id, "failed", Some(&e.to_string())).await;
-                }
+                let _ = self.task_repo.update_status(&task.id, "failed", Some(&e.to_string())).await;
             }
         }
     }
@@ -1531,5 +1524,59 @@ mod tests {
         executor.clone().enqueue_pending(Some("demo")).await;
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "failed");
+    }
+
+    #[tokio::test]
+    async fn conflict_arm_returns_task_to_pending() {
+        // R3 P0-1 回归：写互斥（仓库已有活动会话）时 spawn_and_watch 必须把任务退回 pending——
+        // execute 已置 running，若不退回，retry 循环只扫 pending，任务假活 running 至重启
+        // （N25 幽灵任务在 permits 满路径防过、Conflict 路径漏掉的孪生 bug）
+        use easyvibe_db::{Database, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-conflict-arm-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let repo = easyvibe_map::repo_from_root(&dir);
+        let repo_id = repo.id.clone();
+        let maps = MapService::new(vec![repo]);
+        // 占住仓库：一个活动会话（等价于归纳/巡检进行中）
+        sessions
+            .try_register(easyvibe_api_types::SessionStatusChanged {
+                repo: repo_id.clone(),
+                session_id: "ind-blocker".into(),
+                status: easyvibe_api_types::SessionStatus::Running,
+            })
+            .await
+            .unwrap();
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone())),
+            sessions,
+            maps,
+            harness_stub("框架"),
+            Arc::new("true".into()),
+            Arc::new(vec![]),
+            4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
+        );
+        let mut task = sample_task("pending");
+        task.repo = repo_id.clone();
+        task.id = "task-conflict".into();
+        task.trust = "auto".into();
+        task_repo.create(&task).await.unwrap();
+
+        executor.clone().execute(task).await;
+        // 第一时间：execute 曾把状态推进 running，Conflict 臂必须已退回 pending
+        let t = task_repo.get("task-conflict").await.unwrap().unwrap();
+        assert_eq!(t.status, "pending", "写互斥必须退回 pending，不得滞留 running（假活）");
+
+        // 等过 retry 节拍（5s 后 enqueue 重扫）： Conflict 依旧（会话仍占用），仍应停在 pending
+        tokio::time::sleep(std::time::Duration::from_secs(7)).await;
+        let t = task_repo.get("task-conflict").await.unwrap().unwrap();
+        assert_eq!(t.status, "pending", "retry 重扫撞上持续互斥，任务应排队而非假活");
     }
 }

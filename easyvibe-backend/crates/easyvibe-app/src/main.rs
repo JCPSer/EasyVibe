@@ -395,12 +395,15 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
         .await?;
 
     // 终态后产物核验
+    // R3 P0-2：必须按「自己 spawn 的会话」轮询（status_of_session），不能用仓库级 status_of——
+    // 归纳终态后 2s 窗内新起的巡检/重归纳会话会被本循环误读，grace 收尸会把别的会话误判 Succeeded
     let st2 = st.clone();
     let repo2 = repo.clone();
+    let session_id = session.session_id.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            match st2.session_manager.status_of(&repo2.id).await {
+            match st2.session_manager.status_of_session(&session_id).await {
                 Some(s) if !matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) => {
                     if let Some(before) = hash_before {
                         if let Ok(snap) = st2.map_service.load_map(&repo2).await {
@@ -417,7 +420,7 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
                 // 实弹#4 防线：进度 100% 落盘超过 90s 但会话仍 Running（agent 已交付未自行退出）
                 // → 按成功收尸解除"归纳中"假卡住。产物合法性由 watcher 校验保证（不出残图），
                 // 进程资源由 kill_on_drop 在后端生命周期结束时兜底。巡逻无 progress.json，不误触。
-                Some(_) => {
+                Some(s) => {
                     const GRACE_SECS: u64 = 90;
                     if let Some(ago) = progress_done_ago_secs(&repo2.root) {
                         if ago > GRACE_SECS {
@@ -425,7 +428,6 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
                                 "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸（agent 未自行退出，实弹#4）",
                                 ago
                             );
-                            let Some(s) = st2.session_manager.status_of(&repo2.id).await else { break };
                             st2.session_manager
                                 .note_status(easyvibe_api_types::SessionStatusChanged {
                                     repo: repo2.id.clone(),
@@ -501,13 +503,16 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
             // 会与历史 patrol_runs 行主键碰撞导致落库失败（实弹：UNIQUE constraint failed）
             let st2 = st.clone();
             let repo2 = repo.clone();
+            // R3 P0-2：同 reinduce——按自己 spawn 的会话轮询，不用仓库级 status_of（多会话交错会把
+            // 别的会话终态写进健康历史，归错 run）
+            let session_id = session.session_id.clone();
             let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
             let run_id_task = run_id.clone();
             let model = st.agent_command.to_string();
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    let Some(s) = st2.session_manager.status_of(&repo2.id).await else { continue };
+                    let Some(s) = st2.session_manager.status_of_session(&session_id).await else { continue };
                     if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) { continue }
                     let result = async {
                         let snap = st2.map_service.load_map(&repo2).await?;
@@ -2333,5 +2338,84 @@ mod tests {
         let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
         assert!(data["messages"].as_array().unwrap().is_empty());
         assert!(data["summary"].is_null());
+    }
+
+    #[tokio::test]
+    async fn reinduce_collection_scoped_to_own_session() {
+        // R3 P0-2 回归：归纳收尸循环必须按「自己 spawn 的会话」判定终态。
+        // 旧代码用仓库级 status_of：归纳（agent "true" 秒退）终态后 2s 窗内新注册的会话会被
+        // grace 收尸误判 Succeeded。本测试把 progress.json 预置为 phase=done 且 mtime 超 90s，
+        // 诱导 grace 分支；若循环越界处置，patrol-second 会被改成 Succeeded。
+        let dir = std::env::temp_dir().join("ev-reinduce-scope-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".easyvibe/map")).unwrap();
+        let progress = dir.join(".easyvibe/map/progress.json");
+        std::fs::write(&progress, r#"{"phase":"done"}"#).unwrap();
+        // mtime 拨到 90s 之前（grace 阈值）
+        let _ = std::process::Command::new("touch")
+            .args(["-t", "202610010000", progress.to_str().unwrap()])
+            .status();
+        let repo = repo_from_root(&dir);
+        let repo_id = repo.id.clone();
+        let state = test_state_with(MapService::new(vec![repo])).await;
+
+        // 发起重归纳：S1 秒级终态
+        let resp = start_reinduce(State(state.clone()), axum::extract::Path(repo_id.clone()))
+            .await
+            .map_err(|e| e.0.to_string())
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_response().into_body(), usize::MAX).await.unwrap();
+        let s1 = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["sessionId"].as_str().unwrap().to_string();
+
+        // 等 S1 先终态（真实场景：用户在归纳结束后的瞬间紧接着发起巡检），
+        // 然后抢在收尸循环的下一个 2s 轮询之前注册第二个会话
+        let mut s1_terminal = false;
+        for _ in 0..100 {
+            if let Some(s) = state.session_manager.status_of_session(&s1).await {
+                if !matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) {
+                    s1_terminal = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(s1_terminal, "S1（agent true）应在 5s 内终态");
+        state
+            .session_manager
+            .try_register(easyvibe_api_types::SessionStatusChanged {
+                repo: repo_id.clone(),
+                session_id: "patrol-second".into(),
+                status: easyvibe_api_types::SessionStatus::Running,
+            })
+            .await
+            .unwrap();
+
+        // 等过至少两个收尸循环节拍（2s/轮）+ grace 判定余量
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+
+        // 旧代码的误判会经 note_status 改写仓库级会话状态——以它为观测点：
+        // patrol-second 必须保持 Running（probe 用 status_of_session 探不到 try_register 的会话，
+        // 它在 by_id 无条目；误判的唯一痕迹是仓库级状态被改成 Succeeded）
+        let repo_status = state
+            .session_manager
+            .status_of(&repo_id)
+            .await
+            .expect("注册后仓库应有活动会话");
+        assert_eq!(repo_status.session_id, "patrol-second");
+        assert_eq!(
+            repo_status.status,
+            easyvibe_api_types::SessionStatus::Running,
+            "收尸循环只许处置自己 spawn 的会话，不得把后续会话误判终态: {:?}",
+            repo_status.status
+        );
+        // 锚定：S1 确已终态——本测试真实跨过了「归纳结束 → 新会话注册」的竞态窗口
+        let s1_status = state.session_manager.status_of_session(&s1).await.map(|s| s.status);
+        assert!(
+            matches!(
+                s1_status,
+                Some(easyvibe_api_types::SessionStatus::Succeeded) | Some(easyvibe_api_types::SessionStatus::Failed)
+            ),
+            "S1 应已终态（否则本测试未覆盖竞态窗口）: {s1_status:?}"
+        );
     }
 }
