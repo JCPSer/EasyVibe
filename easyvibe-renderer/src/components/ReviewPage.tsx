@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock, Copy } from 'lucide-react'
+import { CheckCircle2, XCircle, ShieldCheck, GitCompareArrows, Loader2, FileCode2, Lock, Copy, ClipboardList } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
+import { absTime } from '@/lib/diffStat'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -250,24 +251,33 @@ export function ReviewPage({
                   </span>
                 )}
                 {/* 把关台范式：驳回不=任务死亡——以此为基础复制新任务，原驳回记录保留可追溯 */}
-                {sel.status === 'rejected' && (
-                  <button
-                    onClick={() =>
-                      onCreateTask({
-                        title: `${sel.title}（重提）`,
-                        description: sel.description,
-                        modules: sel.modules ?? [],
-                        acceptance: sel.acceptance ?? '',
-                        source: 'manual',
-                        context: {},
-                      })
-                    }
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
-                    title="以本任务为模板创建新任务（原驳回记录保留）"
-                  >
-                    <Copy size={9} /> 复制为新任务
-                  </button>
-                )}
+                {/* 把关台范式：驳回不=任务死亡——以此为基础复制新任务；驳回理由注入新任务
+                    （StaffDeck 挂起/恢复思想的轻量落地：返工路径携带记忆，agent 不必重犯） */}
+                {sel.status === 'rejected' &&
+                  (() => {
+                    const rejectAp = detail?.approvals.find((a) => a.decision === 'rejected')
+                    const reason = rejectAp?.note?.trim()
+                    return (
+                      <button
+                        onClick={() =>
+                          onCreateTask({
+                            title: `${sel.title}（重提）`,
+                            description: reason
+                              ? `${sel.description}\n\n——上次驳回理由：${reason}（原任务 ${sel.id}）`
+                              : sel.description,
+                            modules: sel.modules ?? [],
+                            acceptance: sel.acceptance ?? '',
+                            source: 'manual',
+                            context: { origin_task_id: sel.id, ...(reason ? { reject_reason: reason } : {}) },
+                          })
+                        }
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                        title={reason ? `以上次驳回理由为上下文创建新任务：${reason}` : '以本任务为模板创建新任务（原驳回记录保留）'}
+                      >
+                        <Copy size={9} /> 复制为新任务
+                      </button>
+                    )
+                  })()}
               </div>
               {/* 三道关：每关的决策状态（含报告锁态——报告门审批后锁定） */}
               <div className="mt-2 flex items-center gap-1">
@@ -297,6 +307,34 @@ export function ReviewPage({
                   )
                 })}
               </div>
+              {/* 计划锚点（对标 AionUI 计划快照 #916）：diff/报告关审查时对照"计划改什么"——
+                  任务行即持久化计划（需求/影响模块/验收），计划关审批记录提供时间与结论锚 */}
+              {(sel.gate === 'diff' || sel.gate === 'report' || sel.gate === 'done' || sel.status === 'done') && (
+                <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+                  <p className="mb-1.5 flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
+                    <ClipboardList size={10} /> 计划锚点
+                    {(() => {
+                      const pa = approvals.find((a) => a.gate === 'plan')
+                      return pa ? (
+                        <span className="tnum ml-auto font-normal normal-case tracking-normal text-slate-300">
+                          计划关{pa.decision === 'skipped' ? '自动通过' : '已通过'} · {absTime(pa.decidedAt)}
+                        </span>
+                      ) : null
+                    })()}
+                  </p>
+                  <p className="line-clamp-3 text-cap leading-4 text-slate-600">{sel.description}</p>
+                  {(sel.modules?.length ?? 0) > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {sel.modules!.map((mid) => (
+                        <span key={mid} className="rounded-full bg-white px-1.5 py-px text-micro font-semibold text-slate-500 ring-1 ring-slate-200">
+                          {map.modules.find((m) => m.id === mid)?.name ?? mid}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {sel.acceptance && <p className="mt-1.5 text-micro leading-4 text-slate-400">验收：{sel.acceptance}</p>}
+                </div>
+              )}
             </div>
 
             <div className="flex min-h-0 flex-1">
