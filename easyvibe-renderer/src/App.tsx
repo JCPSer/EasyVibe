@@ -798,7 +798,10 @@ function Canvas({
       setSubmapErrors((prev) => ({ ...prev, [id]: '' }))
       fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
         .then(async (r) => {
-          if (!r.ok) throw new Error(String(r.status))
+          // 必须抛 Response 本体：catch 里要读 body 判别 409（单会话纪律）——
+          // 曾抛 new Error(status)，catch 的 (e as Response).json() 拿到 undefined，
+          // 409 人话文案永远走不到，用户看到的是"后端离线"甩锅
+          if (!r.ok) throw r
           const sess = (await r.json()) as { sessionId?: string; session_id?: string }
           const sid = sess.sessionId ?? sess.session_id ?? ''
           setSubmapSessions((prev) => ({ ...prev, [id]: sid }))
@@ -1599,7 +1602,7 @@ export default function App() {
                 track(d.repo, 'ui.contractAlert.click', { taskId: d.taskId })
                 handlePageChange('review')
               },
-            }, true)
+            }, true, `contract:${d.taskId}`)
             if (document.hidden) notifySystem('EasyVibe · 影响面预警', `任务 ${d.taskId} 正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.contractViolated') {
@@ -1614,7 +1617,7 @@ export default function App() {
                 track(d.repo, 'ui.contractViolated.click', { taskId: d.taskId })
                 handlePageChange('review')
               },
-            }, true)
+            }, true, `contract:${d.taskId}`)
             if (document.hidden) notifySystem('EasyVibe · 影响面越界', `任务 ${d.taskId} 越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.statusChanged') {
