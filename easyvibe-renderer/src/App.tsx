@@ -32,6 +32,7 @@ import { ReviewPage } from '@/components/ReviewPage'
 import { DriftPage } from '@/components/DriftPage'
 import { HealthPage } from '@/components/HealthPage'
 import { ChangesPage } from '@/components/ChangesPage'
+import { GitPage } from '@/components/GitPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -1712,12 +1713,11 @@ export default function App() {
       />
     ),
     git: (
-      <PlaceholderPage
-        title="Git 工作树"
-        milestone="M4-3"
-        description="当前仓库的 git 状态：分支与远程同步、未提交的变更（按模块聚合）、提交历史——提交前先看影响面。"
-        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
-        icon={GitBranch}
+      <GitPage
+        backendRepo={backendRepo}
+        map={map}
+        onOpenChanges={() => handlePageChange('changes')}
+        onOpenReview={() => handlePageChange('review')}
       />
     ),
     'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,

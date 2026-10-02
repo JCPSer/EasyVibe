@@ -57,6 +57,20 @@ export function parseDiffStat(text: string): DiffStat {
   }
 }
 
+/** 单文件归属模块（glob 前缀匹配；未命中返回 null）——aggregateByModule 与 GitPage 分组共用 */
+export function moduleOfFile(
+  path: string,
+  modules: { id: string; name: string; files: string[] }[],
+): { id: string; name: string } | null {
+  const mod = modules.find((mm) =>
+    mm.files.some((g) => {
+      const base = g.replace(/\*\*.*$/, '').replace(/\/$/, '')
+      return path.startsWith(base) || path.includes('/' + base + '/')
+    }),
+  )
+  return mod ? { id: mod.id, name: mod.name } : null
+}
+
 /** 把文件级 stat 按模块 files glob 聚合（与 WorkbenchPage 影响面同口径） */
 export function aggregateByModule(
   files: DiffFileStat[],
@@ -64,13 +78,7 @@ export function aggregateByModule(
 ): { id: string; name: string; adds: number; dels: number; fileCount: number }[] {
   const byModule = new Map<string, { id: string; name: string; adds: number; dels: number; fileCount: number }>()
   for (const f of files) {
-    const mod =
-      modules.find((mm) =>
-        mm.files.some((g) => {
-          const base = g.replace(/\*\*.*$/, '').replace(/\/$/, '')
-          return f.path.startsWith(base) || f.path.includes('/' + base + '/')
-        }),
-      ) ?? null
+    const mod = moduleOfFile(f.path, modules)
     const key = mod?.id ?? '_other'
     const cur = byModule.get(key) ?? { id: key, name: mod?.name ?? '未映射文件', adds: 0, dels: 0, fileCount: 0 }
     cur.adds += f.adds

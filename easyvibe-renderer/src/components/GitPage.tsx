@@ -1,0 +1,784 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Copy, GitBranch, Loader2, RefreshCw,
+  ScanSearch, ShieldCheck, Sparkles, Trash2,
+} from 'lucide-react'
+import { toast } from '@/lib/toast'
+import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/lib/diffStat'
+import { healthColor } from '@/lib/layout'
+import type { CodeMap } from '@/types/map'
+
+// M4-4 Git 工作树（按 ui-mockups/Git工作树原型-v3.png 施工）：
+// 「提交把关台」——提交前影响面预检（模块聚合 + 健康色点 + 红线警示）、
+// 改动来源归因（任务 diffStat 启发式）、提交说明 AI 生成 + EasyVibe-Task footer 留痕、
+// 架构演进对照图（健康分趋势 × 提交时点）、最近提交模块 chips。
+// 后端：git.rs 六端点 + git/commit-message（LLM 生成说明）。
+
+interface GitFile {
+  status: string // M / A / D / R / ?
+  path: string
+  orig: string | null
+  adds: number | null
+  dels: number | null
+}
+
+interface GitStatus {
+  branch: string
+  upstream: string | null
+  ahead: number
+  behind: number
+  files: GitFile[]
+}
+
+interface GitLogRow {
+  hash: string
+  short: string
+  author: string
+  email: string
+  at: number
+  subject: string
+  files: string[]
+}
+
+interface TaskLite {
+  id: string
+  title: string
+  result?: { diffStat?: string } | null
+}
+
+interface HealthPoint {
+  runId: string
+  score: number
+}
+
+const ST_META: Record<string, { label: string; cls: string }> = {
+  M: { label: 'M', cls: 'bg-amber-100 text-amber-700' },
+  A: { label: 'A', cls: 'bg-emerald-100 text-emerald-700' },
+  D: { label: 'D', cls: 'bg-red-100 text-red-600' },
+  R: { label: 'R', cls: 'bg-indigo-100 text-indigo-700' },
+  '?': { label: '?', cls: 'bg-slate-100 text-slate-500' },
+}
+
+export function GitPage({
+  backendRepo,
+  map,
+  onOpenChanges,
+  onOpenReview,
+}: {
+  backendRepo: string | null
+  map: CodeMap | null
+  onOpenChanges: () => void
+  onOpenReview: () => void
+}) {
+  const [status, setStatus] = useState<GitStatus | null>(null)
+  const [commits, setCommits] = useState<GitLogRow[]>([])
+  const [tasks, setTasks] = useState<TaskLite[]>([])
+  const [freshness, setFreshness] = useState<string | null>(null)
+  const [gitError, setGitError] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
+  const [footer, setFooter] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
+  const [committing, setCommitting] = useState(false)
+  const [busy, setBusy] = useState<'pull' | 'push' | null>(null)
+  const [patrolAfter, setPatrolAfter] = useState(false)
+  const [patroling, setPatroling] = useState(false)
+
+  const api = (p: string) => `/api/repos/${encodeURIComponent(backendRepo ?? '')}${p}`
+
+  const load = useCallback(() => {
+    if (!backendRepo) return
+    fetch(api('/git/status'))
+      .then(async (r) => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => null)
+          setGitError(e?.error ?? `HTTP ${r.status}`)
+          setStatus(null)
+          return null
+        }
+        setGitError(null)
+        return r.json()
+      })
+      .then((d: { data?: GitStatus } | null) => setStatus(d?.data ?? null))
+      .catch(() => setGitError('后端不可达'))
+    fetch(api('/git/log?limit=30'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: GitLogRow[] } | null) => setCommits(d?.data ?? []))
+      .catch(() => {})
+    fetch(api('/freshness'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { status?: string } } | null) => setFreshness(d?.data?.status ?? null))
+      .catch(() => {})
+    fetch(api('/tasks'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: TaskLite[] } | null) => setTasks((d?.data ?? []).slice(0, 15)))
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendRepo])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // 改动来源归因：任务 diffStat 文件路径匹配（启发式）+ .easyvibe/ → 巡检/归纳写回
+  const taskByPath = useMemo(() => {
+    const m = new Map<string, TaskLite>()
+    for (const t of tasks) {
+      const ds = t.result?.diffStat
+      if (!ds) continue
+      for (const f of parseDiffStat(ds).files) if (!m.has(f.path)) m.set(f.path, t)
+    }
+    return m
+  }, [tasks])
+
+  const attribOf = useCallback(
+    (path: string): { kind: 'task'; task: TaskLite } | { kind: 'ev' } | { kind: 'manual' } => {
+      if (path.startsWith('.easyvibe/')) return { kind: 'ev' }
+      const t = taskByPath.get(path)
+      return t ? { kind: 'task', task: t } : { kind: 'manual' }
+    },
+    [taskByPath],
+  )
+
+  const moduleList = useMemo(
+    () => (map?.modules ?? []).map((m) => ({ id: m.id, name: m.name, files: m.files as string[] })),
+    [map],
+  )
+
+  const groups = useMemo(() => {
+    if (!status) return []
+    const visible = status.files.filter((f) => !filter || f.path.includes(filter))
+    const agg = aggregateByModule(
+      visible.map((f) => ({ path: f.path, adds: f.adds ?? 0, dels: f.dels ?? 0 })),
+      moduleList,
+    )
+    return agg.map((g) => ({
+      ...g,
+      files: visible.filter((f) => (moduleOfFile(f.path, moduleList)?.id ?? '_other') === g.id),
+    }))
+  }, [status, filter, moduleList])
+
+  const redline = useMemo(
+    () =>
+      groups
+        .filter((g) => g.id !== '_other')
+        .map((g) => ({ ...g, score: map?.modules.find((m) => m.id === g.id)?.health.score ?? null }))
+        .filter((g): g is typeof g & { score: number } => g.score !== null && g.score < 60),
+    [groups, map],
+  )
+
+  const dominantTask = useMemo(() => {
+    const count = new Map<string, number>()
+    for (const f of status?.files ?? []) {
+      const a = attribOf(f.path)
+      if (a.kind === 'task') count.set(a.task.id, (count.get(a.task.id) ?? 0) + 1)
+    }
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0]
+    return top ? (tasks.find((t) => t.id === top[0]) ?? null) : null
+  }, [status, attribOf, tasks])
+
+  const totals = useMemo(() => {
+    const t = { M: 0, A: 0, D: 0, R: 0, '?': 0, adds: 0, dels: 0 }
+    for (const f of status?.files ?? []) {
+      t[f.status as keyof typeof t] = (t[f.status as keyof typeof t] as number) + 1
+      t.adds += f.adds ?? 0
+      t.dels += f.dels ?? 0
+    }
+    return t
+  }, [status])
+
+  const startPatrol = async () => {
+    if (!backendRepo || patroling) return
+    setPatroling(true)
+    try {
+      await fetch(api('/patrol'), { method: 'POST' })
+      toast('巡检已发起（全量 · 可在健康看板看进度）')
+    } catch {
+      toast('巡检发起失败', 'error')
+    } finally {
+      setPatroling(false)
+    }
+  }
+
+  const generateMessage = async () => {
+    if (!backendRepo || generating) return
+    setGenerating(true)
+    try {
+      const affected = groups.filter((g) => g.id !== '_other').map((g) => g.name)
+      const diffStat = status?.files
+        .map((f) => `${f.path} | ${(f.adds ?? 0) + (f.dels ?? 0)} ${'+'.repeat(f.adds ?? 0)}${'-'.repeat(f.dels ?? 0)}`)
+        .join('\n')
+      const r = await fetch(api('/git/commit-message'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: dominantTask?.id ?? null, modules: affected, diff_stat: diffStat ?? '' }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok || !d?.data?.message) {
+        toast(d?.error ?? '生成失败', 'error')
+        return
+      }
+      setMessage(d.data.message)
+      setFooter(d.data.footer ?? null)
+    } catch {
+      toast('生成失败', 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const doCommit = async () => {
+    if (!backendRepo || committing || !message.trim() || !status || status.files.length === 0) return
+    setCommitting(true)
+    try {
+      const full = footer ? `${message.trim()}\n\n${footer}` : message.trim()
+      const r = await fetch(api('/git/commit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: full }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) {
+        toast(d?.error ?? '提交失败', 'error')
+        return
+      }
+      toast(`已提交 ${d?.data?.shortHash ?? ''}${patrolAfter ? ' · 巡检已排队' : ''}`)
+      setMessage('')
+      setFooter(null)
+      load()
+      if (patrolAfter) await fetch(api('/patrol'), { method: 'POST' }).catch(() => {})
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  const doDiscard = async (path: string) => {
+    if (!backendRepo) return
+    try {
+      const r = await fetch(api('/git/discard'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) toast(d?.error ?? '撤销失败', 'error')
+      else toast(`已撤销 ${path}`)
+    } finally {
+      setConfirmDiscard(null)
+      load()
+    }
+  }
+
+  const sync = async (kind: 'pull' | 'push') => {
+    if (!backendRepo || busy) return
+    setBusy(kind)
+    try {
+      const r = await fetch(api(`/git/${kind}`), { method: 'POST' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) toast(d?.error ?? `${kind === 'pull' ? '拉取' : '推送'}失败`, 'error')
+      else toast(kind === 'pull' ? '已拉取（rebase）' : '已推送')
+    } finally {
+      setBusy(null)
+      load()
+    }
+  }
+
+  if (!backendRepo) {
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400">先在左侧选择一个项目。</div>
+  }
+
+  const freshMeta =
+    freshness === 'fresh' ? { color: '#10b981', label: '地图 fresh' } :
+    freshness === 'drifting' ? { color: '#f59e0b', label: '地图漂移中' } :
+    freshness === 'stale' ? { color: '#ef4444', label: '地图已过期' } :
+    { color: '#94a3b8', label: '地图状态未知' }
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="mb-3 flex items-baseline gap-3">
+          <h2 className="text-[15px] font-bold text-slate-800">Git 工作树</h2>
+          <p className="text-[11px] text-slate-400">提交前看见架构代价，提交时绑定任务留痕，提交后联动复检。</p>
+        </div>
+
+        {/* 状态条 */}
+        <div className="mb-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
+          <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-bold text-slate-800">
+            <GitBranch size={12} className="text-slate-400" />
+            {status?.branch ?? '—'}
+          </span>
+          {status?.upstream && (
+            <span className="tnum flex items-center gap-1.5 text-[11.5px]">
+              <span className="flex items-center gap-0.5 font-bold text-emerald-500"><ArrowUpFromLine size={11} />{status.ahead}</span>
+              <span className="flex items-center gap-0.5 font-bold text-amber-500"><ArrowDownToLine size={11} />{status.behind}</span>
+              <span className="text-[10.5px] text-slate-300">与 {status.upstream}</span>
+            </span>
+          )}
+          <span className="flex gap-1.5">
+            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-500"><b className="text-amber-600">{totals.M}</b> 修改</span>
+            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-500"><b className="text-emerald-600">{totals.A + totals['?']}</b> 新增</span>
+            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-500"><b className="text-red-500">{totals.D}</b> 删除</span>
+            <span className="tnum rounded-full bg-blue-50 px-2 py-0.5 text-[10.5px] font-semibold text-blue-600">影响 <b>{groups.filter((g) => g.id !== '_other').length}</b> 个模块</span>
+          </span>
+          <span className="flex items-center gap-1.5 rounded-full border border-slate-100 px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: freshMeta.color }}>
+            <i className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: freshMeta.color }} />
+            {freshMeta.label}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <button
+              onClick={() => sync('pull')}
+              disabled={!!busy}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+            >
+              {busy === 'pull' ? <Loader2 size={11} className="animate-spin" /> : `拉取 ↓${status?.behind ?? 0}`}
+            </button>
+            <button
+              onClick={() => sync('push')}
+              disabled={!!busy}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {busy === 'push' ? <Loader2 size={11} className="animate-spin" /> : `推送 ↑${status?.ahead ?? 0}`}
+            </button>
+          </span>
+        </div>
+
+        {gitError && (
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11.5px] text-amber-700">
+            <AlertTriangle size={14} className="shrink-0" />
+            Git 状态不可用：{gitError}（该仓库可能不是 git 仓库）
+          </div>
+        )}
+
+        <div className="grid grid-cols-5 gap-3">
+          {/* 左列：未提交变更 · 提交前预检 */}
+          <div className="col-span-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+              <span className="text-[12.5px] font-bold text-slate-700">未提交变更 · 提交前预检</span>
+              <span className="text-[10px] text-slate-300">模块色点 = 当前健康分</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="过滤文件…"
+                  className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] text-slate-600 focus:border-blue-300 focus:outline-none"
+                />
+                <button
+                  onClick={load}
+                  className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                  title="刷新"
+                >
+                  <RefreshCw size={11} />
+                </button>
+              </div>
+            </div>
+
+            {/* 改动来源 */}
+            {status && status.files.length > 0 && (
+              <SourceStrip files={status.files} attribOf={attribOf} onOpenChanges={onOpenChanges} />
+            )}
+
+            {/* 红线警示 */}
+            {redline.length > 0 && (
+              <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+                <AlertTriangle size={15} className="shrink-0 text-amber-500" />
+                <p className="min-w-0 flex-1 text-[11px] leading-4 text-amber-700">
+                  <b>红线警示：</b>
+                  {redline.map((g) => `${g.name} 健康分 ${g.score}`).join('、')}
+                  <span className="text-amber-500">（&lt;60），本次改动 +{totals.adds}/−{totals.dels}，提交后腐化风险继续累积。提示，不拦截。</span>
+                </p>
+                <button
+                  onClick={startPatrol}
+                  disabled={patroling}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[10.5px] font-semibold text-amber-600 hover:bg-amber-100 disabled:opacity-40"
+                >
+                  {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 巡检受影响模块
+                </button>
+                <button
+                  onClick={onOpenReview}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[10.5px] font-semibold text-amber-600 hover:bg-amber-100"
+                >
+                  <ShieldCheck size={10} /> 发起评审
+                </button>
+              </div>
+            )}
+
+            {/* 模块分组 */}
+            <div className="py-2">
+              {groups.map((g) => {
+                const score = g.id === '_other' ? null : (map?.modules.find((m) => m.id === g.id)?.health.score ?? null)
+                const isCollapsed = collapsed.has(g.id)
+                return (
+                  <div key={g.id} className="border-b border-slate-50 last:border-0">
+                    <button
+                      onClick={() =>
+                        setCollapsed((cs) => {
+                          const n = new Set(cs)
+                          if (n.has(g.id)) n.delete(g.id)
+                          else n.add(g.id)
+                          return n
+                        })
+                      }
+                      className="flex w-full items-center gap-2 bg-slate-50/50 px-4 py-2.5 text-left hover:bg-slate-50"
+                    >
+                      {score !== null && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: healthColor(score) }} />}
+                      <span className="text-[11.5px] font-bold text-slate-700">{g.name}</span>
+                      <span className="text-[10px] text-slate-300">{g.files.length} 个文件</span>
+                      {score !== null && (
+                        <span className="tnum text-[10.5px] font-bold" style={{ color: healthColor(score) }}>{score}</span>
+                      )}
+                      <span className="tnum ml-auto text-[10.5px] font-bold text-emerald-600">+{g.adds}</span>
+                      <span className="tnum text-[10.5px] font-bold text-red-500">−{g.dels}</span>
+                      <span className="text-[9px] text-slate-300">{isCollapsed ? '▸' : '▾'}</span>
+                    </button>
+                    {!isCollapsed &&
+                      g.files.map((f) => {
+                        const a = attribOf(f.path)
+                        const st = ST_META[f.status] ?? ST_META['?']
+                        return (
+                          <div key={f.path} className="group flex items-center gap-2.5 py-[7px] pl-8 pr-4 hover:bg-slate-50/60">
+                            <span className={`flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[5px] text-[9px] font-extrabold ${st.cls}`}>
+                              {st.label}
+                            </span>
+                            <span className="mono min-w-0 flex-1 truncate text-[10.5px] text-slate-600">
+                              {f.orig ? `${f.orig} → ${f.path}` : f.path}
+                            </span>
+                            {a.kind === 'task' && (
+                              <span className="shrink-0 rounded-full bg-violet-50 px-1.5 py-px text-[9px] font-semibold text-violet-600">
+                                任务 {a.task.title.slice(0, 8)}
+                              </span>
+                            )}
+                            {a.kind === 'ev' && (
+                              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-semibold text-slate-500">巡检写回</span>
+                            )}
+                            <span className="tnum w-[72px] shrink-0 text-right text-[10px] font-bold">
+                              <i className="not-italic text-emerald-600">+{f.adds ?? 0}</i>{' '}
+                              <i className="not-italic text-red-400">−{f.dels ?? 0}</i>
+                            </span>
+                            {confirmDiscard === f.path ? (
+                              <button
+                                onClick={() => doDiscard(f.path)}
+                                onMouseLeave={() => setConfirmDiscard(null)}
+                                className="tnum shrink-0 rounded bg-red-500 px-1.5 py-0.5 text-[9px] font-bold text-white"
+                              >
+                                确认?
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDiscard(f.path)}
+                                className="shrink-0 rounded p-0.5 text-slate-200 hover:bg-red-50 hover:text-red-500 group-hover:text-slate-300"
+                                title="撤销改动"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                  </div>
+                )
+              })}
+              {(!status || status.files.length === 0) && !gitError && (
+                <p className="py-10 text-center text-[11.5px] text-slate-300">工作树干净，没有未提交的变更。</p>
+              )}
+            </div>
+
+            <div className="flex gap-4 border-t border-slate-100 px-4 py-2.5 text-[10.5px] text-slate-400">
+              <span>共影响 <b className="text-slate-600">{groups.filter((g) => g.id !== '_other').length}</b> 个模块 · <b className="tnum text-slate-600">+{totals.adds} −{totals.dels}</b></span>
+              <span>未映射文件 <b className="text-slate-600">{groups.find((g) => g.id === '_other')?.files.length ?? 0}</b> 个</span>
+              <span className="ml-auto">对比基线：<b className="text-slate-600">HEAD</b></span>
+            </div>
+
+            {/* 提交框 */}
+            <div className="border-t border-slate-100">
+              <div className="flex items-center gap-2 px-4 pt-2.5">
+                <span className="text-[11px] font-bold text-slate-500">提交说明</span>
+                <button
+                  onClick={generateMessage}
+                  disabled={generating || !status || status.files.length === 0}
+                  className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                >
+                  {generating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                  {generating ? '生成中…' : dominantTask ? `从任务上下文生成` : 'AI 生成'}
+                </button>
+                {dominantTask && (
+                  <span className="text-[10px] text-slate-300">已关联任务 · footer 随提交写入，历史可反查</span>
+                )}
+              </div>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="输入提交说明…（如 fix(payment): 修复退款金额计算异常）"
+                className="h-14 w-full resize-none px-4 pt-2 text-[11.5px] text-slate-700 outline-none"
+              />
+              <div className="flex items-center gap-3 border-t border-slate-50 bg-slate-50/40 px-4 py-2.5">
+                <span className="text-[10.5px] text-slate-400">
+                  将提交 <b className="tnum text-slate-600">{status?.files.length ?? 0}</b> 个文件 · 影响模块{' '}
+                  <b className="text-blue-600">{groups.filter((g) => g.id !== '_other').slice(0, 3).map((g) => g.name).join('、') || '—'}</b>
+                </span>
+                <label className="ml-auto flex items-center gap-1.5 text-[10px] text-slate-400">
+                  <input type="checkbox" checked={patrolAfter} onChange={(e) => setPatrolAfter(e.target.checked)} className="accent-blue-600" />
+                  提交后触发全量巡检（消耗 LLM token）
+                </label>
+                {redline.length > 0 && (
+                  <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">
+                    <AlertTriangle size={9} /> 含红线模块 · 仍可提交
+                  </span>
+                )}
+                <button
+                  onClick={doCommit}
+                  disabled={committing || !message.trim() || !status || status.files.length === 0}
+                  className="rounded-lg bg-blue-600 px-4 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+                >
+                  {committing ? <Loader2 size={11} className="animate-spin" /> : `提交到 ${status?.branch ?? '—'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 右列 */}
+          <div className="col-span-2 flex flex-col gap-3">
+            <EvolutionChart backendRepo={backendRepo} groups={groups} map={map} commits={commits} />
+            <CommitHistory commits={commits} moduleList={moduleList} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 改动来源 insight 条：任务归因 / 巡检写回 / 手动（未归因） */
+function SourceStrip({
+  files,
+  attribOf,
+  onOpenChanges,
+}: {
+  files: GitFile[]
+  attribOf: (path: string) => { kind: 'task'; task: TaskLite } | { kind: 'ev' } | { kind: 'manual' }
+  onOpenChanges: () => void
+}) {
+  const src = useMemo(() => {
+    const task = new Map<string, { task: TaskLite; n: number }>()
+    let ev = 0
+    let manual = 0
+    for (const f of files) {
+      const a = attribOf(f.path)
+      if (a.kind === 'task') {
+        const cur = task.get(a.task.id) ?? { task: a.task, n: 0 }
+        cur.n += 1
+        task.set(a.task.id, cur)
+      } else if (a.kind === 'ev') ev += 1
+      else manual += 1
+    }
+    return { tasks: [...task.values()].sort((a, b) => b.n - a.n), ev, manual }
+  }, [files, attribOf])
+
+  if (src.tasks.length === 0 && src.ev === 0) return null
+
+  return (
+    <div className="mx-4 mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-violet-100 bg-violet-50/50 px-3.5 py-2 text-[10.5px] text-violet-700">
+      <Sparkles size={11} className="shrink-0" />
+      <span className="font-semibold">改动来源：</span>
+      {src.tasks.slice(0, 2).map(({ task, n }) => (
+        <span key={task.id}>
+          <b>任务「{task.title.slice(0, 12)}」</b>（{n} 个文件）
+        </span>
+      ))}
+      {src.ev > 0 && <span>巡检健康写回（{src.ev} 个）</span>}
+      {src.manual > 0 && <span className="text-violet-400">手动修改（{src.manual} 个 · 未归因）</span>}
+      <button onClick={onOpenChanges} className="ml-auto font-semibold text-blue-600 hover:underline">
+        查看任务 →
+      </button>
+    </div>
+  )
+}
+
+/** 架构演进对照：受影响模块健康分趋势 × 提交时点竖线（纯前端组合，零后端增量） */
+function EvolutionChart({
+  backendRepo,
+  groups,
+  map,
+  commits,
+}: {
+  backendRepo: string
+  groups: { id: string; name: string }[]
+  map: CodeMap | null
+  commits: GitLogRow[]
+}) {
+  const [series, setSeries] = useState<{ id: string; name: string; color: string; points: { t: number; s: number }[] }[]>([])
+  const affected = useMemo(() => groups.filter((g) => g.id !== '_other').slice(0, 2), [groups])
+
+  useEffect(() => {
+    let alive = true
+    const loadSeries = async () => {
+      const runsRes = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs`)
+      const runs: { data?: { id: string; startedAt: string }[] } | null = runsRes.ok ? await runsRes.json() : null
+      const timeByRun = new Map((runs?.data ?? []).map((r) => [r.id, toMs(r.startedAt) ?? 0]))
+      const out: typeof series = []
+      for (const g of affected) {
+        const res = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/modules/${encodeURIComponent(g.id)}/health-history`)
+        const d: { data?: HealthPoint[] } | null = res.ok ? await res.json() : null
+        const points = (d?.data ?? [])
+          .map((h) => ({ t: timeByRun.get(h.runId) ?? 0, s: h.score }))
+          .filter((p) => p.t > 0)
+          .sort((a, b) => a.t - b.t)
+        const score = map?.modules.find((m) => m.id === g.id)?.health.score ?? 60
+        out.push({ id: g.id, name: g.name, color: healthColor(score), points })
+      }
+      if (alive) setSeries(out.filter((s) => s.points.length > 0))
+    }
+    loadSeries().catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [backendRepo, affected, map])
+
+  const W = 460
+  const H = 170
+  const PAD = { l: 26, r: 8, t: 10, b: 18 }
+  const [now] = useState(() => Date.now()) // 渲染期纯度：挂载时锚定一次"当前时间"
+  const allT = series.flatMap((s) => s.points.map((p) => p.t))
+  const commitMarks = commits.map((c) => c.at * 1000).filter((t) => allT.length > 0 && t >= Math.min(...allT) && t <= now)
+  const minT = allT.length > 0 ? Math.min(...allT, ...commitMarks) : 0
+  const maxT = Math.max(now, ...allT)
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <span className="text-[12.5px] font-bold text-slate-700">架构演进对照</span>
+        <span className="text-[10px] text-slate-300">健康分趋势 × 提交时点</span>
+      </div>
+      {series.length > 0 && allT.length > 0 ? (
+        <div className="px-3 pb-1 pt-2">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+            {[0, 60, 100].map((g) => {
+              const y = PAD.t + (1 - g / 100) * (H - PAD.t - PAD.b)
+              return (
+                <g key={g}>
+                  <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y} stroke={g === 60 ? '#fca5a5' : '#f1f5f9'} strokeWidth={1} strokeDasharray={g === 60 ? '4 3' : undefined} />
+                  <text x={PAD.l - 4} y={y + 3} textAnchor="end" fontSize={8} fill={g === 60 ? '#f87171' : '#cbd5e1'} className="tnum">{g === 60 ? '红线60' : g}</text>
+                </g>
+              )
+            })}
+            {commitMarks.map((t, i) => {
+              const x = PAD.l + ((t - minT) / Math.max(1, maxT - minT)) * (W - PAD.l - PAD.r)
+              return <line key={i} x1={x} x2={x} y1={PAD.t} y2={H - PAD.b} stroke="#93c5fd" strokeWidth={1} strokeDasharray="2 3" />
+            })}
+            {series.map((s) => (
+              <path
+                key={s.id}
+                d={s.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(PAD.l + ((p.t - minT) / Math.max(1, maxT - minT)) * (W - PAD.l - PAD.r)).toFixed(1)},${(PAD.t + (1 - p.s / 100) * (H - PAD.t - PAD.b)).toFixed(1)}`).join(' ')}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={1.8}
+              />
+            ))}
+            {series[0]?.points[0] && (
+              <text x={PAD.l + 2} y={H - 4} fontSize={8} fill="#cbd5e1" className="tnum">
+                {absTime(new Date(minT).toISOString()).slice(5, 10)} → {absTime(new Date(maxT).toISOString()).slice(5, 10)}
+              </text>
+            )}
+          </svg>
+          <div className="flex items-center gap-3 px-2 pb-2 pt-0.5">
+            {series.map((s) => (
+              <span key={s.id} className="flex items-center gap-1 text-[9.5px] font-semibold" style={{ color: s.color }}>
+                <i className="h-[3px] w-3 rounded-full" style={{ backgroundColor: s.color }} />
+                {s.name}
+              </span>
+            ))}
+            <span className="ml-auto flex items-center gap-1 text-[9px] text-slate-300">│ 虚线 = 提交时点</span>
+          </div>
+        </div>
+      ) : (
+        <p className="py-8 text-center text-[10.5px] text-slate-300">受影响模块暂无巡检历史（跑一次巡检后绘制对照）</p>
+      )}
+    </div>
+  )
+}
+
+/** 最近提交：模块 chips（log --name-only 文件映射）+ 作者头像 + hash 复制 */
+function CommitHistory({ commits, moduleList }: { commits: GitLogRow[]; moduleList: { id: string; name: string; files: string[] }[] }) {
+  const [q, setQ] = useState('')
+  const rows = useMemo(() => {
+    const list = q
+      ? commits.filter((c) => c.subject.includes(q) || c.author.includes(q) || c.short.includes(q))
+      : commits
+    return list.slice(0, 8)
+  }, [commits, q])
+
+  const modsOf = (files: string[]) => {
+    const names = new Map<string, string>()
+    for (const f of files) {
+      const m = moduleOfFile(f, moduleList)
+      if (m) names.set(m.id, m.name)
+    }
+    return [...names.values()]
+  }
+
+  const AV_COLORS = ['#2563eb', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2']
+  const avatarColor = (s: string) => AV_COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length]
+
+  return (
+    <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <span className="text-[12.5px] font-bold text-slate-700">最近提交</span>
+        <span className="text-[10px] text-slate-300">与任务联动（footer 反查为 P1）</span>
+      </div>
+      <div className="px-4 pt-2.5">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="搜索提交 / 模块 / 作者…"
+          className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10.5px] text-slate-600 focus:border-blue-300 focus:outline-none"
+        />
+      </div>
+      <div className="py-1.5">
+        {rows.map((c) => {
+          const mods = modsOf(c.files)
+          return (
+            <div key={c.hash} className="px-4 py-2.5 hover:bg-slate-50/60">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[11.5px] font-bold text-slate-700">{c.subject}</p>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <span className="mono rounded bg-slate-100 px-1 py-px text-[9px] text-slate-500">{c.short}</span>
+                    <span className="truncate">{c.author}</span>
+                    <span className="shrink-0">{relTime(new Date(c.at * 1000).toISOString())}</span>
+                  </p>
+                  {mods.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {mods.slice(0, 3).map((m) => (
+                        <span key={m} className="rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-semibold text-slate-500">{m}</span>
+                      ))}
+                      {mods.length > 3 && <span className="rounded-full border border-dashed border-slate-200 px-1.5 py-px text-[9px] text-slate-300">+{mods.length - 3}</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-extrabold text-white"
+                    style={{ backgroundColor: avatarColor(c.author) }}
+                  >
+                    {c.author.slice(0, 2).toUpperCase()}
+                  </span>
+                  <button
+                    onClick={() => void navigator.clipboard?.writeText(c.hash)}
+                    className="rounded p-0.5 text-slate-200 hover:bg-slate-100 hover:text-slate-500"
+                    title="复制完整 hash"
+                  >
+                    <Copy size={9} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        {rows.length === 0 && <p className="py-8 text-center text-[10.5px] text-slate-300">没有匹配的提交。</p>}
+      </div>
+      <div className="flex border-t border-slate-100 px-4 py-2 text-[10px] text-slate-400">
+        <span>共 <b className="tnum text-slate-600">{commits.length}</b> 条提交</span>
+      </div>
+    </div>
+  )
+}

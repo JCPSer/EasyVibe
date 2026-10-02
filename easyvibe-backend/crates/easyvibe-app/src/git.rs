@@ -58,6 +58,8 @@ pub struct GitLogRow {
     pub email: String,
     pub at: i64,
     pub subject: String,
+    /// 本提交触及的文件（--name-only；前端映射模块 chips 用）
+    pub files: Vec<String>,
 }
 
 // ---------- 解析（纯函数） ----------
@@ -128,11 +130,15 @@ fn rename_target(p: &str) -> String {
     p.to_string()
 }
 
-/// 解析 `git log --format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s` 输出
+/// 解析 `git log --format=%x1e%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s --name-only` 输出。
+/// %x1e 为记录分隔符：每个提交块 = 首行字段（\x1f 分隔）+ 后续非空行的文件清单。
 pub fn parse_log(text: &str) -> Vec<GitLogRow> {
-    text.lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split('\u{1f}').collect();
+    text.split('\u{1e}')
+        .filter(|rec| !rec.trim().is_empty())
+        .filter_map(|rec| {
+            let mut lines = rec.lines();
+            let head = lines.next()?;
+            let f: Vec<&str> = head.split('\u{1f}').collect();
             if f.len() < 6 {
                 return None;
             }
@@ -143,6 +149,7 @@ pub fn parse_log(text: &str) -> Vec<GitLogRow> {
                 email: f[3].to_string(),
                 at: f[4].parse().unwrap_or(0),
                 subject: f[5].to_string(),
+                files: lines.map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect(),
             })
         })
         .collect()
@@ -181,7 +188,7 @@ pub async fn status(repo: &Path) -> Result<GitStatus, ApiError> {
 }
 
 pub async fn log(repo: &Path, limit: i64) -> Result<Vec<GitLogRow>, ApiError> {
-    let out = git(repo, &["log", &format!("-n{limit}"), "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s"]).await?;
+    let out = git(repo, &["log", &format!("-n{limit}"), "--format=%x1e%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s", "--name-only"]).await?;
     Ok(parse_log(&out))
 }
 
@@ -255,13 +262,15 @@ mod tests {
 
     #[test]
     fn log_parse_roundtrip() {
-        // git 实际格式：%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s（字段分隔全是 \x1f，subject 在最后）
-        let line = "abcdef123456\u{1f}abcdef1\u{1f}张伟\u{1f}zw@ex.com\u{1f}1790871442\u{1f}fix: x\u{1f}尾巴被丢弃";
-        let rows = parse_log(line);
-        assert_eq!(rows.len(), 1);
+        // git 实际格式：%x1e 记录分隔 + 字段全用 \x1f 分隔 + --name-only 文件行
+        let text = "\u{1e}abcdef123456\u{1f}abcdef1\u{1f}张伟\u{1f}zw@ex.com\u{1f}1790871442\u{1f}fix: x\nsrc/a.java\nsrc/b.java\n\u{1e}fedcba654321\u{1f}fedcba6\u{1f}李雷\u{1f}ll@ex.com\u{1f}1790870000\u{1f}feat: y\n\n";
+        let rows = parse_log(text);
+        assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].short, "abcdef1");
         assert_eq!(rows[0].at, 1790871442);
         assert_eq!(rows[0].subject, "fix: x");
+        assert_eq!(rows[0].files, vec!["src/a.java".to_string(), "src/b.java".to_string()]);
+        assert_eq!(rows[1].files.len(), 0, "空行不产生文件项");
     }
 
     #[test]
@@ -310,6 +319,7 @@ mod tests {
         let rows = log(&repo, 10).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].subject, "second");
+        assert!(rows[0].files.contains(&"a.txt".to_string()) && rows[0].files.contains(&"b_new.txt".to_string()), "--name-only 带出文件清单: {:?}", rows[0].files);
 
         // 撤销已跟踪修改 → 内容还原；撤销未跟踪 → 文件删除
         std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
