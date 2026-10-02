@@ -1814,7 +1814,9 @@ export default function App() {
     </div>
   )
   const topBar = (
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {topCenter}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
           className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
@@ -1863,6 +1865,7 @@ export default function App() {
         >
           <Settings size={12} />
         </button>
+        </div>
       </div>
   )
 
@@ -1944,7 +1947,7 @@ export default function App() {
   return (
     <>
       <CanvasBoundary>
-        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} center={topCenter} badges={{ review: pendingApprovals || undefined }}>
+        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} badges={{ review: pendingApprovals || undefined }}>
           {/* R3 B3：地图页 keep-alive——切页只隐藏不卸载，保住选中/过滤/展开子图/右栏对话草稿。
               审批典型动线「看 diff → 评审 → 回地图对照」此前每轮都被重置逼着重来 */}
           <div className="h-full" style={page === 'map' ? undefined : { display: 'none' }}>

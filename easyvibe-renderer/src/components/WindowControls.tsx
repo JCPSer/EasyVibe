@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Minus, Plus, X } from 'lucide-react'
+import { isTauriRuntime } from '@/lib/env'
 
 // 桌面壳自绘窗口控制（VSCode 范式）：系统标题栏退役（decorations=false），
 // 前端渲染三枚 macOS 式红绿灯；浏览器环境渲染等宽占位保持布局一致。
-function isTauriRuntime() {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-}
 
 type TauriWindow = {
   minimize: () => Promise<void>
