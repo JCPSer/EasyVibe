@@ -15,7 +15,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, ClipboardList, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -33,6 +33,7 @@ import { DriftPage } from '@/components/DriftPage'
 import { HealthPage } from '@/components/HealthPage'
 import { ChangesPage } from '@/components/ChangesPage'
 import { GitPage } from '@/components/GitPage'
+import { TodoPage } from '@/components/TodoPage'
 import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
@@ -1841,15 +1842,7 @@ export default function App() {
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
     workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} onLocateModule={() => handlePageChange('map')} />,
-    todo: (
-      <PlaceholderPage
-        title="我的待办"
-        milestone="M4-2"
-        description="你发起的任务都跑到哪一步了：运行中、等待你审批、失败重试——聚合一处，红点提醒。"
-        action={{ label: '先前往任务页', onClick: () => handlePageChange('tasks') }}
-        icon={ClipboardList}
-      />
-    ),
+    todo: <TodoPage backendRepo={backendRepo} onOpenReview={() => handlePageChange('review')} onCreateTask={(d) => setTaskDraft(d)} />,
     review: <ReviewPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
