@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, CircleDot, Copy, Loader2, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
+import { track } from '@/lib/analytics'
 import { absTime } from '@/lib/diffStat'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -12,6 +13,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 interface TodoTask {
   id: string
   title: string
+  description?: string
   status: string
   gate: string | null
   trust: string
@@ -194,7 +196,11 @@ export function TodoPage({
         {FILTERS.map((f) => (
           <button
             key={f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => {
+              // R3 D1：复检点消费率（过滤丸曝光）——治理闭环被不被用，门控靠这个数
+              if (f.key === 'recheck') track(backendRepo, 'ui.recheck.view', { count: counts.recheck })
+              setFilter(f.key)
+            }}
             className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-colors ${
               filter === f.key ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:text-blue-600'
             }`}
@@ -326,7 +332,7 @@ export function TodoPage({
                         onClick={() =>
                           onCreateTask({
                             title: `${t.title}（重提）`,
-                            description: t.title,
+                            description: t.description ?? t.title,
                             modules: t.modules ?? [],
                             acceptance: '',
                             source: 'manual',

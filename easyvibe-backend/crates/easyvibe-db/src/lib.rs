@@ -452,6 +452,8 @@ pub struct TaskRow {
     pub created_at: String,
     pub updated_at: String,
     pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
+    pub origin_task_id: Option<String>,    // R3 D2：返工来源（复制为新任务的原始任务）
+    pub successor_task_id: Option<String>, // R3 D2：原任务视角的反链（返工率聚合的命脉）
 }
 
 pub trait TaskRepository: Send + Sync {
@@ -479,6 +481,8 @@ pub trait TaskRepository: Send + Sync {
     /// M3-5（§11 🟡4）：后端重启会杀掉 spawn 的 agent（kill_on_drop）——
     /// 启动时把 running 任务标记 interrupted（awaiting_approval 是等用户决策，不受影响）
     fn interrupt_running(&self) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
+    /// R3 D2：返工链反链回填
+    fn set_successor(&self, id: &str, successor: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
 }
 
 pub struct SqliteTaskRepository {
@@ -498,24 +502,34 @@ struct TaskRowSql {
     status: String, trust: String, error: Option<String>, session_id: Option<String>, gate: Option<String>,
     prompt_tokens: Option<i64>, completion_tokens: Option<i64>, result: Option<String>, base_head: Option<String>, created_at: String, updated_at: String,
     pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
+    pub origin_task_id: Option<String>,    // R3 D2
+    pub successor_task_id: Option<String>, // R3 D2
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at, conversation_id: r.conversation_id,}
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at, conversation_id: r.conversation_id, origin_task_id: r.origin_task_id, successor_task_id: r.successor_task_id,}
     }
 }
 
 impl TaskRepository for SqliteTaskRepository {
     async fn create(&self, t: &TaskRow) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, result, created_at, updated_at, conversation_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, repo, title, description, modules, acceptance, source, context, status, trust, session_id, gate, prompt_tokens, completion_tokens, result, created_at, updated_at, conversation_id, origin_task_id, successor_task_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id).bind(&t.repo).bind(&t.title).bind(&t.description).bind(&t.modules)
         .bind(&t.acceptance).bind(&t.source).bind(&t.context).bind(&t.status).bind(&t.trust)
-        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at).bind(&t.conversation_id)
+        .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at).bind(&t.conversation_id).bind(&t.origin_task_id).bind(&t.successor_task_id)
         .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    /// R3 D2：返工链反链——复制出新任务时回填原任务的 successor
+    async fn set_successor(&self, id: &str, successor: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET successor_task_id = ? WHERE id = ?")
+            .bind(successor).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
     }
 
@@ -601,6 +615,48 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(now_secs())
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(res.rows_affected())
+    }
+}
+
+// ---------- 使用证据埋点（R3 D1，战略报告 P0-2：门控的秤） ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct EventCountRow {
+    pub name: String,
+    pub count: i64,
+}
+
+pub trait EventRepository: Send + Sync {
+    fn record(&self, repo: &str, name: &str, payload: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 门控读数：按事件名计数（L3 三道门、Harness 验证指标的数据源）
+    fn summary(&self, repo: &str) -> impl std::future::Future<Output = Result<Vec<EventCountRow>, ApiError>> + Send;
+}
+
+pub struct SqliteEventRepository {
+    pool: SqlitePool,
+}
+
+impl SqliteEventRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl EventRepository for SqliteEventRepository {
+    async fn record(&self, repo: &str, name: &str, payload: &str) -> Result<(), ApiError> {
+        sqlx::query("INSERT INTO events (repo, name, payload, created_at) VALUES (?, ?, ?, ?)")
+            .bind(repo).bind(name).bind(payload)
+            .bind(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string())
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn summary(&self, repo: &str) -> Result<Vec<EventCountRow>, ApiError> {
+        let rows = sqlx::query_as::<_, EventCountRow>("SELECT name, COUNT(*) AS count FROM events WHERE repo = ? GROUP BY name ORDER BY count DESC")
+            .bind(repo)
+            .fetch_all(&self.pool).await.map_err(db_err)?;
+        Ok(rows)
     }
 }
 
@@ -965,6 +1021,7 @@ mod tests {
             trust: "manual".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
             created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
+            origin_task_id: None, successor_task_id: None,
         };
         repo.create(&t).await.unwrap();
         repo.update_status("task-1", "running", None).await.unwrap();
@@ -1039,7 +1096,7 @@ mod tests {
             modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
             status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None, created_at: "1".into(), updated_at: "1".into(),
-            conversation_id: None,
+            conversation_id: None, origin_task_id: None, successor_task_id: None,
         };
         repo.create(&mk("task-run", "running")).await.unwrap();
         repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();

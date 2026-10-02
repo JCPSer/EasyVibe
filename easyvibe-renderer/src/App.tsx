@@ -42,6 +42,7 @@ import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
+import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
@@ -1588,16 +1589,32 @@ export default function App() {
           }
           if (msg.name === 'task.contractAlert') {
             // L2 过程预警：任务执行中哨兵抓到的新增越界——比终态红线早 N 分钟到达
+            // R3 D1：埋点（过程预警曝光）+ 操作按钮直达评审（此前裸 toast 无入口）；info 色与终态红区分
             const d = msg.data
             if (d?.repo !== backendRepo) return
-            toast(`影响面预警：任务 ${d.taskId} 正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'error')
+            track(d.repo, 'ui.contractAlert.shown', { taskId: d.taskId })
+            toast(`影响面预警：任务 ${d.taskId} 正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'info', {
+              label: '去评审',
+              onClick: () => {
+                track(d.repo, 'ui.contractAlert.click', { taskId: d.taskId })
+                handlePageChange('review')
+              },
+            })
             if (document.hidden) notifySystem('EasyVibe · 影响面预警', `任务 ${d.taskId} 正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.contractViolated') {
             // R2 裂缝#3：auto/supervised 任务无审批关——越界经 WS 主动送达（与审批通知同双通道）
+            // R3 D1：埋点（终态红线曝光）+ 直达评审操作
             const d = msg.data
             if (d?.repo !== backendRepo) return
-            toast(`影响面合约：任务 ${d.taskId} 越界改动 ${d.files?.length ?? 0} 个文件`, 'error')
+            track(d.repo, 'ui.contractViolated.shown', { taskId: d.taskId })
+            toast(`影响面合约：任务 ${d.taskId} 越界改动 ${d.files?.length ?? 0} 个文件`, 'error', {
+              label: '去评审',
+              onClick: () => {
+                track(d.repo, 'ui.contractViolated.click', { taskId: d.taskId })
+                handlePageChange('review')
+              },
+            })
             if (document.hidden) notifySystem('EasyVibe · 影响面越界', `任务 ${d.taskId} 越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.statusChanged') {
@@ -1632,6 +1649,8 @@ export default function App() {
       window.clearTimeout(timer)
       ws?.close()
     }
+    // handlePageChange/track 仅用于事件回调内的瞬态动作（跳页/埋点），不应重启 WS 连接
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendRepo])
 
   useEffect(() => {

@@ -260,15 +260,15 @@ export function ReviewPage({
                     return (
                       <button
                         onClick={() =>
+                          // R3 D2：驳回理由注入与血缘回填已由后端统一（create_task 读 context.origin_task_id），
+                          // 前端三入口只传来源 id——此前三个入口记忆强度不一致（F10）
                           onCreateTask({
                             title: `${sel.title}（重提）`,
-                            description: reason
-                              ? `${sel.description}\n\n——上次驳回理由：${reason}（原任务 ${sel.id}）`
-                              : sel.description,
+                            description: sel.description,
                             modules: sel.modules ?? [],
                             acceptance: sel.acceptance ?? '',
                             source: 'manual',
-                            context: { origin_task_id: sel.id, ...(reason ? { reject_reason: reason } : {}) },
+                            context: { origin_task_id: sel.id },
                           })
                         }
                         className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"

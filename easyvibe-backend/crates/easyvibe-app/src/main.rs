@@ -34,6 +34,8 @@ pub struct AppState {
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
     pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
     pub conversation_repo: Arc<easyvibe_db::SqliteConversationRepository>,
+    /// R3 D1：使用证据埋点（门控的秤——L3 三道门、Harness 验证指标的数据源）
+    pub event_repo: Arc<easyvibe_db::SqliteEventRepository>,
     /// 会话写串行化（审查 🟡1）：append+compact 是 read-modify-write，SQLite 语句原子
     /// 不保证这段复合操作；发送中点"压缩上下文"是 UI 允许的真实并发
     pub chat_lock: Arc<tokio::sync::Mutex<()>>,
@@ -108,6 +110,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
+        // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
+        .route("/repos/{id}/events", axum::routing::post(ingest_event))
+        .route("/repos/{id}/events/summary", get(events_summary))
         .route("/repos/{id}/git/status", get(git::get_git_status))
         .route("/repos/{id}/git/log", get(git::get_git_log))
         .route("/repos/{id}/git/commit", axum::routing::post(git::post_git_commit))
@@ -577,6 +582,27 @@ fn ensure_agent_available(st: &AppState) -> Result<(), ApiError> {
 }
 
 /// 健康历史：巡检运行列表（域 2 的第一个读接口）
+/// R3 D1：前端交互埋点入库（dot.case 事件名 + JSON 计数维度；服务端事件由总线持久化任务代写）
+async fn ingest_event(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<serde_json::Value>) -> Result<Response, AppError> {
+    use easyvibe_db::EventRepository as _;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let name = body["name"].as_str().unwrap_or_default().trim();
+    if name.is_empty() || name.len() > 64 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-') {
+        return Err(AppError(ApiError::BadRequest("事件名须为 dot.case（字母数字._-，≤64）".into())));
+    }
+    let payload = body["payload"].as_object().map(|_| body["payload"].to_string()).unwrap_or_else(|| "{}".into());
+    st.event_repo.record(&repo.id, name, &payload).await?;
+    Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
+/// R3 D1：门控读数——按事件名计数（L3 三道门、Harness 验证指标的秤）
+async fn events_summary(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    use easyvibe_db::EventRepository as _;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let rows = st.event_repo.summary(&repo.id).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
 async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     use easyvibe_db::HealthRepository as _;
     let runs = st.health_repo.list_runs(&id, 20).await?;
@@ -915,6 +941,10 @@ struct CreateTaskRequest {
     /// M4-2：任务←→会话关联（对话升级/工作台聚合）
     #[serde(default)]
     conversation_id: Option<String>,
+    /// R3 D2：返工来源（驳回→复制为新任务）——后端统一注入驳回理由并回填反链，
+    /// 三个前端入口（评审/收件箱/任务页）不必各自拼理由
+    #[serde(default)]
+    origin_task_id: Option<String>,
 }
 
 /// 影响面合约展开：声明模块 → 其 files glob 边界（地图缺失/模块未命中时静默不约束——
@@ -946,7 +976,7 @@ async fn task_ctx_with_contract(
 }
 
 async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<CreateTaskRequest>) -> Result<Response, AppError> {
-    use easyvibe_db::TaskRepository as _;
+    use easyvibe_db::{ApprovalRepository as _, EventRepository as _, TaskRepository as _};
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if body.description.trim().is_empty() {
         return Err(AppError(ApiError::BadRequest("需求描述不能为空".into())));
@@ -954,17 +984,53 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string();
     let task_id = format!("task-{}", &now);
     let repo_id = repo.id.clone();
+    // R3 D2：返工来源——三入口统一在后端注入驳回理由（此前只有评审页注入，记忆强度取决于入口），
+    // 并回填原任务的 successor 反链（返工率聚合的命脉）。
+    // 前端惯例放在 context.origin_task_id（TaskDraft.context 透传），兼容顶层 origin_task_id
+    let origin_input = body.origin_task_id.or_else(|| {
+        body.context
+            .get("origin_task_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    let mut description = body.description;
+    let mut origin_task_id = None;
+    if let Some(origin_id) = origin_input.as_deref() {
+        if let Some(origin) = st.task_repo.get(origin_id).await? {
+            origin_task_id = Some(origin.id.clone());
+            let reason = st
+                .approval_repo
+                .list_by_task(&origin.id)
+                .await
+                .ok()
+                .map(|aps| {
+                    aps.into_iter()
+                        .filter(|a| a.decision == "rejected" && a.note.as_deref().map(str::trim).is_some_and(|n| !n.is_empty()))
+                        .map(|a| a.note.unwrap())
+                        .collect::<Vec<_>>()
+                        .join("；")
+                })
+                .filter(|r| !r.is_empty());
+            if let Some(r) = reason {
+                description = format!("{description}\n\n—— 返工自 {}（驳回理由：{}）", origin.id, r);
+            } else {
+                description = format!("{description}\n\n—— 返工自 {}", origin.id);
+            }
+        }
+    }
+    let contract_ctx = task_ctx_with_contract(&st, &repo, &body.modules, body.context.clone()).await;
+    let has_contract = contract_ctx.get("contract").is_some();
     let row = easyvibe_db::TaskRow {
         id: task_id.clone(),
         repo: repo_id.clone(),
         title: body.title,
-        description: body.description,
+        description,
         modules: serde_json::to_string(&body.modules).unwrap_or_else(|_| "[]".into()),
         acceptance: body.acceptance,
         source: if body.source.is_empty() { "manual".into() } else { body.source },
         // 影响面合约（战略审查第一 P0）：声明的模块在创建时展开为 glob 边界写入 context——
         // 终态采集对全部变更文件做确定性越界校验（task_exec::collect_task_result），零 LLM。
-        context: serde_json::to_string(&task_ctx_with_contract(&st, &repo, &body.modules, body.context.clone()).await).unwrap_or_else(|_| "{}".into()),
+        context: serde_json::to_string(&contract_ctx).unwrap_or_else(|_| "{}".into()),
         status: "pending".into(), // M3-3：harness 执行引擎接走
         trust: match body.trust.as_str() {
             "auto" => "auto".into(),
@@ -981,8 +1047,19 @@ async fn create_task(State(st): State<AppState>, Path(id): Path<String>, Json(bo
         base_head: None,
         created_at: now.clone(),
         updated_at: now,
+        origin_task_id,
+        successor_task_id: None,
     };
     st.task_repo.create(&row).await?;
+    // 返工链反链回填（原任务 → 本任务）
+    if let Some(origin_id) = row.origin_task_id.as_deref() {
+        let _ = st.task_repo.set_successor(origin_id, &task_id).await;
+    }
+    // R3 D1：影响模块填写率/合约声明率——L3 门①的原始计数
+    let _ = st
+        .event_repo
+        .record(&repo_id, "task.created", &serde_json::json!({ "trust": row.trust, "modules": body.modules.len(), "hasContract": has_contract, "rework": row.origin_task_id.is_some() }).to_string())
+        .await;
     // M3-3：入队执行（harness 引擎；并发上限 4，审批门 M3-4 接入）
     st.executor.clone().enqueue_pending(Some(&repo_id)).await;
     Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "success": true, "data": { "id": task_id } }))).into_response())
@@ -1008,6 +1085,7 @@ async fn list_tasks(
             "status": t.status, "trust": t.trust, "error": t.error,
             "gate": t.gate, "sessionId": t.session_id,
             "conversationId": t.conversation_id,
+            "originTaskId": t.origin_task_id, "successorTaskId": t.successor_task_id,
             "result": t.result.as_deref().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok()),
             "createdAt": t.created_at, "updatedAt": t.updated_at,
         }))
@@ -1739,6 +1817,32 @@ async fn main() {
     let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(database.pool().clone()));
     let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(database.pool().clone()));
 
+    // R3 D1：总线持久化——关键服务端事件落 events 表（越界率/复检消费率的秤），
+    // 集中一处订阅，业务代码零侵入（前端交互事件走 POST /events 另一条路）
+    {
+        use easyvibe_db::EventRepository as _;
+        let mut rx = event_bus.subscribe();
+        let events = Arc::new(easyvibe_db::SqliteEventRepository::new(database.pool().clone()));
+        tokio::spawn(async move {
+            while let Ok(e) = rx.recv().await {
+                let (repo, name, payload) = match e {
+                    BusEvent::TaskContractAlert { repo, task_id, files } => {
+                        (repo, "task.contractAlert", serde_json::json!({ "taskId": task_id, "files": files.len() }))
+                    }
+                    BusEvent::TaskContractViolated { repo, task_id, files } => {
+                        (repo, "task.contractViolated", serde_json::json!({ "taskId": task_id, "files": files.len() }))
+                    }
+                    BusEvent::PatrolFinished { repo, run_id, status } => {
+                        (repo, "patrol.finished", serde_json::json!({ "runId": run_id, "status": status }))
+                    }
+                    _ => continue,
+                };
+                let _ = events.record(&repo, name, &payload.to_string()).await;
+            }
+        });
+    }
+
+
     // Y4 清债：主密钥走 KeyProvider 抽象（当前=文件源；二期换系统钥匙串只换实现）
     let cipher = easyvibe_common::SecretCipher::from_provider(&easyvibe_common::FileKeyProvider::new(&data_dir))
         .expect("主密钥装载失败");
@@ -1835,6 +1939,7 @@ async fn main() {
         task_repo,
         approval_repo,
         conversation_repo,
+        event_repo: Arc::new(easyvibe_db::SqliteEventRepository::new(database.pool().clone())),
         chat_lock: Arc::new(tokio::sync::Mutex::new(())),
         executor,
         harness: harness.clone(),
@@ -1960,6 +2065,7 @@ mod tests {
             task_repo,
             approval_repo,
             conversation_repo,
+            event_repo: Arc::new(easyvibe_db::SqliteEventRepository::new(db.pool().clone())),
             chat_lock: Arc::new(tokio::sync::Mutex::new(())),
             executor,
             harness,
@@ -2451,4 +2557,122 @@ mod tests {
             "S1 应已终态（否则本测试未覆盖竞态窗口）: {s1_status:?}"
         );
     }
+    #[tokio::test]
+    async fn rework_lineage_links_origin_and_injects_reason() {
+        // R3 D2 回归：复制为新任务（返工）三入口统一——
+        // ① originTaskId 建立血缘并回填原任务 successor 反链（返工率聚合的命脉）
+        // ② 驳回理由由后端从原任务审批留痕自动注入描述（此前只有评审页入口注入）
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("lineage").await;
+        let app = build_router(state.clone());
+
+        // 原任务：manual 停在计划关 → 驳回（带理由）
+        let post = |body: serde_json::Value| {
+            let app = app.clone();
+            let repo = repo.clone();
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let resp = post(serde_json::json!({ "title": "原任务", "description": "第一次尝试", "trust": "manual" })).await;
+        assert_eq!(resp.status(), axum::http::StatusCode::CREATED);
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::json!({ "title": "原任务", "description": "第一次尝试", "trust": "manual" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let origin_id = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string();
+
+        // 驳回（计划关）带理由——decide 需要 expected_gate（当前 gate=plan）
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/tasks/{origin_id}/decide"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::json!({ "decision": "rejected", "note": "方案风险过大", "gate": "plan" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "驳回应成功");
+
+        // 返工：复制为新任务（此前端行为是带 originTaskId 创建）
+        let resp = post(serde_json::json!({
+            "title": "返工任务", "description": "按驳回意见调整", "trust": "manual",
+            "context": { "origin_task_id": origin_id },
+        }))
+        .await;
+        assert_eq!(resp.status(), axum::http::StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let new_id = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string();
+
+        let origin = state.task_repo.get(&origin_id).await.unwrap().unwrap();
+        assert_eq!(origin.successor_task_id.as_deref(), Some(new_id.as_str()), "原任务必须回填 successor 反链");
+        let task = state.task_repo.get(&new_id).await.unwrap().unwrap();
+        assert_eq!(task.origin_task_id.as_deref(), Some(origin_id.as_str()), "新任务必须记录返工来源");
+        assert!(
+            task.description.contains("方案风险过大"),
+            "驳回理由必须由后端自动注入描述（三入口统一），实际: {}",
+            task.description
+        );
+
+        // 埋点：task.created 事件带合约/模块计数
+        use easyvibe_db::EventRepository as _;
+        let summary = state.event_repo.summary(&repo).await.unwrap();
+        let created = summary.iter().find(|r| r.name == "task.created");
+        assert!(created.is_some(), "创建事件必须落库: {:?}", summary);
+        assert!(created.unwrap().count >= 2);
+    }
+
+    #[tokio::test]
+    async fn event_ingest_validates_name_and_summarizes() {
+        // R3 D1：前端埋点入库（dot.case 校验）+ 门控读数端点
+        use easyvibe_db::EventRepository as _;
+        let (state, repo) = chat_state("events").await;
+        let app = build_router(state.clone());
+        let post = |name: &str| {
+            let app = app.clone();
+            let repo = repo.clone();
+            let name = name.to_string();
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(format!("/api/repos/{repo}/events"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(serde_json::json!({ "name": name, "payload": { "a": 1 } }).to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let resp = post("ui.contractAlert.click").await;
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let resp = post("非法 名字!").await;
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST, "非法事件名必须 400");
+
+        let resp = app
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/events/summary")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let data = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        assert!(data.as_array().unwrap().iter().any(|r| r["name"] == "ui.contractAlert.click" && r["count"] == 1));
+        // 仓储直读兜底
+        let summary = state.event_repo.summary(&repo).await.unwrap();
+        assert_eq!(summary.iter().find(|r| r.name == "ui.contractAlert.click").unwrap().count, 1);
+    }
 }
+

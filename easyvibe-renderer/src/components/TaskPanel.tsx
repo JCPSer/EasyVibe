@@ -225,13 +225,14 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
             {t.status === 'rejected' && onCreateTask && (
               <button
                 onClick={() =>
+                  // R3 D2：血缘与驳回理由注入由后端统一（context.origin_task_id）
                   onCreateTask({
                     title: `${t.title}（重提）`,
                     description: t.description,
                     modules: t.modules ?? [],
                     acceptance: t.acceptance ?? '',
                     source: 'manual',
-                    context: {},
+                    context: { origin_task_id: t.id },
                   })
                 }
                 className="mt-1.5 flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-micro font-semibold text-slate-500 hover:bg-slate-50"

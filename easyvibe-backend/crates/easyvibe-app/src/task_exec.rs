@@ -867,6 +867,8 @@ mod tests {
             base_head: None,
             created_at: "1".into(),
             updated_at: "1".into(),
+            origin_task_id: None,
+            successor_task_id: None,
         }
     }
 
