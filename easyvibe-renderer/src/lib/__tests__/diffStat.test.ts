@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { absTime, aggregateByModule, parseDiffStat, relTime } from '@/lib/diffStat'
+import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime } from '@/lib/diffStat'
 
 const SAMPLE = ` src/App.tsx                | 12 ++++++-------
  src/components/Node.tsx    |  5 ++---
@@ -59,6 +59,15 @@ describe('aggregateByModule', () => {
     expect(core.fileCount).toBe(2)
     expect(agg.find((a) => a.id === '_other')!.name).toBe('未映射文件')
     expect(agg[0].id).toBe('core')
+  })
+
+  it('R2 边界：前缀必须有路径段边界（core 不得匹配 coreography）', () => {
+    const mods = [{ id: 'core', name: '核心', files: ['src/core/**'] }]
+    expect(moduleOfFile('src/core/a.ts', mods)?.id).toBe('core')
+    expect(moduleOfFile('lib/src/core/deep/x.ts', mods)?.id).toBe('core')
+    expect(moduleOfFile('src/coreography/data.ts', mods)).toBeNull()
+    expect(moduleOfFile('src/core_plus/x.ts', mods)).toBeNull()
+    expect(aggregateByModule([{ path: 'src/coreography/d.ts', adds: 1, dels: 0 }], mods)[0].id).toBe('_other')
   })
 })
 

@@ -1540,6 +1540,13 @@ export default function App() {
               commitsSinceMap: msg.data.commitsSinceMap,
             })
           }
+          if (msg.name === 'task.contractViolated') {
+            // R2 裂缝#3：auto/supervised 任务无审批关——越界经 WS 主动送达（与审批通知同双通道）
+            const d = msg.data
+            if (d?.repo !== backendRepo) return
+            toast(`影响面合约：任务 ${d.taskId} 越界改动 ${d.files?.length ?? 0} 个文件`, 'error')
+            if (document.hidden) notifySystem('EasyVibe · 影响面越界', `任务 ${d.taskId} 越界：${(d.files ?? []).slice(0, 3).join('、')}`)
+          }
           if (msg.name === 'task.statusChanged') {
             const d = msg.data
             if (d?.repo !== backendRepo) return

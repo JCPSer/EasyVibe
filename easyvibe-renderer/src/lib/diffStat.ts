@@ -57,7 +57,8 @@ export function parseDiffStat(text: string): DiffStat {
   }
 }
 
-/** 单文件归属模块（glob 前缀匹配；未命中返回 null）——aggregateByModule 与 GitPage 分组共用 */
+/** 单文件归属模块（glob 前缀匹配，带路径段边界；未命中返回 null）——
+ *  R2 审查实锤：startsWith("src/core") 会放过 src/coreography/，前缀必须有边界。 */
 export function moduleOfFile(
   path: string,
   modules: { id: string; name: string; files: string[] }[],
@@ -65,7 +66,7 @@ export function moduleOfFile(
   const mod = modules.find((mm) =>
     mm.files.some((g) => {
       const base = g.replace(/\*\*.*$/, '').replace(/\/$/, '')
-      return path.startsWith(base) || path.includes('/' + base + '/')
+      return base !== '' && (path.startsWith(base + '/') || path.includes('/' + base + '/'))
     }),
   )
   return mod ? { id: mod.id, name: mod.name } : null

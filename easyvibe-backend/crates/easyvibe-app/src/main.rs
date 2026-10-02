@@ -65,6 +65,8 @@ pub enum BusEvent {
     Progress { repo: String, progress: Value },
     SessionStatus(SessionStatusChanged),
     TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
+    /// R2 裂缝#3：影响面合约越界（auto/supervised 无审批关，必须主动送达）
+    TaskContractViolated { repo: String, task_id: String, files: Vec<String> },
     /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
     Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
     /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
@@ -1570,6 +1572,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "task.statusChanged".into(),
                     data: serde_json::json!({ "repo": repo, "taskId": task_id, "status": status, "gate": gate }),
                 },
+                BusEvent::TaskContractViolated { repo, task_id, files } => WsMessage {
+                    name: "task.contractViolated".into(),
+                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
+                },
                 BusEvent::Freshness { repo, status, latest_commit_at, commits_since_map } => WsMessage {
                     name: "freshness.changed".into(),
                     data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
@@ -1840,6 +1846,7 @@ async fn main() {
         Arc::new(agent_args.clone()),
         std::env::var("EASYVIBE_MAX_PARALLEL").ok().and_then(|v| v.parse().ok()).unwrap_or(4),
         settings_repo.clone(),
+        Some(event_bus.clone()),
     );
     // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记
     // interrupted（awaiting_approval 等用户决策的任务不受影响）；pending 任务照常重新入队
@@ -2007,6 +2014,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             settings_repo.clone(),
+            None,
         );
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {

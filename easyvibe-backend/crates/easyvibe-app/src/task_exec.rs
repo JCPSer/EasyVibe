@@ -23,6 +23,11 @@ pub struct TaskExecutor {
     pub agent_args: Arc<Vec<String>>,
     /// 并行执行上限（§11 🟡7 = 4）
     pub permits: Arc<Semaphore>,
+    /// 影响面合约·启动基线：task_id → 启动时工作区脏文件快照（采集时扣减，防冤案）。
+    /// 内存态即可：spawn 与采集同进程；重启把 running 任务标 interrupted，基线随之作废。
+    pub baselines: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>>,
+    /// R2 裂缝#3：越界事件出口——auto/supervised 任务无审批关，越界必须主动送达（WS→通知）
+    pub events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
 }
 
 impl TaskExecutor {
@@ -36,6 +41,7 @@ impl TaskExecutor {
         agent_args: Arc<Vec<String>>,
         max_parallel: usize,
         settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
+        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
@@ -48,6 +54,8 @@ impl TaskExecutor {
             settings_repo,
             // Y2 清债：并发上限可配（env/启动配置传入），默认 4 不再焊死
             permits: Arc::new(Semaphore::new(max_parallel.max(1))),
+            baselines: Default::default(),
+            events,
         })
     }
 
@@ -204,6 +212,13 @@ impl TaskExecutor {
         if let Some(head) = &base_head {
             let _ = self.task_repo.set_base_head(&task.id, head).await;
         }
+        // 影响面合约·基线对账：启动时的脏文件快照（采集时扣减——任务前的陈年脏文件不算越界）
+        {
+            let baseline = dirty_files(&repo.root).await;
+            if let Ok(mut m) = self.baselines.lock() {
+                m.insert(task.id.clone(), baseline);
+            }
+        }
         let prompt = {
             let h = self.harness.read().await;
             assemble_task_prompt(&h.framework_transparent, &task)
@@ -222,6 +237,7 @@ impl TaskExecutor {
                 info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);
                 let this = self.clone();
                 let task_id = task.id.clone();
+                let repo_name = task.repo.clone();
                 let repo_root = repo.root.clone();
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
@@ -239,9 +255,26 @@ impl TaskExecutor {
                                 // M4-1：执行成功 → 产物采集（RESULT 行 + git 摘要 + development_docs 归档），
                                 // 供 diff 关审批展示；采集失败不阻断终态回写
                                 if !failed {
+                                    let baseline = this.baselines.lock().ok().and_then(|mut m| m.remove(&task_id)).unwrap_or_default();
                                     if let Some(json) =
-                                        collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id, &this.task_repo).await
+                                        collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id, &this.task_repo, &baseline).await
                                     {
+                                        // R2 裂缝#3：auto/supervised 无审批关——越界经 WS 事件主动送达（toast+系统通知）
+                                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+                                            let files: Vec<String> = v["contractViolations"].as_array().map(|a| {
+                                                a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()
+                                            }).unwrap_or_default();
+                                            if !files.is_empty() {
+                                                if let Some(tx) = &this.events {
+                                                    // broadcast::Sender::send 是同步方法
+                                                    let _ = tx.send(crate::BusEvent::TaskContractViolated {
+                                                        repo: repo_name.clone(),
+                                                        task_id: task_id.clone(),
+                                                        files,
+                                                    });
+                                                }
+                                            }
+                                        }
                                         let _ = this.task_repo.set_result(&task_id, &json).await;
                                         info!("[task-exec] 任务 {} 产物已归档（diff 关供料）", task_id);
                                     }
@@ -504,8 +537,9 @@ pub fn parse_result_line(output: &str) -> Option<serde_json::Value> {
 
 // ---------- 影响面合约（战略审查第一 P0：任务声明的模块从注释升级为确定性边界） ----------
 
-/// 路径是否落在合约 glob 范围内——与前端 moduleOfFile 严格同口径：
-/// 取 glob 的 `**` 前前缀、去尾斜杠，前缀匹配或路径段包含即命中。零 LLM，确定性。
+/// 路径是否落在合约 glob 范围内——与前端 moduleOfFile 同口径且**带路径段边界**：
+/// `**` 前前缀去尾斜杠后，须以 `base/` 开头（或整段包含 `/base/`）——
+/// R2 审查实锤：starts_with("src/core") 会放过 src/coreography/，前缀必须有边界。
 pub fn path_within_contract(path: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|g| {
         let base = match g.find("**") {
@@ -513,7 +547,10 @@ pub fn path_within_contract(path: &str, patterns: &[String]) -> bool {
             None => g.as_str(),
         };
         let base = base.trim_end_matches('/');
-        !base.is_empty() && (path.starts_with(base) || path.contains(&format!("/{base}/")))
+        if base.is_empty() {
+            return false;
+        }
+        path.starts_with(&format!("{base}/")) || path.contains(&format!("/{base}/"))
     })
 }
 
@@ -528,31 +565,66 @@ pub fn contract_patterns_from_context(context_json: &str) -> Vec<String> {
         .collect()
 }
 
-/// 工作区全部变更文件（porcelain：M/A/D/R/?? 全覆盖——diff --stat 漏未跟踪文件，
-/// 而 agent 新建文件正是最常见的越界形态）。非 git 仓库返回空。
-pub async fn changed_files(repo_root: &std::path::Path) -> Vec<String> {
-    let out = match tokio::time::timeout(
+/// 任务启动后变更的文件（越界校验候选集）：
+/// - 已跟踪：`git diff --name-only <base>`（base 缺省 HEAD）——只算基线之后的改动
+/// - 未跟踪：porcelain -uall 的 `??` 行（diff 系命令漏未跟踪，新建文件恰是最常见越界形态）
+pub async fn changed_files(repo_root: &std::path::Path, base: Option<&str>) -> Vec<String> {
+    let run = |args: &[&str]| {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::process::Command::new("git").args(args).current_dir(repo_root).output(),
+        )
+    };
+    let mut out: Vec<String> = vec![];
+    let diff_args: Vec<&str> = match base {
+        Some(b) => vec!["diff", "--name-only", b],
+        None => vec!["diff", "--name-only", "HEAD"],
+    };
+    if let Ok(Ok(o)) = run(&diff_args).await {
+        if o.status.success() {
+            out.extend(String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()));
+        }
+    }
+    if let Ok(Ok(o)) = run(&["status", "--porcelain=v1", "-uall"]).await {
+        if o.status.success() {
+            out.extend(
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter(|l| l.starts_with("?? "))
+                    .filter_map(|l| l.get(3..).map(str::trim).map(str::to_string))
+                    .filter(|l| !l.is_empty()),
+            );
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// 启动基线快照：任务开始时工作区的全部脏文件（已跟踪改动 + 未跟踪）。
+/// 采集时从越界候选集中扣减——任务之前就在那儿的陈年脏文件不进冤案（R2 审查裂缝#1）。
+/// 存内存（spawn 与采集同进程；重启会把 running 任务标 interrupted，基线随之失效）。
+pub async fn dirty_files(repo_root: &std::path::Path) -> Vec<String> {
+    let Ok(Ok(o)) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        // -uall：未跟踪文件逐个列出（默认折叠成目录条目 "stray/"，越界检测会漏文件级路径）
         tokio::process::Command::new("git").args(["status", "--porcelain=v1", "-uall"]).current_dir(repo_root).output(),
     )
     .await
-    {
-        Ok(Ok(o)) if o.status.success() => o,
-        _ => return vec![],
+    else {
+        return vec![]
     };
-    String::from_utf8_lossy(&out.stdout)
+    if !o.status.success() {
+        return vec![];
+    }
+    let mut v: Vec<String> = String::from_utf8_lossy(&o.stdout)
         .lines()
-        .filter_map(|l| {
-            let rest = l.get(3..)?.trim();
-            if rest.is_empty() {
-                return None;
-            }
-            // 重命名 "old -> new" 取新路径（与前端 parse_porcelain 同口径）
-            let p = rest.split_once(" -> ").map(|(_, to)| to.trim()).unwrap_or(rest);
-            Some(p.trim_matches('"').to_string())
-        })
-        .collect()
+        .filter_map(|l| l.get(3..).map(str::trim).map(str::to_string))
+        .filter(|l| !l.is_empty())
+        .map(|p| p.split_once(" -> ").map(|(_, to)| to.trim().to_string()).unwrap_or(p))
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// git 变更摘要（diff 关供料）：`git diff --stat`（已跟踪改动）+ `git status --porcelain`
@@ -632,6 +704,7 @@ pub async fn collect_task_result(
     repo_root: &std::path::Path,
     task_id: &str,
     task_repo: &easyvibe_db::SqliteTaskRepository,
+    baseline: &[String],
 ) -> Option<String> {
     let output = session_manager.take_output(session_id).await.unwrap_or_default();
     let parsed = parse_result_line(&output);
@@ -649,16 +722,18 @@ pub async fn collect_task_result(
         warnings.push("agent 未输出 [EASYVIBE-RESULT] 归档行——执行可能未按协议完成，审批时请核对 diff 是否为本任务改动".into());
     }
     // 影响面合约：越界写文件 = 红线（注入式护栏哲学——不阻断，但审批人必须看见）。
-    // 确定性校验：porcelain 全量变更文件 × 创建时展开的模块 glob，零 LLM。
+    // 确定性校验：基线之后的变更文件（扣启动时已有的脏文件，防冤案）× 创建时展开的模块 glob，零 LLM。
     let task_ctx = task_repo.get(task_id).await.ok().flatten().map(|t| t.context).unwrap_or_default();
     let contract = contract_patterns_from_context(&task_ctx);
+    let baseline_set: std::collections::HashSet<&str> = baseline.iter().map(String::as_str).collect();
     // 产品自身 bookkeeping（.easyvibe/ 归档/地图产物）不属于 agent 改动——排除出合约校验
     let contract_violations: Vec<String> = if contract.is_empty() {
         vec![]
     } else {
-        changed_files(repo_root)
+        changed_files(repo_root, base_owned.as_deref())
             .await
             .into_iter()
+            .filter(|p| !baseline_set.contains(p.as_str()))
             .filter(|p| !p.starts_with(".easyvibe/"))
             .filter(|p| !path_within_contract(p, &contract))
             .collect()
@@ -821,6 +896,8 @@ mod tests {
         assert!(path_within_contract("src/ui/Button.tsx", &pats));
         assert!(!path_within_contract("src/other/c.ts", &pats));
         assert!(!path_within_contract("README.md", &pats));
+        assert!(!path_within_contract("src/coreography/data.ts", &pats), "R2 实锤：前缀必须有段边界");
+        assert!(!path_within_contract("src/core_plus/x.ts", &pats), "下划线前缀同样不得误配");
         // 空合约 = 不约束（未声明模块的任务不校验）
         assert!(!path_within_contract("anything", &[]));
         // context 提取
@@ -857,7 +934,7 @@ mod tests {
         // 界内修改 + 越界未跟踪新文件
         std::fs::write(repo.join("allowed/base.txt"), "1\n2\n").unwrap();
         std::fs::write(repo.join("stray/out.txt"), "oops\n").unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract", &task_repo).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract", &task_repo, &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let viol = v["contractViolations"].as_array().expect("必须有越界列表");
         assert_eq!(viol.len(), 1, "allowed/base.txt 界内、stray/out.txt 越界: {viol:?}");
@@ -872,9 +949,51 @@ mod tests {
         clean.id = "task-contract-clean".into();
         clean.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
         task_repo.create(&clean).await.unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", &task_repo).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", &task_repo, &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["contractViolations"].as_array().unwrap().is_empty(), "界内改动零误报: {v}");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn contract_baseline_excludes_preexisting_dirt() {
+        // R2 裂缝#1 回归：任务启动前就存在的脏文件（baseline 快照）不得算越界——
+        // 否则红线出冤案：陈年脏仓库里每个任务都被误报
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let sessions = SessionManager::new(tx);
+        let db = easyvibe_db::Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let repo = std::env::temp_dir().join("ev-contract-baseline-test");
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(repo.join("allowed")).unwrap();
+        std::fs::create_dir_all(repo.join("legacy")).unwrap();
+        std::fs::create_dir_all(repo.join("stray")).unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("allowed/base.txt"), "1\n").unwrap();
+        std::fs::write(repo.join("legacy/old.txt"), "old\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        // 任务启动前 legacy/old.txt 已被改脏（baseline 快照会收录它）
+        std::fs::write(repo.join("legacy/old.txt"), "old\ndirty\n").unwrap();
+        // 任务执行：界内改动 + 全新越界文件
+        std::fs::write(repo.join("allowed/base.txt"), "1\n2\n").unwrap();
+        std::fs::write(repo.join("stray/new.txt"), "agent\n").unwrap();
+
+        let mut task = sample_task("running");
+        task.id = "task-baseline".into();
+        task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
+        task_repo.create(&task).await.unwrap();
+        // 基线 = 启动时脏文件（legacy/old.txt）——spawn 路径由 dirty_files 提供，测试直接给等价快照
+        let baseline = vec!["legacy/old.txt".to_string()];
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-baseline", &task_repo, &baseline).await.expect("有 diff 即应采集");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let viol = v["contractViolations"].as_array().unwrap();
+        assert_eq!(viol.len(), 1, "启动前的脏文件 legacy/old.txt 不得算越界: {viol:?}");
+        assert_eq!(viol[0].as_str().unwrap(), "stray/new.txt");
         let _ = std::fs::remove_dir_all(&repo);
     }
 
@@ -896,7 +1015,7 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
         std::fs::write(repo.join("x.txt"), "1\n2\n").unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn", &task_repo).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn", &task_repo, &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["result"].is_null());
         assert!(
@@ -929,6 +1048,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
 
         // pending 任务不可审批（此前会复活 spawn）
@@ -986,6 +1106,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         let mut task = sample_task("pending");
         task.repo = "ev-task-exec-test".into();
@@ -1041,6 +1162,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         let mut task = sample_task("pending");
         task.id = "task-auto".into();
@@ -1128,6 +1250,7 @@ mod tests {
             Arc::new(vec!["[EASYVIBE-RESULT] {\"summary\":\"修复完成\",\"changed_modules\":[\"m1\"]}".to_string()]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         let mut task = sample_task("pending");
         task.id = "task-collect".into();
@@ -1173,6 +1296,7 @@ mod tests {
             harness_stub("框架"), Arc::new("true".into()), Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         // 低危：单模块、短描述、无高危词 → 直通 done
         let mut low = sample_task("pending");
@@ -1225,6 +1349,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         let mut task = sample_task("pending");
         task.trust = "manual".into();
@@ -1263,6 +1388,7 @@ mod tests {
             Arc::new(vec![]),
             4,
             Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
         );
         let mut task = sample_task("pending");
         task.trust = "auto".into(); // auto 直通 → spawn_and_watch → 仓库未注册 → failed
