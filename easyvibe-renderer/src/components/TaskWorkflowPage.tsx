@@ -26,7 +26,7 @@ interface TaskItem {
   error?: string | null
   createdAt?: string
   updatedAt?: string
-  result?: { diffStat?: string; contractViolations?: string[]; warnings?: string[] } | null
+  result?: { diffStat?: string; contractViolations?: string[]; warnings?: string[]; review?: { verdict: string; summary: string } } | null
 }
 
 interface Approval {
@@ -451,9 +451,27 @@ export function TaskWorkflowPage({
                   </div>
                 )}
 
-                {/* ④ diff 关：双栏查看器 */}
+                {/* ④ diff 关：子agent初审结论（有则置顶）+ 双栏查看器 */}
                 {stage === 3 && (
-                  <div className="flex min-h-0 flex-1">
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    {sel.result?.review && (
+                      <div
+                        className={`mx-4 mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
+                          sel.result.review.verdict === 'pass'
+                            ? 'border-emerald-200 bg-emerald-50/60'
+                            : 'border-amber-200 bg-amber-50/60'
+                        }`}
+                      >
+                        <ShieldAlert size={11} className={sel.result.review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
+                        <div className="min-w-0">
+                          <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            子 agent 初审：{sel.result.review.verdict === 'pass' ? '通过' : '未通过'}
+                          </p>
+                          <p className="mt-0.5 line-clamp-2 text-micro leading-4 text-slate-600">{sel.result.review.summary}</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex min-h-0 flex-1">
                     <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 bg-slate-50/50 p-2">
                       <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400">
                         <FileCode2 size={10} /> 文件（{files.length}）
@@ -501,6 +519,7 @@ export function TaskWorkflowPage({
                       ) : (
                         <p className="py-8 text-center text-[11px] text-slate-400">该任务无变更归档</p>
                       )}
+                    </div>
                     </div>
                   </div>
                 )}

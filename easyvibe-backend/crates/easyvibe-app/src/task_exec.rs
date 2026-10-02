@@ -244,9 +244,12 @@ impl TaskExecutor {
                 let repo_name = task.repo.clone();
                 let repo_root = repo.root.clone();
                 let contract = contract.clone();
+                let task_for_review = task.clone(); // B案审查 prompt 需要任务书字段
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     let review_after = review_after;
+                    // B 案：审查槽参数（settings `agent.args.review` 可换便宜模型/收紧权限）
+                    let review_args = slot_args(&this.settings_repo, "review", &this.agent_args).await;
                     // L2 哨兵状态：已上报越界集合 + 巡检节拍器
                     let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
                     let sentry_every = std::cmp::max(1, sentry_interval().as_secs() / 2) as u32;
@@ -314,15 +317,72 @@ impl TaskExecutor {
                                 let (status, gate) = if failed {
                                     ("failed", None)
                                 } else if review_after {
-                                    // manual/supervised：执行成功 → 回到审批流（diff 关审产物；
-                                    // supervised 低危首次停此处，gate 需从 None 置为 diff）
-                                    ("awaiting_approval", Some("diff"))
+                                    // manual/supervised：执行成功 → 独立子agent审查（B案，harness 2.3.2）
+                                    // → 通过才回审批流（diff 关）；fail 自动打回（rejected，理由入留痕）
+                                    match run_subagent_review(
+                                        &this.session_manager,
+                                        &this.agent_command,
+                                        &review_args,
+                                        &repo_name,
+                                        &repo_root,
+                                        &task_for_review,
+                                    )
+                                    .await
+                                    {
+                                        Some(v) if v.verdict == "fail" => {
+                                            let note = format!("子agent审查未通过：{}", v.summary);
+                                            warn!("[task-exec] 任务 {} 审查打回：{}", task_id, v.summary);
+                                            this.record_approval(&task_id, "diff", "rejected", Some(&note)).await;
+                                            let _ = this.task_repo.update_status(&task_id, "rejected", Some(&note)).await;
+                                            let _ = this.task_repo.set_gate(&task_id, Some("rejected")).await;
+                                            if let Some(tx) = &this.events {
+                                                crate::publish(tx, crate::BusEvent::TaskStatus {
+                                                    repo: repo_name.clone(),
+                                                    task_id: task_id.clone(),
+                                                    status: "rejected".into(),
+                                                    gate: Some("rejected".into()),
+                                                });
+                                            }
+                                            ("__already_final__", None) // 状态已回写，下面的统一回写跳过
+                                        }
+                                        Some(v) => {
+                                            // 审查通过：结论并入 result（④格"子agent初审"卡的数据源），照常进 diff 关
+                                            if let Ok(Some(row)) = this.task_repo.get(&task_id).await {
+                                                if let Some(res) = &row.result {
+                                                    if let Ok(mut rv) = serde_json::from_str::<serde_json::Value>(res) {
+                                                        rv["review"] = serde_json::json!({ "verdict": v.verdict, "summary": v.summary });
+                                                        if let Ok(s) = serde_json::to_string(&rv) {
+                                                            let _ = this.task_repo.set_result(&task_id, &s).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            ("awaiting_approval", Some("diff"))
+                                        }
+                                        None => {
+                                            // 审查不可用（会话失败/超时/结论非法）：不阻断，diff 关照常（方案：人机审查兜底）
+                                            info!("[task-exec] 任务 {} 审查不可用，照常进 diff 关", task_id);
+                                            ("awaiting_approval", Some("diff"))
+                                        }
+                                    }
                                 } else {
                                     ("done", Some("done"))
                                 };
-                                let _ = this.task_repo.update_status(&task_id, status, None).await;
-                                if let Some(g) = gate {
-                                    let _ = this.task_repo.set_gate(&task_id, Some(g)).await;
+                                if status != "__already_final__" {
+                                    let _ = this.task_repo.update_status(&task_id, status, None).await;
+                                    if let Some(g) = gate {
+                                        let _ = this.task_repo.set_gate(&task_id, Some(g)).await;
+                                    }
+                                    // 存量缺口补发：任务执行终态此前只写库不发事件（前端靠轮询才发现）——
+                                    // 与 decide_task 对齐，终态即广播 task.statusChanged
+                                    if let Some(tx) = &this.events {
+                                        crate::publish(tx, crate::BusEvent::TaskStatus {
+                                            repo: repo_name.clone(),
+                                            task_id: task_id.clone(),
+                                            status: status.into(),
+                                            gate: gate.map(Into::into),
+                                        });
+                                    }
                                 }
                                 info!("[task-exec] 任务 {} 终态 {:?} → {}", task_id, s.status, status);
                                 break;
@@ -358,6 +418,111 @@ impl TaskExecutor {
     }
 }
 
+/// 独立子 agent 代码审查（用户裁定「全做」B 案，harness 2.3.2 的独立可信落地）：
+/// 实施完成后、diff 关之前，spawn 一个审查会话——只读 diff + 架构规则，产出审查报告与结论。
+/// 报告落 `.easyvibe/development_docs/<user>/3_test_results/review-<task_id>.md`
+/// （与 A 案协议同一规范路径，dev-docs 端点自动捞取）。
+/// 结论行协议：`[EASYVIBE-REVIEW] {"verdict":"pass|fail","summary":"一句话"}`
+/// 审查自身失败/超时 → None（不阻断：diff 关照常，人机审查兜底）。
+fn assemble_review_prompt(task: &TaskRow, user: &str) -> String {
+    let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
+    format!(
+        r#"你是独立代码审查 agent（harness 2.3.2 的执行者），只做审查，不做实现。
+被审任务的实施刚完成，工作区的未提交改动就是它的产出。
+
+## 被审任务
+- 需求描述：{description}
+- 影响模块：{modules}
+- 验收标准：{acceptance}
+
+## 审查材料
+- 改动全文：工作目录即仓库根目录，执行 `git diff` 查看（不要 git checkout/stash 等任何写操作）
+- 规则正文：cat {harness_dir}/rule_development.md（功能开发）或 {harness_dir}/rule_bugfix.md（Bug 修复），按任务性质择一
+- 模块职责与边界：.easyvibe/map/map.json
+
+## 审查维度（逐项给出结论）
+代码规范、代码结构、可读性、可维护性、性能；对照影响面合约检查越界改动；
+对照验收标准检查完整性。**除写审查报告外，禁止修改任何文件。**
+
+## 输出（两者都必须）
+1. 审查报告写入 .easyvibe/development_docs/{user}/3_test_results/review-{task_id}.md
+   （含明确的审查意见：通过 / 打回 + 理由；发现问题逐条列出）
+2. 最后一行输出：[EASYVIBE-REVIEW] {{"verdict":"pass","summary":"一句话结论"}}
+   verdict 只能是 pass 或 fail；有任一阻断性问题必须 fail。"#,
+        description = task.description,
+        modules = if modules.is_empty() { "（未指定）".into() } else { modules.join(", ") },
+        acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
+        user = user,
+        task_id = task.id,
+        harness_dir = harness_dir().to_string_lossy(),
+    )
+}
+
+/// 审查结论（解析自 [EASYVIBE-REVIEW] 行）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewVerdict {
+    pub verdict: String, // pass / fail
+    pub summary: String,
+}
+
+/// 跑独立审查会话并等终态。25 分钟上限（审查是分钟级任务；超时判不可用不阻断）。
+async fn run_subagent_review(
+    session_manager: &SessionManager,
+    agent_command: &str,
+    agent_args: &[String],
+    repo_id: &str,
+    repo_root: &std::path::Path,
+    task: &TaskRow,
+) -> Option<ReviewVerdict> {
+    let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+    let prompt = assemble_review_prompt(task, &user);
+    // 审查会话沿用任务槽 CLI 参数（可经 settings `agent.args.review` 单独收紧/换模型）
+    let session = session_manager
+        .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(25 * 60)))
+        .await
+        .ok()?;
+    let sid = session.session_id.clone();
+    info!("[task-exec] 任务 {} 审查会话 {} 已启动", task.id, sid);
+    // 等终态（2s 节拍；status_of_session None = 状态丢失 → 不可用）
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25 * 60);
+    loop {
+        match session_manager.status_of_session(&sid).await {
+            Some(s)
+                if matches!(
+                    s.status,
+                    easyvibe_api_types::SessionStatus::Succeeded | easyvibe_api_types::SessionStatus::Failed
+                ) =>
+            {
+                if s.status != easyvibe_api_types::SessionStatus::Succeeded {
+                    warn!("[task-exec] 任务 {} 审查会话异常终态：{:?}", task.id, s.status);
+                    return None;
+                }
+                let out = session_manager.take_output(&sid).await.unwrap_or_default();
+                let line = out.lines().rev().find(|l| l.contains("[EASYVIBE-REVIEW]"))?;
+                let json_str = line.split("[EASYVIBE-REVIEW]").nth(1)?.trim();
+                let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+                let verdict = v["verdict"].as_str().unwrap_or("").to_string();
+                if verdict != "pass" && verdict != "fail" {
+                    warn!("[task-exec] 任务 {} 审查结论 verdict 非法：{}", task.id, verdict);
+                    return None;
+                }
+                let summary = v["summary"].as_str().unwrap_or("（无结论摘要）").to_string();
+                info!("[task-exec] 任务 {} 审查结论：{} — {}", task.id, verdict, summary);
+                return Some(ReviewVerdict { verdict, summary });
+            }
+            None => return None,
+            _ => {
+                if tokio::time::Instant::now() > deadline {
+                    warn!("[task-exec] 任务 {} 审查会话超时，按不可用处理", task.id);
+                    let _ = session_manager.kill(&sid).await;
+                    return None;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
 /// 组装任务执行 prompt：harness 框架（路径适配）+ 表单字段 + 事前注入上下文。
 /// 路由/拷问/豁免全交给 LLM 决断（§9 #3/#5）。
 pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
@@ -385,12 +550,15 @@ pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
 - 需求类型（功能开发 / Bug 修复 / 重构）由你按框架路由决断，选择对应规则正文执行。
 - 改动规模评估与是否走完整评审流程由你决断（框架内的豁免条款），全程留痕。
 - 统计/验证类结论用工具数准，禁止估算。
+- 实施完成后对接口/界面进行测试，测试结果写入 .easyvibe/development_docs/{user}/3_test_results/（规范路径，含 INDEX 索引）——对应规则正文 2.3.1。
+- 代码审查（规则正文 2.3.2）由系统独立审查 agent 执行，你无需自审；不要伪造审查结论。
 - 完成后最后一行输出：`[EASYVIBE-RESULT] {{"summary": "一句话总结", "changed_modules": ["模块id"]}}` 便于系统归档。"#,
         framework = framework,
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         context = task.context,
+        user = std::env::var("USER").unwrap_or_else(|_| "default".into()),
     )
 }
 
@@ -1346,6 +1514,94 @@ mod tests {
         let aps = approvals.list_by_task("task-t1").await.unwrap();
         assert_eq!(aps.len(), 3);
         assert!(aps.iter().all(|a| a.decision == "approved"));
+    }
+
+    #[tokio::test]
+    async fn review_fail_auto_rejects_task() {
+        // B案：独立子agent审查 fail → 任务自动打回（rejected），理由入留痕，不进 diff 关
+        use easyvibe_db::{ApprovalRepository as _, Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-task-review-fail-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        // echo 同时充当执行 agent 与审查 agent：打印 REVIEW 结论行（fail）
+        // 主会话 echo 该行至 stdout——collect 无 RESULT 行不阻断；审查会话解析同一行 → fail
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            harness_stub("框架"),
+            Arc::new("echo".into()),
+            Arc::new(vec!["[EASYVIBE-REVIEW] {\"verdict\":\"fail\",\"summary\":\"存在阻断性问题\"}".into()]),
+            4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
+        );
+        let mut task = sample_task("pending");
+        task.repo = "ev-task-review-fail-test".into();
+        task.trust = "manual".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-task-review-fail-test")).await;
+        // 过计划关 → 执行（echo 立即成功）→ 审查会话（echo 打 fail）→ 自动打回
+        executor.decide("task-t1", "approved", None, None).await.unwrap();
+        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+        for _ in 0..20 {
+            if t.status == "rejected" { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "rejected", "审查 fail 必须自动打回，不进 diff 关");
+        assert!(t.error.as_deref().unwrap_or("").contains("存在阻断性问题"), "打回理由必须入 error 留痕");
+        // 留痕：diff 关有一条 rejected 审批（审查打回），用户可见可溯源
+        let aps = approvals.list_by_task("task-t1").await.unwrap();
+        assert!(aps.iter().any(|a| a.gate == "diff" && a.decision == "rejected"), "审查打回必须留审批痕");
+    }
+
+    #[tokio::test]
+    async fn review_unavailable_does_not_block_diff_gate() {
+        // B案降级路径：审查会话产出无 [EASYVIBE-REVIEW] 行（如 true 命令）→ 审查不可用
+        // → 不阻断，照常进 diff 关（人机审查兜底）
+        use easyvibe_db::{Database, SqliteApprovalRepository, SqliteTaskRepository};
+        let dir = std::env::temp_dir().join("ev-task-review-na-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        let executor = TaskExecutor::new(
+            task_repo.clone(),
+            approvals.clone(),
+            sessions,
+            maps,
+            harness_stub("框架"),
+            Arc::new("true".into()), // 无输出：审查会话拿不到结论行
+            Arc::new(vec![]),
+            4,
+            Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone())),
+            None,
+        );
+        let mut task = sample_task("pending");
+        task.repo = "ev-task-review-na-test".into();
+        task.trust = "manual".into();
+        task_repo.create(&task).await.unwrap();
+        executor.clone().enqueue_pending(Some("ev-task-review-na-test")).await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap();
+        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+        for _ in 0..20 {
+            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("diff") { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        }
+        assert_eq!(t.gate.as_deref(), Some("diff"), "审查不可用不得阻断 diff 关");
     }
 
     #[tokio::test]
