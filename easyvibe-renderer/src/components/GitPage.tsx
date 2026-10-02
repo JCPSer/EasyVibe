@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Copy, GitBranch, Loader2, RefreshCw,
+  AlertTriangle, ArrowDownToLine, ArrowUpFromLine, ChevronRight, Copy, GitBranch, Loader2, RefreshCw,
   ScanSearch, ShieldCheck, Sparkles, Trash2,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
@@ -551,7 +551,7 @@ export function GitPage({
           {/* 右列 */}
           <div className="col-span-2 flex flex-col gap-3">
             <EvolutionChart backendRepo={backendRepo} groups={groups} map={map} commits={commits} />
-            <CommitHistory commits={commits} moduleList={moduleList} />
+            <CommitHistory commits={commits} moduleList={moduleList} backendRepo={backendRepo} />
           </div>
         </div>
       </div>
@@ -708,15 +708,42 @@ function EvolutionChart({
   )
 }
 
-/** 最近提交：模块 chips（log --name-only 文件映射）+ 作者头像 + hash 复制 */
-function CommitHistory({ commits, moduleList }: { commits: GitLogRow[]; moduleList: { id: string; name: string; files: string[] }[] }) {
+/** 最近提交：模块 chips（log --name-only 文件映射）+ 作者头像 + hash 复制。
+ *  用户反馈补交互：点击行展开提交详情（正文 + 逐文件增删，git show --numstat） */
+interface CommitDetail {
+  hash: string
+  subject: string
+  body: string
+  files: { path: string; adds: number; dels: number }[]
+}
+
+function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRow[]; moduleList: { id: string; name: string; files: string[] }[]; backendRepo: string | null }) {
   const [q, setQ] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [detail, setDetail] = useState<CommitDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const rows = useMemo(() => {
     const list = q
       ? commits.filter((c) => c.subject.includes(q) || c.author.includes(q) || c.short.includes(q))
       : commits
     return list.slice(0, 8)
   }, [commits, q])
+
+  const toggle = (hash: string) => {
+    if (expanded === hash) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(hash)
+    setDetail(null)
+    if (!backendRepo) return
+    setDetailLoading(true)
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/git/commit?hash=${encodeURIComponent(hash)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: CommitDetail }) => setDetail(d.data ?? null))
+      .catch(() => toast('提交详情加载失败', 'error'))
+      .finally(() => setDetailLoading(false))
+  }
 
   const modsOf = (files: string[]) => {
     const names = new Map<string, string>()
@@ -747,9 +774,11 @@ function CommitHistory({ commits, moduleList }: { commits: GitLogRow[]; moduleLi
       <div className="py-1.5">
         {rows.map((c) => {
           const mods = modsOf(c.files)
+          const open = expanded === c.hash
           return (
-            <div key={c.hash} className="px-4 py-2.5 hover:bg-slate-50/60">
-              <div className="flex items-start gap-2">
+            <div key={c.hash} className={`px-4 py-2.5 ${open ? 'bg-blue-50/40' : 'hover:bg-slate-50/60'}`}>
+              {/* 整行可点：展开提交详情（此前纯展示，用户反馈） */}
+              <button onClick={() => toggle(c.hash)} className="flex w-full items-start gap-2 text-left" title={open ? '收起详情' : '查看提交详情'}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[12px] font-bold text-slate-700">{c.subject}</p>
                   <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
@@ -773,15 +802,44 @@ function CommitHistory({ commits, moduleList }: { commits: GitLogRow[]; moduleLi
                   >
                     {c.author.slice(0, 2).toUpperCase()}
                   </span>
-                  <button
-                    onClick={() => void navigator.clipboard?.writeText(c.hash)}
-                    className="rounded p-0.5 text-slate-200 hover:bg-slate-100 hover:text-slate-500"
-                    title="复制完整 hash"
-                  >
-                    <Copy size={9} />
-                  </button>
                 </div>
-              </div>
+                <span className={`mt-1 shrink-0 self-start text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`}>
+                  <ChevronRight size={12} />
+                </span>
+              </button>
+              {open && (
+                <div className="ml-1 mt-2 border-l-2 border-blue-100 pl-3">
+                  {detailLoading && <p className="py-1 text-micro text-slate-400">加载详情…</p>}
+                  {!detailLoading && detail && (
+                    <>
+                      {detail.body && <p className="mb-1.5 whitespace-pre-wrap text-[11px] leading-4 text-slate-500">{detail.body}</p>}
+                      {detail.files.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {detail.files.slice(0, 12).map((f) => (
+                            <div key={f.path} className="flex items-center gap-2 text-micro">
+                              <span className="min-w-0 flex-1 truncate font-mono text-slate-600">{f.path}</span>
+                              <span className="tnum shrink-0 font-semibold text-emerald-600">+{f.adds}</span>
+                              <span className="tnum shrink-0 font-semibold text-red-400">−{f.dels}</span>
+                            </div>
+                          ))}
+                          {detail.files.length > 12 && <p className="text-micro text-slate-300">…共 {detail.files.length} 个文件</p>}
+                        </div>
+                      ) : (
+                        <p className="text-micro text-slate-400">无文件变更（merge/空提交）</p>
+                      )}
+                    </>
+                  )}
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      onClick={() => void navigator.clipboard?.writeText(c.hash)}
+                      className="flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      title="复制完整 hash"
+                    >
+                      <Copy size={9} /> 复制 hash
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )
         })}

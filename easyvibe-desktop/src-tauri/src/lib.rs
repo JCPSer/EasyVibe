@@ -115,6 +115,8 @@ pub fn run() {
                     .title("EasyVibe")
                     .inner_size(1500.0, 940.0)
                     .min_inner_size(1100.0, 700.0)
+                    // 自绘标题栏（VSCode 范式）：前端渲染红绿灯与拖拽区，系统横条退役
+                    .decorations(false)
                     .build()
                 } else {
                     WebviewWindowBuilder::new(

@@ -1756,10 +1756,9 @@ export default function App() {
     )
   }
 
-  // M4-1 顶栏：项目选择器（含仓库管理面板）+ 全局动作（视图/优化建议/巡检/导出/设置）
-  const topBar = (
-    <>
-      <div className="relative">
+  // M4-1 顶栏三区（VSCode 范式）：左=品牌（AppShell 内置红绿灯），中=项目切换器（居中），右=全局动作
+  const topCenter = (
+    <div className="relative">
         <button
           onClick={() => setRepoPanelOpen((v) => !v)}
           className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 hover:border-blue-300"
@@ -1812,8 +1811,10 @@ export default function App() {
           </div>
           </>
         )}
-      </div>
-      <div className="ml-auto flex items-center gap-1.5">
+    </div>
+  )
+  const topBar = (
+      <div className="flex items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
           className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
@@ -1863,7 +1864,6 @@ export default function App() {
           <Settings size={12} />
         </button>
       </div>
-    </>
   )
 
   const PAGES: Record<PageId, React.ReactNode> = {
@@ -1944,7 +1944,7 @@ export default function App() {
   return (
     <>
       <CanvasBoundary>
-        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} badges={{ review: pendingApprovals || undefined }}>
+        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} center={topCenter} badges={{ review: pendingApprovals || undefined }}>
           {/* R3 B3：地图页 keep-alive——切页只隐藏不卸载，保住选中/过滤/展开子图/右栏对话草稿。
               审批典型动线「看 diff → 评审 → 回地图对照」此前每轮都被重置逼着重来 */}
           <div className="h-full" style={page === 'map' ? undefined : { display: 'none' }}>

@@ -199,6 +199,66 @@ pub async fn log(repo: &Path, limit: i64) -> Result<Vec<GitLogRow>, ApiError> {
     Ok(parse_log(&out))
 }
 
+// ---------- 提交详情（历史记录可点开——用户反馈：此前纯展示） ----------
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitFileStat {
+    pub path: String,
+    pub adds: i64,
+    pub dels: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    pub hash: String,
+    pub subject: String,
+    pub body: String,
+    pub files: Vec<CommitFileStat>,
+}
+
+/// git show 单提交：%x1f 分隔头部字段，--numstat 逐文件增删行
+pub async fn show_commit(repo: &Path, hash: &str) -> Result<CommitDetail, ApiError> {
+    if hash.len() < 6 || hash.len() > 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::BadRequest("非法提交 hash".into()));
+    }
+    let out = git(repo, &["show", "--format=%H%x1f%s%x1f%b%x1e", "--numstat", hash]).await?;
+    let mut parts = out.splitn(2, '\u{1e}');
+    let head = parts.next().unwrap_or_default();
+    let numstat = parts.next().unwrap_or_default();
+    let mut fields = head.split('\u{1f}');
+    let hash_full = fields.next().unwrap_or_default().trim().to_string();
+    let subject = fields.next().unwrap_or_default().trim().to_string();
+    let body = fields.next().unwrap_or_default().trim().to_string();
+    let files = numstat
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.splitn(3, '\t');
+            let adds = it.next()?.parse::<i64>().ok().unwrap_or(0);
+            let dels = it.next()?.parse::<i64>().ok().unwrap_or(0);
+            let path = it.next()?.trim().to_string();
+            if path.is_empty() { None } else { Some(CommitFileStat { path, adds, dels }) }
+        })
+        .collect();
+    if hash_full.is_empty() {
+        return Err(ApiError::NotFound(format!("提交 {hash} 不存在")));
+    }
+    Ok(CommitDetail { hash: hash_full, subject, body, files })
+}
+
+pub async fn get_git_commit(
+    State(st): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let hash = q.get("hash").ok_or_else(|| ApiError::BadRequest("缺少 hash 参数".into()))?;
+    let detail = show_commit(&repo.root, hash).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": detail })).into_response())
+}
+
+
 // ---------- HTTP handlers：查询 ----------
 
 pub async fn get_git_status(State(st): State<AppState>, AxumPath(id): AxumPath<String>) -> Result<Response, AppError> {
@@ -499,6 +559,38 @@ mod tests {
             rows[0].files
         );
         assert!(dir.join(".easyvibe/map/map.json").exists() && dir.join(".claude/development_docs/t1.json").exists(), "账簿文件必须留在磁盘（不被提交也不被吞掉）");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn show_commit_parses_header_and_numstat() {
+        // 历史记录可点开（用户反馈）：提交详情 = 主题 + 正文 + 逐文件增删
+        let dir = std::env::temp_dir().join("ev-show-commit-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git_sync = |args: &[&str]| {
+            assert!(std::process::Command::new("git").args(args).current_dir(&dir).status().unwrap().success())
+        };
+        git_sync(&["init", "-q"]);
+        git_sync(&["config", "user.email", "t@t"]);
+        git_sync(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "1\n").unwrap();
+        git_sync(&["add", "."]);
+        git_sync(&["commit", "-q", "-m", "标题行", "-m", "正文段落一\n正文段落二"]);
+        let head = std::process::Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&dir).output().unwrap();
+        let hash = String::from_utf8_lossy(&head.stdout).trim().to_string();
+
+        let d = show_commit(&dir, &hash).await.unwrap();
+        assert_eq!(d.hash, hash);
+        assert_eq!(d.subject, "标题行");
+        assert!(d.body.contains("正文段落一"), "正文必须带出: {:?}", d.body);
+        assert_eq!(d.files.len(), 1);
+        assert_eq!(d.files[0].path, "a.txt");
+        assert_eq!(d.files[0].adds, 1);
+
+        // 非法 hash 必须 400 而不是进 git
+        assert!(show_commit(&dir, "zzzz!!").await.is_err());
+        assert!(show_commit(&dir, "abc").await.is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

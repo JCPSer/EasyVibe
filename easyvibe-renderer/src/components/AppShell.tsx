@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { WindowControls } from '@/components/WindowControls'
 import {
   GitBranch,
   Map as MapIcon,
@@ -75,12 +76,14 @@ interface Props {
   onPageChange: (p: PageId) => void
   /** 页签徽标（如 评审 的待审批数） */
   badges?: Partial<Record<PageId, number>>
-  /** 顶栏内容（项目选择器 + 全局动作），由 App 注入 */
+  /** 顶栏右侧内容（全局动作），由 App 注入 */
   topBar: React.ReactNode
+  /** 标题栏中央槽（项目切换器居中——VSCode 范式） */
+  center?: React.ReactNode
   children: React.ReactNode
 }
 
-export function AppShell({ page, onPageChange, badges, topBar, children }: Props) {
+export function AppShell({ page, onPageChange, badges, topBar, center, children }: Props) {
   // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）；折叠选择持久化（真人测试建议#5）
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && localStorage.getItem('ev.nav.collapsed') === '1')
   const toggleCollapsed = () => {
@@ -91,13 +94,18 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
   }
   return (
     <div className="flex h-screen flex-col bg-slate-50">
-      {/* 顶栏：项目选择器 + 全局动作（App 注入） */}
-      <header className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3">
-        <span className="flex items-center gap-1.5 pr-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
-          <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>
-        </span>
-        {topBar}
+      {/* 自绘标题栏（VSCode 范式）：红绿灯 + 品牌｜中央项目切换器｜右侧全局动作。
+          data-tauri-drag-region = 整栏可拖拽移动窗口（桌面壳）；浏览器中该属性无效、自然降级 */}
+      <header data-tauri-drag-region className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3">
+        <div className="flex items-center gap-2">
+          <WindowControls />
+          <span className="flex items-center gap-1.5 pr-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
+            <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-1 items-center justify-center">{center}</div>
+        <div className="flex items-center gap-1.5">{topBar}</div>
       </header>
       <div className="flex min-h-0 flex-1">
         {/* 左侧导航 */}

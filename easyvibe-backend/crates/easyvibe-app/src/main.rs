@@ -115,6 +115,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/events/summary", get(events_summary))
         .route("/repos/{id}/git/status", get(git::get_git_status))
         .route("/repos/{id}/git/log", get(git::get_git_log))
+        .route("/repos/{id}/git/commit", get(git::get_git_commit))
         .route("/repos/{id}/git/commit", axum::routing::post(git::post_git_commit))
         .route("/repos/{id}/git/pull", axum::routing::post(git::post_git_pull))
         .route("/repos/{id}/git/push", axum::routing::post(git::post_git_push))
