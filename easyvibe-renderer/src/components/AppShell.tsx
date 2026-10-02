@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { WindowControls } from '@/components/WindowControls'
+import { TrafficLightsSpacer } from '@/components/WindowControls'
 import { isTauriRuntime } from '@/lib/env'
 import {
   GitBranch,
@@ -40,7 +40,7 @@ export type PageId =
   | 'kb-apis'
   | 'settings'
 
-export const NAV: { group: string; items: { id: PageId; label: string; icon: typeof MapIcon }[] }[] = [
+const NAV: { group: string; items: { id: PageId; label: string; icon: typeof MapIcon }[] }[] = [
   {
     group: '探索',
     items: [
@@ -93,9 +93,9 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
   }
   return (
     <div className="flex h-screen flex-col bg-slate-50">
-      {/* 自绘标题栏（VSCode 范式）：红绿灯 + 品牌 + 项目切换器｜右侧全局动作。
-          拖拽用手动 startDragging（data-tauri-drag-region 在嵌套结构下不可靠）：
-          点中非交互空白即拖动窗口；按钮/输入/链接不受影响 */}
+      {/* 自绘标题栏（multica/Electron hiddenInset 范式）：原生红绿灯悬浮左上（Overlay），
+          前端留 76px 净空。拖拽 = 整栏非交互空白 mousedown → startDragging；
+          双击空白 → 最大化/还原（系统级双击标题行为） */}
       <header
         className="glass z-20 flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3"
         onMouseDown={(e) => {
@@ -103,9 +103,14 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
           if (!isTauriRuntime()) return
           import('@tauri-apps/api/window').then((m) => m.getCurrentWindow().startDragging()).catch(() => {})
         }}
+        onDoubleClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
+          if (!isTauriRuntime()) return
+          import('@tauri-apps/api/window').then((m) => m.getCurrentWindow().toggleMaximize()).catch(() => {})
+        }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <WindowControls />
+          <TrafficLightsSpacer />
           <span className="flex shrink-0 items-center gap-1.5 pr-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
             <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>

@@ -115,8 +115,11 @@ pub fn run() {
                     .title("EasyVibe")
                     .inner_size(1500.0, 940.0)
                     .min_inner_size(1100.0, 700.0)
-                    // 自绘标题栏（VSCode 范式）：前端渲染红绿灯与拖拽区，系统横条退役
-                    .decorations(false)
+                    // macOS 原生红绿灯 + 自绘标题栏（参考 multica/Electron hiddenInset 范式）：
+                    // Overlay = 隐藏系统标题栏但保留原生交通灯悬浮于内容上方，
+                    // 拖拽由前端透明热区负责（见 AppShell 的 startDragging）
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
                     .build()
                 } else {
                     WebviewWindowBuilder::new(
