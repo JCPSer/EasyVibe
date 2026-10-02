@@ -61,7 +61,7 @@ export function AnswerCards({ content }: { content: string }) {
                 {s.title}
               </p>
             )}
-            <div className="text-[11.5px] leading-5 text-slate-600">
+            <div className="text-[12px] leading-5 text-slate-600">
               <MarkdownMessage content={s.body.trim()} />
             </div>
           </div>

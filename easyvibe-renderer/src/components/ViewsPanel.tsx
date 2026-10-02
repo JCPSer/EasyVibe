@@ -98,12 +98,12 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   }
 
   if (!backendRepo) {
-    return <p className="py-8 text-center text-[11.5px] text-slate-400">需要本地后端在线</p>
+    return <p className="py-8 text-center text-[12px] text-slate-400">需要本地后端在线</p>
   }
   if (error) {
     return (
       <div className="py-8 text-center">
-        <p className="text-[11.5px] text-red-500">{error}</p>
+        <p className="text-[12px] text-red-500">{error}</p>
         <button onClick={load} className="mt-2 rounded-lg border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:bg-slate-50">
           重试
         </button>
@@ -112,14 +112,14 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   }
   if (views === null) {
     return (
-      <p className="flex items-center justify-center gap-2 py-8 text-[11.5px] text-slate-400">
+      <p className="flex items-center justify-center gap-2 py-8 text-[12px] text-slate-400">
         <Loader2 size={13} className="animate-spin" /> 加载视图…
       </p>
     )
   }
   if (views.length === 0) {
     return (
-      <p className="py-8 text-center text-[11.5px] leading-5 text-slate-400">
+      <p className="py-8 text-center text-[12px] leading-5 text-slate-400">
         还没有保存的视图。
         <br />
         在<span className="text-slate-500">对话</span>页签提问后，点回答下方的
@@ -131,7 +131,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
 
   return (
     <div className="space-y-2.5">
-      <p className="text-[10.5px] leading-4 text-slate-400">
+      <p className="text-cap leading-4 text-slate-400">
         共 {views.length} 个视图 · 引用式存储（.easyvibe/views/，随仓库走）
       </p>
       {views.map((v) => {
@@ -143,20 +143,20 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
             <div className="flex items-center gap-1.5">
               <Bookmark size={11} className="shrink-0 text-emerald-500" />
               <span className="truncate text-[12px] font-semibold text-slate-800">{v.name}</span>
-              <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-[9px] text-slate-400">
+              <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-micro text-slate-400">
                 {v.nodes === 0 && v.view.annotations?.some((a) => a.type === 'mermaid') ? '纯图视图' : `${v.nodes} 个模块`}
               </span>
             </div>
-            {note && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-400">{note}</p>}
+            {note && <p className="mt-1 line-clamp-2 text-micro leading-4 text-slate-400">{note}</p>}
             {moduleIds.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {moduleIds.slice(0, 6).map((id) => (
-                  <span key={id} className="rounded-full bg-slate-50 px-1.5 py-px font-mono text-[9px] text-slate-500">
+                  <span key={id} className="rounded-full bg-slate-50 px-1.5 py-px font-mono text-micro text-slate-500">
                     {id}
                   </span>
                 ))}
                 {moduleIds.length > 6 && (
-                  <span className="rounded-full bg-slate-50 px-1.5 py-px text-[9px] text-slate-400">
+                  <span className="rounded-full bg-slate-50 px-1.5 py-px text-micro text-slate-400">
                     +{moduleIds.length - 6}
                   </span>
                 )}
@@ -164,7 +164,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
             )}
             {mermaid && (
               <details className="mt-1.5 rounded-md border border-slate-100 bg-white p-1.5">
-                <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                <summary className="cursor-pointer text-micro font-semibold text-slate-500 hover:text-slate-700">
                   附：对话生成的流程图
                 </summary>
                 <div className="mt-1 max-h-72 overflow-auto">
@@ -172,7 +172,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                 </div>
                 <button
                   onClick={() => setZoomed({ name: v.name, content: mermaid })}
-                  className="mt-1 rounded-full border border-slate-200 px-2 py-0.5 text-[9.5px] text-slate-500 hover:bg-slate-50"
+                  className="mt-1 rounded-full border border-slate-200 px-2 py-0.5 text-micro text-slate-500 hover:bg-slate-50"
                 >
                   放大查看
                 </button>
@@ -182,7 +182,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
               <button
                 onClick={() => open(v)}
                 disabled={moduleIds.length === 0}
-                className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-[10.5px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+                className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-cap font-bold text-white hover:bg-blue-700 disabled:opacity-40"
                 title="在画布中定位该视图的模块"
               >
                 {openedSlug === v.slug ? <Check size={10} /> : <ExternalLink size={10} />}
@@ -190,7 +190,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
               </button>
               <button
                 onClick={() => download(v)}
-                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] text-slate-500 hover:bg-slate-50"
+                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-500 hover:bg-slate-50"
                 title="下载视图文件（含流程图，资产可外带）"
               >
                 <Download size={10} />
@@ -200,14 +200,14 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                   <button
                     onClick={() => remove(v.slug)}
                     disabled={deleting !== null}
-                    className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-[10.5px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                    className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-cap font-bold text-white hover:bg-red-700 disabled:opacity-40"
                   >
                     {deleting === v.slug ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
                     确认删除
                   </button>
                   <button
                     onClick={() => setConfirming(null)}
-                    className="rounded-lg px-2 py-1 text-[10.5px] text-slate-400 hover:text-slate-600"
+                    className="rounded-lg px-2 py-1 text-cap text-slate-400 hover:text-slate-600"
                   >
                     取消
                   </button>
@@ -215,14 +215,14 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
               ) : (
                 <button
                   onClick={() => setConfirming(v.slug)}
-                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-[10.5px] text-slate-500 hover:bg-slate-50 hover:text-red-600"
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-cap text-slate-500 hover:bg-slate-50 hover:text-red-600"
                   title="删除该视图文件"
                 >
                   <Trash2 size={10} />
                   删除
                 </button>
               )}
-              <span className="ml-auto text-[9px] text-slate-300">{v.createdAt?.slice(0, 10)}</span>
+              <span className="ml-auto text-micro text-slate-300">{v.createdAt?.slice(0, 10)}</span>
             </div>
           </div>
         )

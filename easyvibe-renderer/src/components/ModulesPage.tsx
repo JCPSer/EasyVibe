@@ -91,25 +91,25 @@ export function ModulesPage({ map, onOpenMap }: { map: CodeMap; onOpenMap: () =>
               <tr key={m.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                 <td className="px-3 py-2">
                   <p className="text-[12px] font-semibold text-slate-700">{m.name}</p>
-                  <p className="mono text-[9.5px] text-slate-300">{m.id}</p>
+                  <p className="mono text-micro text-slate-300">{m.id}</p>
                 </td>
-                <td className="px-3 py-2 text-[11.5px] text-slate-500">{layerName(m.layer)}</td>
+                <td className="px-3 py-2 text-[12px] text-slate-500">{layerName(m.layer)}</td>
                 <td className="px-3 py-2">
                   <span className="tnum text-[13px] font-bold" style={{ color: healthColor(m.health.score) }}>
                     {m.health.score}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-[11.5px] text-slate-500">{m.health.coupling}</td>
+                <td className="px-3 py-2 text-[12px] text-slate-500">{m.health.coupling}</td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     {m.health.decay_flags.slice(0, 3).map((f) => (
-                      <span key={f} className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-[9px] leading-4 text-red-600">
+                      <span key={f} className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-micro leading-4 text-red-600">
                         {FLAG_LABEL[f] ?? f}
                       </span>
                     ))}
                   </div>
                 </td>
-                <td className="px-3 py-2"><span className="tnum text-[11.5px] text-slate-500">{m.files.length}</span></td>
+                <td className="px-3 py-2"><span className="tnum text-[12px] text-slate-500">{m.files.length}</span></td>
                 <td className="max-w-[280px] px-3 py-2 text-[11px] leading-4 text-slate-500">{m.responsibility}</td>
               </tr>
             ))}

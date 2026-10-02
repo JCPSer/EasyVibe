@@ -174,13 +174,13 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
       {/* 左列：任务列表 */}
       <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[12.5px] font-bold text-slate-700">
+          <span className="text-[13px] font-bold text-slate-700">
             评审
             {pendingCount > 0 && (
-              <span className="tnum ml-1.5 rounded-full bg-red-500 px-1.5 text-[9.5px] font-bold leading-4 text-white">{pendingCount}</span>
+              <span className="tnum ml-1.5 rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{pendingCount}</span>
             )}
           </span>
-          <p className="mt-0.5 text-[9.5px] text-slate-400">待你审批的任务在前</p>
+          <p className="mt-0.5 text-micro text-slate-400">待你审批的任务在前</p>
         </div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
           {tasks.map((t) => (
@@ -197,7 +197,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                 </span>
                 {t.status === 'awaiting_approval' && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />}
               </div>
-              <p className="mt-0.5 flex items-center gap-1.5 text-[9.5px] text-slate-400">
+              <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
                 <span>{STATUS_LABEL[t.status] ?? t.status}</span>
                 {t.gate && <span className="rounded-full bg-slate-100 px-1.5">{GATES.find((g) => g.key === t.gate)?.label ?? t.gate}</span>}
                 <span className="tnum">{t.trust === 'auto' ? '自动' : '手动'}</span>
@@ -219,9 +219,9 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
               <div className="flex items-center gap-2">
                 <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-slate-800">{sel.title}</h2>
                 {sel.status === 'awaiting_approval' ? (
-                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">等待审批</span>
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待审批</span>
                 ) : (
-                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-micro font-semibold text-slate-500">
                     {STATUS_LABEL[sel.status] ?? sel.status}
                   </span>
                 )}
@@ -233,7 +233,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                   return (
                     <div key={g.key} className="flex flex-1 items-center gap-1">
                       <span
-                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro font-bold ${
                           d === 'approved' || d === 'skipped'
                             ? 'bg-emerald-500 text-white'
                             : d === 'rejected'
@@ -245,7 +245,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                       >
                         {d === 'approved' || d === 'skipped' ? <CheckCircle2 size={10} /> : d === 'rejected' ? <XCircle size={10} /> : i + 1}
                       </span>
-                      <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
+                      <span className="flex items-center gap-0.5 text-micro text-slate-500">
                         {g.label}
                         {g.key === 'report' && (d === 'approved' || sel.status === 'done') && <Lock size={8} className="text-emerald-500" />}
                       </span>
@@ -260,14 +260,14 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
               {/* 双栏 Diff：文件索引 ｜ diff 内容 */}
               <div className="flex min-w-0 flex-1 border-r border-slate-100">
                 <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 bg-slate-50/50 p-2">
-                  <p className="flex items-center gap-1 px-1.5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400">
                     <FileCode2 size={10} /> 文件（{files.length}）
                   </p>
                   {files.map((f) => (
                     <button
                       key={f}
                       onClick={() => setActiveFile(f === activeFile ? null : f)}
-                      className={`block w-full truncate rounded px-1.5 py-1 text-left font-mono text-[10px] ${
+                      className={`block w-full truncate rounded px-1.5 py-1 text-left font-mono text-micro ${
                         f === activeFile ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'
                       }`}
                       title={f}
@@ -275,11 +275,11 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                       {f}
                     </button>
                   ))}
-                  {files.length === 0 && <p className="px-1.5 py-2 text-[10px] text-slate-400">无 diff 数据</p>}
+                  {files.length === 0 && <p className="px-1.5 py-2 text-micro text-slate-400">无 diff 数据</p>}
                 </div>
                 <div className="min-w-0 flex-1 overflow-auto bg-white p-3">
                   {activeDiff ? (
-                    <pre className="mono text-[10.5px] leading-4">
+                    <pre className="mono text-cap leading-4">
                       {activeDiff.split('\n').map((line, i) => (
                         <div
                           key={i}
@@ -306,7 +306,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
               {/* 影响面 + 审批动作 */}
               <aside className="flex w-64 shrink-0 flex-col">
                 <div className="border-b border-slate-100 p-3">
-                  <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
                     <GitCompareArrows size={10} /> 影响面
                   </p>
                   {impact.map((im) => (
@@ -315,7 +315,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                         <span className="bg-emerald-500" style={{ width: `${(im.adds / Math.max(1, im.adds + im.dels)) * 100}%` }} />
                         <span className="bg-red-400" style={{ width: `${(im.dels / Math.max(1, im.adds + im.dels)) * 100}%` }} />
                       </div>
-                      <p className="tnum mt-1 text-[10px] text-slate-500">
+                      <p className="tnum mt-1 text-micro text-slate-500">
                         <span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件
                       </p>
                     </div>
@@ -325,7 +325,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                     {sel && (sel as unknown as { modules?: string[] }).modules?.map((mid) => {
                       const m = map.modules.find((x) => x.id === mid)
                       return (
-                        <span key={mid} className="rounded-full bg-slate-100 px-1.5 py-px text-[9.5px] text-slate-500">
+                        <span key={mid} className="rounded-full bg-slate-100 px-1.5 py-px text-micro text-slate-500">
                           {m?.name ?? mid}
                         </span>
                       )
@@ -343,19 +343,19 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                             onChange={(e) => setRejectNote(e.target.value)}
                             rows={3}
                             placeholder="驳回理由（必填）——将反馈给任务系统留痕"
-                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[11.5px] outline-none focus:border-red-300"
+                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                           />
                           <div className="flex gap-2">
                             <button
                               onClick={() => decide('rejected')}
                               disabled={!!deciding || !rejectNote.trim()}
-                              className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[11.5px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                              className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
                             >
                               {deciding === 'rejected' ? '提交中…' : '确认驳回'}
                             </button>
                             <button
                               onClick={() => setRejecting(false)}
-                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11.5px] text-slate-500 hover:bg-slate-50"
+                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500 hover:bg-slate-50"
                             >
                               取消
                             </button>
@@ -382,7 +382,7 @@ export function ReviewPage({ backendRepo, map }: { backendRepo: string | null; m
                       )}
                     </>
                   ) : (
-                    <p className="rounded-lg bg-slate-50 px-3 py-2 text-center text-[10.5px] text-slate-400">
+                    <p className="rounded-lg bg-slate-50 px-3 py-2 text-center text-cap text-slate-400">
                       该任务当前无需审批（{STATUS_LABEL[sel.status] ?? sel.status}）
                     </p>
                   )}

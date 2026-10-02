@@ -92,7 +92,11 @@
 
 /* ============ M4-1.5 设计地基（陪审团评审后落地，docs/design-tokens.md） ============ */
 
-/* 四级字阶纪律：12 / 13 / 15 / 20，正文行高 1.5（新代码遵守；存量随触随迁） */
+/* 六级字阶纪律（2026-10-02 审计收敛：原四级 + 两级说明性小字）：
+   body 12 / emphasis 13 / heading 15 / display 20 / cap 11 / micro 10，正文行高 1.5。
+   禁止新增其它分数档（9/9.5/10.5/11.5/12.5 等——存量已随本轮迁移收敛）。 */
+.text-cap { font-size: 11px; line-height: 1.5; }
+.text-micro { font-size: 10px; line-height: 1.5; }
 /* 数字右对齐等宽：统计/评分/token 计数 */
 .tnum {
   font-variant-numeric: tabular-nums;

@@ -109,7 +109,7 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
             {NAV.map((g) => (
               <div key={g.group}>
-                {!collapsed && <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">{g.group}</p>}
+                {!collapsed && <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wider text-slate-300">{g.group}</p>}
                 {g.items.map((it) => {
                   const active = page === it.id
                   const badge = badges?.[it.id]
@@ -118,14 +118,14 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
                       key={it.id}
                       onClick={() => onPageChange(it.id)}
                       title={collapsed ? it.label : undefined}
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] transition-colors ${
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] transition-colors ${
                         active ? 'border-r-2 border-blue-600 bg-blue-50/70 font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
                       } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
                     >
                       <it.icon size={15} className="shrink-0" />
                       {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>}
                       {!collapsed && badge ? (
-                        <span className="rounded-full bg-red-500 px-1.5 text-[9.5px] font-bold leading-4 text-white">{badge}</span>
+                        <span className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{badge}</span>
                       ) : null}
                     </button>
                   )
@@ -138,7 +138,7 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
             <button
               onClick={() => onPageChange('settings')}
               title="设置"
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] ${
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] ${
                 page === 'settings' ? 'font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
               } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
             >

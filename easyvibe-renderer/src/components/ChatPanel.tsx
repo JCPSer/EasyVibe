@@ -534,7 +534,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             )}
             <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{displayTitle}</span>
             {currentConv && currentConv.runtime.pendingConfirmations > 0 && (
-              <span className="rounded-full bg-red-500 px-1.5 text-[9.5px] font-bold leading-4 text-white">
+              <span className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">
                 {currentConv.runtime.pendingConfirmations}
               </span>
             )}
@@ -561,9 +561,9 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                         {c.title ?? '未命名会话'}
                       </span>
                       {c.runtime.pendingConfirmations > 0 && (
-                        <span className="rounded-full bg-red-500 px-1.5 text-[9px] font-bold leading-4 text-white">{c.runtime.pendingConfirmations}</span>
+                        <span className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{c.runtime.pendingConfirmations}</span>
                       )}
-                      <span className="tnum shrink-0 text-[9.5px] text-slate-300">{c.messageCount}条</span>
+                      <span className="tnum shrink-0 text-micro text-slate-300">{c.messageCount}条</span>
                     </button>
                     {c.id === convId && (
                       <button onClick={() => { setRenaming(true); setRenameVal(c.title ?? '') }} className="shrink-0 rounded p-0.5 text-slate-300 hover:text-blue-500" title="重命名">
@@ -602,7 +602,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
       )}
 
       <div className="mb-2 flex items-center justify-between">
-        <span className="tnum text-[10px] text-slate-400">
+        <span className="tnum text-micro text-slate-400">
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
         </span>
         <div className="flex flex-wrap items-center justify-end gap-1">
@@ -610,7 +610,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             <button
               onClick={deleteConv}
               disabled={!backendRepo}
-              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
               title="删除当前会话"
             >
               <XIcon size={10} />
@@ -620,7 +620,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           <button
             onClick={exportAndClear}
             disabled={!backendRepo || messages.length === 0}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
             title="导出为 Markdown 后可清空会话（D2 拍板：留痕照旧，清理显式）"
           >
             <Download size={10} />
@@ -629,7 +629,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           <button
             onClick={upgradeToTask}
             disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
             title="把本轮对话（已澄清的需求与引用模块）组织成修复任务"
           >
             <Wrench size={10} />
@@ -638,7 +638,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           <button
             onClick={compact}
             disabled={!backendRepo || compacting}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
             title="压缩上下文：早期历史折叠为结构化摘要（原文保留在库中可回放）"
           >
             <Shrink size={10} />
@@ -647,7 +647,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           <button
             onClick={createConv}
             disabled={!backendRepo || sending}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
             title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
           >
             <RotateCcw size={10} />
@@ -663,11 +663,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <p className="flex items-center gap-1.5 text-[11px] font-semibold leading-4 text-amber-800">
                 <AlertTriangle size={11} />
-                审批请求 <span className="rounded-full bg-white/80 px-1.5 text-[9px] font-bold text-amber-600">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
+                审批请求 <span className="rounded-full bg-white/80 px-1.5 text-micro font-bold text-amber-600">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
               </p>
-              <p className="mt-1 text-[11.5px] leading-5 text-slate-700">{p.title}</p>
+              <p className="mt-1 text-[12px] leading-5 text-slate-700">{p.title}</p>
               {decided[p.taskId + ':' + (p.gate ?? '')] ? (
-                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600">
+                <p className="mt-1.5 flex items-center gap-1 text-cap font-semibold text-emerald-600">
                   <CheckCircle2 size={11} /> 已{decided[p.taskId + ':' + (p.gate ?? '')] === 'approved' ? '通过' : '驳回'}
                 </p>
               ) : (
@@ -694,32 +694,32 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             <button
               onClick={loadEarlier}
               disabled={loadingMore}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
             >
               {loadingMore ? '加载中…' : '↑ 加载更早的消息'}
             </button>
           </div>
         )}
         {messages.length === 0 && pendingApprovals.length === 0 && (
-          <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
+          <p className="pt-8 text-center text-[12px] leading-5 text-slate-400">
             基于语义代码地图提问：
             <br />
             "评测提交流程是谁负责的？"
             <br />
             "哪些模块耦合最重？"
             <br />
-            <span className="text-[10px]">（回答可存为视图，引用模块可定位到画布）</span>
+            <span className="text-micro">（回答可存为视图，引用模块可定位到画布）</span>
           </p>
         )}
         {messages.map((m, i) =>
           m.role === 'system' ? (
             <div key={i} className="anim-msg-in flex justify-center">
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] text-slate-400">{m.content}</span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-micro text-slate-400">{m.content}</span>
             </div>
           ) : (
             <div key={i} className={`anim-msg-in flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[11.5px] leading-5 ${
+                className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >
@@ -729,7 +729,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 {m.mentions && m.mentions.length > 0 && (
                   <div className="mb-1 flex flex-wrap gap-1">
                     {m.mentions.map((mm) => (
-                      <span key={mm.id} className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[9.5px]">
+                      <span key={mm.id} className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-micro">
                         <AtSign size={8} />
                         {mm.name}
                       </span>
@@ -750,7 +750,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                       <button
                         key={id}
                         onClick={() => onLocateModule(id)}
-                        className="flex items-center gap-0.5 rounded-full bg-white px-2 py-0.5 font-mono text-[10px] text-blue-600 shadow-sm hover:bg-blue-50"
+                        className="flex items-center gap-0.5 rounded-full bg-white px-2 py-0.5 font-mono text-micro text-blue-600 shadow-sm hover:bg-blue-50"
                         title="定位到画布"
                       >
                         <Crosshair size={9} />
@@ -769,12 +769,12 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                             if (e.key === 'Escape') setNamingIdx(null)
                           }}
                           placeholder="视图名…"
-                          className="w-36 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10.5px] outline-none"
+                          className="w-36 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-cap outline-none"
                         />
                         <button
                           onClick={() => saveAsView(i)}
                           disabled={!viewName.trim()}
-                          className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white disabled:opacity-40"
+                          className="rounded-full bg-emerald-600 px-2 py-0.5 text-micro font-bold text-white disabled:opacity-40"
                         >
                           存
                         </button>
@@ -786,7 +786,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                           setViewName(q.replace(/\s+/g, ' ').slice(0, 24))
                           setNamingIdx(i)
                         }}
-                        className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                        className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-100"
                         title="把本回答（含流程图）存为可复用视图（.easyvibe/views/）"
                       >
                         {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
@@ -820,7 +820,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                     className="flex w-full flex-col items-start gap-0.5 rounded-md border border-amber-200 bg-white px-2 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50"
                   >
                     <span className="text-[11px] font-medium leading-4 text-slate-700">{o.label}</span>
-                    {o.desc && <span className="text-[9.5px] leading-4 text-slate-400">{o.desc}</span>}
+                    {o.desc && <span className="text-micro leading-4 text-slate-400">{o.desc}</span>}
                   </button>
                 ))}
               </div>
@@ -839,7 +839,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
       {mentions.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {mentions.map((m) => (
-            <span key={m.id} className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] text-white">
+            <span key={m.id} className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-micro text-white">
               <AtSign size={9} />
               {m.name}
               <button onClick={() => setMentions((prev) => prev.filter((x) => x.id !== m.id))} className="text-blue-200 hover:text-white">
@@ -854,14 +854,14 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           {images.map((im, i) => (
             <span key={`img-${i}`} className="relative flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
               <img src={im.dataUrl} alt={im.name} className="h-8 w-8 rounded object-cover" />
-              <span className="max-w-[90px] truncate text-[9.5px] text-slate-500">{im.name}</span>
+              <span className="max-w-[90px] truncate text-micro text-slate-500">{im.name}</span>
               <button onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500">
                 <XIcon size={9} />
               </button>
             </span>
           ))}
           {attachments.map((a, i) => (
-            <span key={i} className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] text-blue-700">
+            <span key={i} className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-micro text-blue-700">
               <Paperclip size={9} />
               {a.name}（{(a.size / 1024).toFixed(0)}KB）
               <button onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))} className="text-blue-300 hover:text-red-500">
@@ -902,8 +902,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                   className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left ${i === suggestIdx ? 'bg-blue-50' : 'bg-white'}`}
                 >
                   <AtSign size={10} className="shrink-0 text-blue-400" />
-                  <span className="truncate text-[11.5px] font-medium text-slate-700">{m.name}</span>
-                  <span className="ml-auto shrink-0 font-mono text-[9.5px] text-slate-400">{m.id}</span>
+                  <span className="truncate text-[12px] font-medium text-slate-700">{m.name}</span>
+                  <span className="ml-auto shrink-0 font-mono text-micro text-slate-400">{m.id}</span>
                 </button>
               ))}
             </div>

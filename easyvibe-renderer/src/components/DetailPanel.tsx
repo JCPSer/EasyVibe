@@ -66,7 +66,7 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
   const delta = latest - prev
   return (
     <div className="mt-2 flex items-center gap-2">
-      <span className="text-[9.5px] font-semibold text-slate-400">健康趋势</span>
+      <span className="text-micro font-semibold text-slate-400">健康趋势</span>
       <div className="flex h-4 items-end gap-0.5">
         {rows.slice(-12).map((r, i) => (
           <div
@@ -77,7 +77,7 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
           />
         ))}
       </div>
-      <span className={`text-[9.5px] font-bold ${delta >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+      <span className={`text-micro font-bold ${delta >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
         {delta >= 0 ? '+' : ''}
         {delta}
       </span>
@@ -115,17 +115,17 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
           </span>
           <button
             onClick={() => onCreateTask(buildModuleTask(map, mod.id))}
-            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
             title="指哪打哪：以本模块为上下文发起修复任务"
           >
             <Wrench size={10} /> 发起修复
           </button>
         </div>
-        <p className="mt-1 text-[10.5px] text-slate-400">
+        <p className="mt-1 text-cap text-slate-400">
           coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
         </p>
         {backendRepo && <HealthTrend backendRepo={backendRepo} moduleId={mod.id} />}
-        {mod.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{mod.health.review_note}</p>}
+        {mod.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600">{mod.health.review_note}</p>}
       </div>
 
       <Row icon={<KeyRound size={12} />} label="关键入口">
@@ -133,7 +133,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
           {mod.key_entries.slice(0, 6).map((k) => (
             <div key={k.file + k.symbol} className="rounded-md bg-slate-50 px-2.5 py-1.5">
               <div className="font-mono text-[11px] font-medium text-slate-700">{k.symbol}</div>
-              <div className="truncate font-mono text-[10px] text-slate-400">{k.file}</div>
+              <div className="truncate font-mono text-micro text-slate-400">{k.file}</div>
             </div>
           ))}
           {mod.key_entries.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
@@ -143,7 +143,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
       <Row icon={<FileCode2 size={12} />} label="文件归属">
         <div className="space-y-1">
           {mod.files.map((f) => (
-            <div key={f} className="truncate font-mono text-[10.5px] text-slate-500">
+            <div key={f} className="truncate font-mono text-cap text-slate-500">
               {f}
             </div>
           ))}
@@ -227,16 +227,16 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
           </span>
           <button
             onClick={() => onCreateTask(buildLayerTask(map, layer.id))}
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
             title="指哪打哪：以本层为上下文发起治理任务"
           >
             <Wrench size={10} /> 发起治理
           </button>
         </div>
-        <p className="mt-1 text-[10.5px] text-slate-400">
+        <p className="mt-1 text-cap text-slate-400">
           {mods.length} 模块 · 逆向依赖 <span className="tnum">{violations.length}</span> 条
         </p>
-        <p className="mt-2 flex items-start gap-1.5 text-[10.5px] leading-4 text-slate-500">
+        <p className="mt-2 flex items-start gap-1.5 text-cap leading-4 text-slate-500">
           <Info size={11} className="mt-0.5 shrink-0 text-slate-400" />
           层健康是成员模块分数的聚合参考，并非 LLM 独立评估；LLM 评估仅模块级与架构级两级。
         </p>
@@ -245,7 +245,7 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
       <Row icon={<Flag size={12} />} label={`层间逆向依赖（${violations.length}）`}>
         <div className="space-y-1.5">
           {violations.slice(0, 8).map((e, i) => (
-            <div key={i} className="flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1.5 text-[10.5px] text-red-600">
+            <div key={i} className="flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1.5 text-cap text-red-600">
               <span className="font-mono font-medium">{e.from}</span>
               <span className="text-red-400">→</span>
               <span className="font-mono font-medium">{e.to}</span>
@@ -262,10 +262,10 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
             <div key={m.id} className="flex items-center gap-2 rounded-md bg-slate-50 px-2.5 py-2">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: healthColor(m.health.score) }} />
               <div className="min-w-0">
-                <div className="text-[11.5px] font-medium text-slate-700">{m.name}</div>
-                <div className="truncate text-[10px] text-slate-400">{m.responsibility}</div>
+                <div className="text-[12px] font-medium text-slate-700">{m.name}</div>
+                <div className="truncate text-micro text-slate-400">{m.responsibility}</div>
               </div>
-              <span className="ml-auto text-[10.5px] font-semibold" style={{ color: healthColor(m.health.score) }}>
+              <span className="ml-auto text-cap font-semibold" style={{ color: healthColor(m.health.score) }}>
                 {m.health.score}
               </span>
             </div>
@@ -274,7 +274,7 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
       </Row>
 
       {downViolations > 0 && (
-        <p className="text-[10.5px] leading-4 text-slate-400">
+        <p className="text-cap leading-4 text-slate-400">
           其中 {downViolations} 条为指向更上层的逆向依赖（本层模块主动引用上层）。
         </p>
       )}
@@ -297,7 +297,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
           {/* M4-1.5：子模块补上修复入口（模块/层都有，此前独缺） */}
           <button
             onClick={() => onCreateTask(buildSubmoduleTask(parent, sub))}
-            className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+            className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
             title="指哪打哪：以父模块+该子模块为上下文发起修复任务"
           >
             <Wrench size={10} /> 发起修复
@@ -317,11 +317,11 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
           <span className="text-[11px] font-semibold" style={{ color }}>
             {healthLabel(sub.health.score)} · {sub.health.score}/100
           </span>
-          <span className="text-[10.5px] text-slate-400">
+          <span className="text-cap text-slate-400">
             coupling {sub.health.coupling} · complexity {sub.health.complexity} · churn {sub.health.churn ?? 'n/a'}
           </span>
         </div>
-        {sub.health.review_note && <p className="mt-2 text-[11.5px] leading-5 text-slate-600">{sub.health.review_note}</p>}
+        {sub.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600">{sub.health.review_note}</p>}
       </div>
 
       <Row icon={<KeyRound size={12} />} label="关键入口">
@@ -329,7 +329,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
           {sub.key_entries.slice(0, 6).map((k) => (
             <div key={k.file + k.symbol} className="rounded-md bg-slate-50 px-2.5 py-1.5">
               <div className="font-mono text-[11px] font-medium text-slate-700">{k.symbol}</div>
-              <div className="truncate font-mono text-[10px] text-slate-400">{k.file}</div>
+              <div className="truncate font-mono text-micro text-slate-400">{k.file}</div>
             </div>
           ))}
         </div>
@@ -338,7 +338,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
       <Row icon={<FileCode2 size={12} />} label="文件归属">
         <div className="space-y-1">
           {sub.files.map((f) => (
-            <div key={f} className="truncate font-mono text-[10.5px] text-slate-500">{f}</div>
+            <div key={f} className="truncate font-mono text-cap text-slate-500">{f}</div>
           ))}
         </div>
       </Row>
@@ -412,7 +412,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             <button
               key={key as string}
               onClick={() => onTabChange(key as typeof tab)}
-              className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-[11.5px] font-semibold transition-colors ${
+              className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] font-semibold transition-colors ${
                 tab === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'
               }`}
             >
@@ -446,7 +446,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} onCreateTask={onCreateTask} />
         )}
         {tab === 'detail' && !module && !layer && !sub && selection?.kind === 'submodule' && (
-          <p className="pt-8 text-center text-[11.5px] leading-5 text-slate-400">
+          <p className="pt-8 text-center text-[12px] leading-5 text-slate-400">
             子模块数据不存在或仍在加载中，请稍候再点击。
           </p>
         )}
@@ -462,7 +462,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
                 ['耦合度', map.health.coupling],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <p className="text-[10px] text-slate-400">{k}</p>
+                  <p className="text-micro text-slate-400">{k}</p>
                   <p className="text-[15px] font-bold text-slate-700">{v}</p>
                 </div>
               ))}
@@ -472,7 +472,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
                 {map.health.review_note}
               </p>
             )}
-            <p className="text-[10.5px] leading-5 text-slate-400">
+            <p className="text-cap leading-5 text-slate-400">
               点击画布中的模块卡片、层标签或展开的子模块查看详情；选中模块后顶部工具栏可展开内部结构。
             </p>
           </div>

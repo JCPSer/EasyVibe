@@ -94,7 +94,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
           {mod.health.decay_flags.slice(0, 3).map((f) => (
             <span
               key={f}
-              className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-[9px] leading-4 text-red-600"
+              className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-micro leading-4 text-red-600"
             >
               {FLAG_LABEL[f] ?? f}
             </span>

@@ -61,10 +61,10 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-[12px] font-semibold leading-4 text-slate-800">{sub.name}</div>
-          <div className="mt-0.5 line-clamp-2 text-[10px] leading-3.5 text-slate-500">{sub.responsibility}</div>
+          <div className="mt-0.5 line-clamp-2 text-micro leading-3.5 text-slate-500">{sub.responsibility}</div>
         </div>
         <span
-          className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+          className="shrink-0 rounded-full px-1.5 py-0.5 text-micro font-bold"
           style={{ background: `${color}18`, color }}
           title={healthLabel(sub.health.score)}
         >
@@ -72,7 +72,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
         </span>
       </div>
 
-      <div className="mt-1.5 flex items-center gap-2 text-[9.5px] text-slate-400">
+      <div className="mt-1.5 flex items-center gap-2 text-micro text-slate-400">
         <span className="flex items-center gap-0.5">
           <FileCode2 size={9} /> {sub.files.length} 文件
         </span>

@@ -43,7 +43,7 @@ export function ToastHost() {
                 setItems((prev) => prev.filter((x) => x.id !== t.id))
                 t.action!.onClick()
               }}
-              className="pointer-events-auto ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] hover:bg-white/30"
+              className="pointer-events-auto ml-1 rounded-full bg-white/20 px-2 py-0.5 text-micro hover:bg-white/30"
             >
               {t.action.label}
             </button>

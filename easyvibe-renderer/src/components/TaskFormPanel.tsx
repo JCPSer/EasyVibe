@@ -64,7 +64,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
           <Wrench size={14} className="text-blue-500" /> 发起任务
-          <span className="rounded-full bg-blue-50 px-1.5 py-px text-[9px] font-semibold text-blue-500">
+          <span className="rounded-full bg-blue-50 px-1.5 py-px text-micro font-semibold text-blue-500">
             {{ module: '模块', concern: '问题', layer: '层', manual: '手动' }[draft.source]}
           </span>
         </span>
@@ -81,7 +81,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             {showContext ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
           {showContext && (
-            <div className="mt-2 space-y-1 text-[10.5px] leading-4 text-slate-500">
+            <div className="mt-2 space-y-1 text-cap leading-4 text-slate-500">
               <p>
                 模块 {selected.length} 个 · 职责/健康度/边界 · 相关违规边 {violationCount} 条
               </p>
@@ -108,7 +108,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
               <span key={m.id} className="flex items-center gap-0.5">
                 <button
                   onClick={() => toggleModule(m.id)}
-                  className={`rounded-full border px-2.5 py-1 text-[10.5px] font-medium transition-colors ${
+                  className={`rounded-full border px-2.5 py-1 text-cap font-medium transition-colors ${
                     selected.includes(m.id)
                       ? 'border-blue-300 bg-blue-50 text-blue-700'
                       : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
@@ -164,7 +164,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
         {created ? (
           /* S1-5：创建成功不自动消失——引导用户去任务页签跟踪审批（此前链路断在面板静默关闭） */
           <div className="space-y-2">
-            <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[11.5px] font-semibold text-emerald-700">
+            <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-700">
               <Check size={13} /> 任务已创建{trust === 'manual' ? '，等待计划审批' : '，自动模式直通执行'}
             </p>
             <button
@@ -176,7 +176,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             >
               <ArrowRight size={13} /> 前往任务页签跟踪
             </button>
-            <button onClick={onClose} className="w-full py-0.5 text-[10.5px] text-slate-400 hover:text-slate-600">
+            <button onClick={onClose} className="w-full py-0.5 text-cap text-slate-400 hover:text-slate-600">
               留在画布
             </button>
           </div>
@@ -190,7 +190,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             {sending ? '提交中…' : '提交任务'}
           </button>
         )}
-        {!backendRepo && !created && <p className="mt-1.5 text-center text-[10.5px] text-slate-400">需要本地后端在线</p>}
+        {!backendRepo && !created && <p className="mt-1.5 text-center text-cap text-slate-400">需要本地后端在线</p>}
       </div>
     </div>
   )

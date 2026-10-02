@@ -310,7 +310,7 @@ function Legend({ violations }: { violations: number }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-[11px] text-slate-600 shadow-sm backdrop-blur">
-      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600">
         <Info size={11} /> 图例{open ? ' ▴' : ' ▾'}
       </button>
       {open && (
@@ -379,7 +379,7 @@ function ModuleToolbar({
 }) {
   return (
     <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
-      <span className="mr-1 max-w-[180px] truncate text-[11.5px] font-bold text-slate-700">{moduleName}</span>
+      <span className="mr-1 max-w-[180px] truncate text-[12px] font-bold text-slate-700">{moduleName}</span>
       <button
         onClick={onToggleExpand}
         className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
@@ -462,11 +462,11 @@ function GrowthPanel({
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between">
-          <span className="truncate text-[11.5px] font-semibold text-slate-700">
+          <span className="truncate text-[12px] font-semibold text-slate-700">
             <Sparkles size={11} className="mr-1 inline text-blue-500" />
             {status}
           </span>
-          <span className="text-[10px] tabular-nums text-slate-400">{pct}%</span>
+          <span className="text-micro tabular-nums text-slate-400">{pct}%</span>
         </div>
         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
           <div
@@ -971,7 +971,7 @@ function Canvas({
                 {filters.solo && selModule && (
                   <button
                     onClick={() => setFilters((f) => ({ ...f, solo: false }))}
-                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-[10.5px] font-semibold text-indigo-600 hover:bg-indigo-100"
+                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
                     title="退出聚焦（Esc）"
                   >
                     <Focus size={10} />
@@ -993,7 +993,7 @@ function Canvas({
                 {(filters.violationsOnly || filters.issuesOnly) && (
                   <button
                     onClick={() => setFilters({ violationsOnly: false, issuesOnly: false, solo: filters.solo })}
-                    className="rounded-full px-2 py-1 text-[10.5px] text-slate-400 hover:text-slate-600"
+                    className="rounded-full px-2 py-1 text-cap text-slate-400 hover:text-slate-600"
                   >
                     重置
                   </button>
@@ -1008,8 +1008,8 @@ function Canvas({
           <div className="px-5 py-3">
             <div className="pointer-events-auto inline-block rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">架构地图</span>
-                <span className="text-[10px] text-slate-300">|</span>
+                <span className="text-micro font-bold uppercase tracking-widest text-blue-600">架构地图</span>
+                <span className="text-micro text-slate-300">|</span>
                 <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo}</h1>
                 {/* M4-1.5 叙事重排（陪审团）：健康分立为画布内主视觉——先给诊断，再给地图 */}
                 <button
@@ -1024,8 +1024,8 @@ function Canvas({
                     {map.health.score}
                   </span>
                   <span className="flex flex-col items-start leading-none">
-                    <span className="text-[9px] font-semibold text-slate-400">架构健康</span>
-                    {map.health.score < 75 && <span className="mt-0.5 text-[9px] font-semibold text-red-500">有问题 · 查看 →</span>}
+                    <span className="text-micro font-semibold text-slate-400">架构健康</span>
+                    {map.health.score < 75 && <span className="mt-0.5 text-micro font-semibold text-red-500">有问题 · 查看 →</span>}
                   </span>
                 </button>
               </div>
@@ -1036,12 +1036,12 @@ function Canvas({
               >
                 <p className={`text-[11px] text-slate-500 ${headerExpanded ? 'max-h-28 overflow-y-auto' : 'truncate'}`}>
                   {map.meta.description}
-                  <span className="ml-1 text-[9.5px] font-medium text-blue-400">
+                  <span className="ml-1 text-micro font-medium text-blue-400">
                     {headerExpanded ? '▲ 收起' : '▼ 展开'}
                   </span>
                 </p>
               </button>
-              <div className="mt-1 flex items-center gap-3 text-[10.5px] text-slate-400">
+              <div className="mt-1 flex items-center gap-3 text-cap text-slate-400">
                 <span className="flex items-center gap-1">
                   <GitBranch size={11} /> {map.meta.generator}
                 </span>
@@ -1067,7 +1067,7 @@ function Canvas({
                     <AlertTriangle size={9} />
                     地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
                     {freshness === 'stale' && backendRepo && (
-                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 px-1 text-[9px] hover:bg-white">
+                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 px-1 text-micro hover:bg-white">
                         重新归纳
                       </button>
                     )}
@@ -1120,7 +1120,7 @@ function Canvas({
               onLocateModule={focusModule}
               onOpenView={openView}
               onClose={() => onPanelOpenChange(false)}
-              width={undefined}
+              width={panelWidth}
             />
           </div>
         </div>
@@ -1132,7 +1132,7 @@ function Canvas({
           title="展开面板"
         >
           <PanelRightOpen size={15} />
-          <span className="text-[10px] [writing-mode:vertical-rl]">{selection ? '详情' : '面板'}</span>
+          <span className="text-micro [writing-mode:vertical-rl]">{selection ? '详情' : '面板'}</span>
         </button>
       )}
 
@@ -1654,7 +1654,7 @@ export default function App() {
             {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
             <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
             <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 p-2 shadow-xl">
-            <p className="px-1.5 pb-1.5 text-[10px] font-semibold text-slate-400">已挂载仓库</p>
+            <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
                 <div key={r.id} className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-50">
@@ -1696,7 +1696,7 @@ export default function App() {
       <div className="ml-auto flex items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11.5px] font-semibold text-slate-500 hover:bg-slate-50"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
           title="我的视图（对话沉淀的图资产）"
         >
           <LayoutGrid size={12} />
@@ -1705,7 +1705,7 @@ export default function App() {
         {backendRepo && (
           <button
             onClick={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
-            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11.5px] font-semibold text-amber-700 hover:bg-amber-100"
+            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100"
             title="AI 主动发现优化建议，逐条可发起修复"
           >
             <Lightbulb size={12} />
@@ -1716,7 +1716,7 @@ export default function App() {
           <button
             onClick={startPatrol}
             disabled={patrolling}
-            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11.5px] font-semibold transition-colors disabled:opacity-60 ${
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-60 ${
               patrolling ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
             }`}
             title="巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史"
@@ -1727,7 +1727,7 @@ export default function App() {
         )}
         <button
           onClick={() => downloadHealthReport(map)}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11.5px] font-semibold text-slate-600 hover:bg-slate-50"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
           title="导出架构健康报告（Markdown，零 token 成本）"
         >
           <FileDown size={12} />
@@ -1735,7 +1735,7 @@ export default function App() {
         </button>
         <button
           onClick={() => handlePageChange('settings')}
-          className={`rounded-lg border px-2 py-1 text-[11.5px] font-semibold ${
+          className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
             page === 'settings' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
           }`}
           title="设置（LLM 服务 / 槽位绑定 / 高级）"
@@ -1772,7 +1772,7 @@ export default function App() {
                       setGuideDismissed(true)
                       localStorage.setItem('ev.m4.guide', '1')
                     }}
-                    className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
+                    className="shrink-0 rounded-full bg-white px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
                   >
                     知道了
                   </button>
@@ -1841,7 +1841,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <span className="text-[12.5px] font-bold text-slate-700">我的视图</span>
+              <span className="text-[13px] font-bold text-slate-700">我的视图</span>
               <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                 <X size={15} />
               </button>
@@ -1864,7 +1864,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <span className="text-[12.5px] font-bold text-slate-700">智能优化建议</span>
+              <span className="text-[13px] font-bold text-slate-700">智能优化建议</span>
               <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                 <X size={15} />
               </button>

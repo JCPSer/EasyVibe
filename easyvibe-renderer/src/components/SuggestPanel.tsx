@@ -62,13 +62,13 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
           <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800">
             <Lightbulb size={15} className="text-amber-500" /> 智能优化建议
           </h2>
-          <p className="mt-0.5 text-[10.5px] text-slate-400">AI 主动发现的优化机会，逐条可发起修复任务</p>
+          <p className="mt-0.5 text-cap text-slate-400">AI 主动发现的优化机会，逐条可发起修复任务</p>
         </div>
         <div className="flex items-center gap-1.5">
           {loading && (
             <button
               onClick={stop}
-              className="flex items-center gap-1 rounded-full border border-red-200 px-2.5 py-1 text-[10.5px] font-semibold text-red-600 hover:bg-red-50"
+              className="flex items-center gap-1 rounded-full border border-red-200 px-2.5 py-1 text-cap font-semibold text-red-600 hover:bg-red-50"
               title="停止等待（后端 LLM 调用已发出，成本已发生；不再等待结果）"
             >
               停止
@@ -78,7 +78,7 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
             <button
               onClick={load}
               disabled={loading || !backendRepo}
-              className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+              className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-cap font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
             >
               <RefreshCw size={10} className={loading ? 'animate-spin' : ''} /> {loading ? '分析中' : '刷新'}
             </button>
@@ -86,12 +86,12 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
         </div>
       </div>
 
-      {!backendRepo && <p className="py-6 text-center text-[11.5px] text-slate-400">需要本地后端在线</p>}
-      {error && <p className="py-6 text-center text-[11.5px] text-red-500">建议生成失败：{error}</p>}
+      {!backendRepo && <p className="py-6 text-center text-[12px] text-slate-400">需要本地后端在线</p>}
+      {error && <p className="py-6 text-center text-[12px] text-red-500">建议生成失败：{error}</p>}
       {/* M4-1 Bug#5：显式开始——分析消耗 LLM token，用户点头才开始 */}
       {backendRepo && items === null && !loading && !error && (
         <div className="flex flex-col items-center gap-2 py-10">
-          <p className="text-[11.5px] text-slate-400">分析将调用 LLM 扫描全图，找出优化机会（约 1 分钟，有 token 成本）。</p>
+          <p className="text-[12px] text-slate-400">分析将调用 LLM 扫描全图，找出优化机会（约 1 分钟，有 token 成本）。</p>
           <button
             onClick={load}
             className="flex items-center gap-1 rounded-lg bg-blue-600 px-4 py-2 text-[12px] font-semibold text-white hover:bg-blue-700"
@@ -105,18 +105,18 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
           <Loader2 size={14} className="animate-spin" /> 正在分析地图…（结果会保留，切页签不会重分析）
         </div>
       )}
-      {items && !loading && items.length === 0 && <p className="py-6 text-center text-[11.5px] text-slate-400">当前地图没有可建议的优化项，保持得很好。</p>}
+      {items && !loading && items.length === 0 && <p className="py-6 text-center text-[12px] text-slate-400">当前地图没有可建议的优化项，保持得很好。</p>}
 
       {items?.map((sg, i) => (
         <div key={i} className="rounded-lg border border-slate-200 p-3">
           <div className="flex items-start gap-2">
-            <span className={`mt-0.5 rounded-full px-1.5 py-px text-[9px] font-bold ${PRIORITY_STYLE[sg.priority] ?? PRIORITY_STYLE.medium}`}>
+            <span className={`mt-0.5 rounded-full px-1.5 py-px text-micro font-bold ${PRIORITY_STYLE[sg.priority] ?? PRIORITY_STYLE.medium}`}>
               {sg.priority}
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-[12px] font-semibold leading-5 text-slate-800">{sg.title}</div>
               <p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-slate-600">{sg.description}</p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-micro text-slate-400">
                 <span>{sg.rationale}</span>
                 {sg.modules.map((id) => {
                   const m = map.modules.find((x) => x.id === id)
@@ -126,7 +126,7 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
                 })}
                 <button
                   onClick={() => onCreateTask(buildSuggestionTask(map, sg))}
-                  className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+                  className="ml-auto flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
                 >
                   <Wrench size={9} /> 发起修复
                 </button>

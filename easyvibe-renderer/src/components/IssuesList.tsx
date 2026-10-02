@@ -134,7 +134,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
       </div>
 
       {issues.length === 0 && (
-        <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2.5 text-[11.5px] text-emerald-700">
+        <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2.5 text-[12px] text-emerald-700">
           <Info size={13} /> 当前地图没有检出问题，保持健康。
         </p>
       )}
@@ -162,10 +162,10 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
                   />
                 </span>
               )}
-              <span className="ml-auto text-[10px] text-slate-400">影响 {issue.impact} 模块</span>
+              <span className="ml-auto text-micro text-slate-400">影响 {issue.impact} 模块</span>
             </div>
 
-            <p className="mt-1.5 text-[11.5px] leading-5 text-slate-700">{issue.finding}</p>
+            <p className="mt-1.5 text-[12px] leading-5 text-slate-700">{issue.finding}</p>
 
             <p className="mt-1 flex items-start gap-1 text-[11px] leading-5 text-slate-500">
               <ArrowRight size={11} className="mt-1 shrink-0 text-emerald-600" />
@@ -174,14 +174,14 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
 
             <div className="mt-1.5 flex items-center gap-2">
               {issue.moduleId && (
-                <span className="flex items-center gap-1 text-[10px] font-medium text-blue-500">
+                <span className="flex items-center gap-1 text-micro font-medium text-blue-500">
                   <Crosshair size={10} /> 点击定位到画布
                 </span>
               )}
               <button
                 onClick={(e) => quickFix(e, issue)}
                 disabled={quickBusy !== null || !backendRepo}
-                className="flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
+                className="flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
                 title="跳过表单直接自动修复（自动模式直通执行，全程留痕）——90% 的场景不需要调整范围"
               >
                 {quickBusy === issue.key ? <Loader2 size={9} className="animate-spin" /> : <Zap size={9} />}
@@ -207,7 +207,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
                     })
                   }
                 }}
-                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600 hover:bg-blue-100"
+                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-micro font-bold text-blue-600 hover:bg-blue-100"
                 title="指哪打哪：以该问题为上下文发起修复任务"
               >
                 <Wrench size={9} /> 修复
@@ -217,7 +217,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
         ))}
       </div>
 
-      <p className="flex items-start gap-1.5 text-[10.5px] leading-4 text-slate-400">
+      <p className="flex items-start gap-1.5 text-cap leading-4 text-slate-400">
         <Info size={11} className="mt-0.5 shrink-0" />
         严重度来自 LLM 问题提名（concerns）；影响面为确定性统计（被依赖数）。旧版地图数据无 concerns 字段时，本列表由腐化标记与评审意见兜底生成。
       </p>

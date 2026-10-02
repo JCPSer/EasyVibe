@@ -57,12 +57,12 @@ function Ring({ score, size = 44 }: { score: number; size?: number }) {
 }
 
 function Delta({ now, prev }: { now: number; prev: number | null }) {
-  if (prev === null) return <p className="mt-0.5 text-[10px] text-slate-300">无上次记录</p>
+  if (prev === null) return <p className="mt-0.5 text-micro text-slate-300">无上次记录</p>
   const d = now - prev
-  if (d === 0) return <p className="mt-0.5 flex items-center gap-0.5 text-[10px] text-slate-400">较上次 +0</p>
+  if (d === 0) return <p className="mt-0.5 flex items-center gap-0.5 text-micro text-slate-400">较上次 +0</p>
   const up = d > 0
   return (
-    <p className={`mt-0.5 flex items-center gap-0.5 text-[10px] ${up ? 'text-emerald-500' : 'text-red-500'}`}>
+    <p className={`mt-0.5 flex items-center gap-0.5 text-micro ${up ? 'text-emerald-500' : 'text-red-500'}`}>
       {up ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
       较上次 {up ? '+' : ''}
       {d}
@@ -152,36 +152,36 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
       {/* KPI 行 */}
       <div className="mb-4 grid grid-cols-4 gap-3">
         <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-[10.5px] text-slate-400">架构健康</p>
+          <p className="text-cap text-slate-400">架构健康</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6" style={{ color: archScore !== null ? healthColor(archScore) : '#94a3b8' }}>
-            {archScore ?? '—'} <span className="text-[10.5px] font-normal text-slate-300">/ 100</span>
+            {archScore ?? '—'} <span className="text-cap font-normal text-slate-300">/ 100</span>
           </p>
           {archScore !== null && <Delta now={archScore} prev={prev?.archScore ?? null} />}
           <div className="absolute right-3 top-1/2 -translate-y-1/2">{archScore !== null && <Ring score={archScore} />}</div>
         </div>
         <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-[10.5px] text-slate-400">模块平均</p>
+          <p className="text-cap text-slate-400">模块平均</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6" style={{ color: healthColor(moduleAvg ?? mapModuleAvg ?? 0) }}>
-            {moduleAvg ?? mapModuleAvg ?? '—'} <span className="text-[10.5px] font-normal text-slate-300">/ 100</span>
+            {moduleAvg ?? mapModuleAvg ?? '—'} <span className="text-cap font-normal text-slate-300">/ 100</span>
           </p>
           {moduleAvg !== null && <Delta now={moduleAvg} prev={prev && prev.moduleCount > 0 ? prev.moduleAvg : null} />}
-          {moduleAvg === null && <p className="mt-0.5 text-[10px] text-slate-300">{mapModuleAvg !== null ? '当前地图口径' : '暂无数据'}</p>}
+          {moduleAvg === null && <p className="mt-0.5 text-micro text-slate-300">{mapModuleAvg !== null ? '当前地图口径' : '暂无数据'}</p>}
           <div className="absolute right-3 top-1/2 -translate-y-1/2">
             {(moduleAvg ?? mapModuleAvg) !== null && <Ring score={(moduleAvg ?? mapModuleAvg)!} />}
           </div>
         </div>
         <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-[10.5px] text-slate-400">逆向依赖</p>
+          <p className="text-cap text-slate-400">逆向依赖</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-red-500">{reverseDeps ?? '—'}</p>
-          <p className="mt-0.5 text-[10px] text-slate-300">当前地图口径</p>
+          <p className="mt-0.5 text-micro text-slate-300">当前地图口径</p>
         </div>
         <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-[10.5px] text-slate-400">覆盖率</p>
+          <p className="text-cap text-slate-400">覆盖率</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-emerald-500">
             {coverage !== null ? `${Math.round(coverage * 100)}` : '—'}
             <span className="text-[12px]"> %</span>
           </p>
-          <p className="mt-0.5 text-[10px] text-slate-300">当前地图口径</p>
+          <p className="mt-0.5 text-micro text-slate-300">当前地图口径</p>
         </div>
       </div>
 
@@ -196,8 +196,8 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
         {/* 趋势图 */}
         <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[12.5px] font-bold text-slate-700">架构健康趋势（近 {Math.min(10, trend.length)} 次巡检）</span>
-            <div className="flex items-center gap-3 text-[10px] text-slate-400">
+            <span className="text-[13px] font-bold text-slate-700">架构健康趋势（近 {Math.min(10, trend.length)} 次巡检）</span>
+            <div className="flex items-center gap-3 text-micro text-slate-400">
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-500" /> 架构级</span>
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-slate-300" /> 模块平均</span>
             </div>
@@ -213,12 +213,12 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
 
         {/* 最差模块排行 */}
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <p className="mb-2 text-[12.5px] font-bold text-slate-700">模块健康排行</p>
+          <p className="mb-2 text-[13px] font-bold text-slate-700">模块健康排行</p>
           <div className="space-y-1">
             {(data?.latestModules ?? []).slice(0, 10).map((m, i) => (
               <div key={m.moduleId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                <span className="tnum w-4 text-[10px] text-slate-300">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-[11.5px] text-slate-600">{m.name ?? m.moduleId}</span>
+                <span className="tnum w-4 text-micro text-slate-300">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-slate-600">{m.name ?? m.moduleId}</span>
                 <div className="relative">
                   <Ring score={m.score} size={26} />
                   <span
@@ -240,7 +240,7 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
       {/* 巡检记录 */}
       <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-4 py-2.5">
-          <span className="text-[12.5px] font-bold text-slate-700">巡检记录</span>
+          <span className="text-[13px] font-bold text-slate-700">巡检记录</span>
         </div>
         <table className="w-full text-left">
           <thead>
@@ -256,16 +256,16 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
           <tbody>
             {(data?.runs ?? []).map((r) => (
               <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                <td className="tnum px-4 py-2.5 text-[11.5px] text-slate-600">{absTime(r.startedAt)}</td>
-                <td className="px-3 py-2.5 text-[11.5px] text-slate-500">{r.model ?? '—'}</td>
-                <td className="tnum px-3 py-2.5 text-right text-[11.5px] font-semibold" style={{ color: r.archScore !== null ? healthColor(r.archScore) : '#94a3b8' }}>
+                <td className="tnum px-4 py-2.5 text-[12px] text-slate-600">{absTime(r.startedAt)}</td>
+                <td className="px-3 py-2.5 text-[12px] text-slate-500">{r.model ?? '—'}</td>
+                <td className="tnum px-3 py-2.5 text-right text-[12px] font-semibold" style={{ color: r.archScore !== null ? healthColor(r.archScore) : '#94a3b8' }}>
                   {r.archScore ?? '—'}
                 </td>
-                <td className="tnum px-3 py-2.5 text-right text-[11.5px] text-slate-600">{r.moduleCount > 0 ? r.moduleAvg : '—'}</td>
-                <td className="tnum px-3 py-2.5 text-right text-[11.5px] text-slate-400">{r.moduleCount > 0 ? r.moduleCount : '—'}</td>
+                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-600">{r.moduleCount > 0 ? r.moduleAvg : '—'}</td>
+                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-400">{r.moduleCount > 0 ? r.moduleCount : '—'}</td>
                 <td className="px-3 py-2.5">
                   <span
-                    className={`rounded-full px-1.5 py-px text-[9.5px] font-semibold ${
+                    className={`rounded-full px-1.5 py-px text-micro font-semibold ${
                       r.status === 'succeeded'
                         ? 'bg-emerald-50 text-emerald-600'
                         : r.status === 'failed'
@@ -280,7 +280,7 @@ export function HealthPage({ backendRepo, map }: { backendRepo: string | null; m
             ))}
             {!hasAnyRun && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[11.5px] text-slate-300">{loading ? '加载中…' : '暂无巡检记录'}</td>
+                <td colSpan={6} className="px-4 py-8 text-center text-[12px] text-slate-300">{loading ? '加载中…' : '暂无巡检记录'}</td>
               </tr>
             )}
           </tbody>
@@ -339,7 +339,7 @@ function TrendChart({
       </svg>
       {h && (
         <div
-          className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[10px] shadow-lg"
+          className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-micro shadow-lg"
           style={{ left: `${(x(hover!) / W) * 100}%`, top: 0, transform: `translateX(${hover! > runs.length / 2 ? '-110%' : '10%'})` }}
         >
           <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400">架构级</span></p>

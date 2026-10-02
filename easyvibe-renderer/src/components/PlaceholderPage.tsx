@@ -19,7 +19,7 @@ export function PlaceholderPage({ title, description, action, icon: Icon = Const
       </span>
       <h2 className="text-[15px] font-bold text-slate-700">{title}</h2>
       <p className="max-w-md text-[12px] leading-6 text-slate-400">{description}</p>
-      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-400">规划中</span>
+      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-micro font-semibold text-slate-400">规划中</span>
       {action && (
         <button
           onClick={action.onClick}

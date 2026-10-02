@@ -44,28 +44,28 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
         {/* 改进#5：层序徽标 L0/L1…——分层"可数可辨"，远看知道几层、谁在上谁在下 */}
         <div className="flex items-center gap-1.5 text-slate-700">
           <span
-            className="rounded px-1 py-px font-mono text-[9px] font-bold"
+            className="rounded px-1 py-px font-mono text-micro font-bold"
             style={{ background: `${color}22`, color }}
           >
             L{index}
           </span>
           <Boxes size={15} strokeWidth={1.8} />
-          <span className="text-[12.5px] font-bold tracking-wide">{layer.name}</span>
+          <span className="text-[13px] font-bold tracking-wide">{layer.name}</span>
           <ChevronRight size={13} className="ml-auto text-slate-300" />
         </div>
         {/* 层健康色条：整层体温一眼可见 */}
         <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full" style={{ width: `${stats.avgScore}%`, background: color }} />
         </div>
-        <div className="mt-1 text-[10px] leading-4 text-slate-400">{layer.description}</div>
+        <div className="mt-1 text-micro leading-4 text-slate-400">{layer.description}</div>
 
         {/* 层聚合健康 */}
         <div className="mt-auto flex items-center gap-1.5 pt-2">
           <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-          <span className="text-[10px] font-semibold" style={{ color }}>
+          <span className="text-micro font-semibold" style={{ color }}>
             {stats.avgScore}
           </span>
-          <span className="text-[9.5px] text-slate-400">
+          <span className="text-micro text-slate-400">
             · {stats.count} 模块{stats.violations > 0 && ` · ${stats.violations} 逆向`}
           </span>
         </div>

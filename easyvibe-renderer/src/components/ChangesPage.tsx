@@ -135,7 +135,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                     <button
                       key={k}
                       onClick={() => setTrustFilter(k)}
-                      className={`px-2.5 py-1 text-[10.5px] font-semibold ${
+                      className={`px-2.5 py-1 text-cap font-semibold ${
                         trustFilter === k ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'
                       }`}
                     >
@@ -146,14 +146,14 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                 <select
                   value={moduleFilter}
                   onChange={(e) => setModuleFilter(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10.5px] text-slate-600 focus:outline-none"
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-cap text-slate-600 focus:outline-none"
                 >
                   <option value="all">全部模块</option>
                   {(map?.modules ?? []).map((m) => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </select>
-                <span className="tnum ml-auto text-[10.5px] text-slate-300">共 {filtered.length} 条</span>
+                <span className="tnum ml-auto text-cap text-slate-300">共 {filtered.length} 条</span>
               </div>
             </div>
 
@@ -182,14 +182,14 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                       className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left"
                     >
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: STATUS_DOT[t.status] ?? '#94a3b8' }} />
-                      <span className="tnum w-[92px] shrink-0 text-[10px] leading-3 text-slate-400">
+                      <span className="tnum w-[92px] shrink-0 text-micro leading-3 text-slate-400">
                         {absTime(t.createdAt).split(' ')[0]}
                         <br />
                         {absTime(t.createdAt).split(' ')[1]}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[12px] font-semibold text-slate-700">{t.title}</span>
-                        <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-400">
+                        <span className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
                           {changedCount > 0 && <span>{changedCount} 个模块</span>}
                           {stat && (
                             <span className="tnum">
@@ -197,7 +197,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                               <i className="not-italic text-red-400">-{stat.deletions}</i> 行
                             </span>
                           )}
-                          <span className={`rounded-full border px-1.5 py-px text-[9px] font-semibold ${TRUST_CHIP[t.trust] ?? TRUST_CHIP.auto}`}>
+                          <span className={`rounded-full border px-1.5 py-px text-micro font-semibold ${TRUST_CHIP[t.trust] ?? TRUST_CHIP.auto}`}>
                             {TRUST_LABEL[t.trust] ?? t.trust}
                           </span>
                         </span>
@@ -208,12 +208,12 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                       <div className="space-y-1.5 border-t border-slate-50 px-4 py-3">
                         {impact.map((i) => (
                           <div key={i.id} className="flex items-center gap-2">
-                            <span className="w-20 shrink-0 truncate text-[10.5px] text-slate-500">{i.name}</span>
+                            <span className="w-20 shrink-0 truncate text-cap text-slate-500">{i.name}</span>
                             <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                               <div className="bg-emerald-400" style={{ width: `${(i.adds / maxI) * 100}%` }} />
                               <div className="bg-red-300" style={{ width: `${(i.dels / maxI) * 100}%` }} />
                             </div>
-                            <span className="tnum w-14 shrink-0 text-right text-[9.5px] text-slate-400">
+                            <span className="tnum w-14 shrink-0 text-right text-micro text-slate-400">
                               <i className="not-italic text-emerald-500">+{i.adds}</i>{' '}
                               <i className="not-italic text-red-400">-{i.dels}</i>
                             </span>
@@ -225,7 +225,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                 )
               })}
               {filtered.length === 0 && (
-                <div className="py-16 text-center text-[11.5px] text-slate-300">
+                <div className="py-16 text-center text-[12px] text-slate-300">
                   {tasks === null ? '加载中…' : '没有符合筛选条件的变更记录。'}
                 </div>
               )}
@@ -243,8 +243,8 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <div className="border-b border-slate-100 px-4 py-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-[12.5px] font-bold text-slate-700">变更详情</span>
-                    <span className="flex items-center gap-0.5 text-[9.5px] text-slate-300">
+                    <span className="text-[13px] font-bold text-slate-700">变更详情</span>
+                    <span className="flex items-center gap-0.5 text-micro text-slate-300">
                       <ShieldCheck size={10} /> 全程留痕
                     </span>
                   </div>
@@ -258,7 +258,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                       ].map((k) => (
                         <div key={k.l} className="rounded-lg bg-slate-50 py-1.5">
                           <p className={`text-[13px] font-bold ${k.c}`}>{k.v}</p>
-                          <p className="mt-0.5 text-[9px] text-slate-400">{k.l}</p>
+                          <p className="mt-0.5 text-micro text-slate-400">{k.l}</p>
                         </div>
                       ))}
                     </div>
@@ -266,7 +266,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                 </div>
 
                 <div className="border-b border-slate-100 px-4 py-3">
-                  <p className="mb-1.5 text-[10.5px] font-bold text-slate-400">基本信息</p>
+                  <p className="mb-1.5 text-cap font-bold text-slate-400">基本信息</p>
                   <dl className="space-y-1.5 text-[11px]">
                     {[
                       { l: '任务 ID', v: sel.id, mono: true, copy: true },
@@ -277,7 +277,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                     ].map((row) => (
                       <div key={row.l} className="flex items-center gap-2">
                         <dt className="w-16 shrink-0 text-slate-400">{row.l}</dt>
-                        <dd className={`min-w-0 flex-1 truncate text-slate-600 ${row.mono ? 'mono text-[10px]' : ''}`}>{row.v}</dd>
+                        <dd className={`min-w-0 flex-1 truncate text-slate-600 ${row.mono ? 'mono text-micro' : ''}`}>{row.v}</dd>
                         {row.copy && (
                           <button
                             onClick={() => void navigator.clipboard?.writeText(String(row.v))}
@@ -294,16 +294,16 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
 
                 {selImpact.length > 0 && (
                   <div className="border-b border-slate-100 px-4 py-3">
-                    <p className="mb-1.5 text-[10.5px] font-bold text-slate-400">模块影响面</p>
+                    <p className="mb-1.5 text-cap font-bold text-slate-400">模块影响面</p>
                     <div className="space-y-1.5">
                       {selImpact.map((i) => (
                         <div key={i.id} className="flex items-center gap-2">
-                          <span className="w-20 shrink-0 truncate text-[10.5px] text-slate-500">{i.name}</span>
+                          <span className="w-20 shrink-0 truncate text-cap text-slate-500">{i.name}</span>
                           <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                             <div className="bg-emerald-400" style={{ width: `${(i.adds / Math.max(1, ...selImpact.map((x) => x.adds + x.dels))) * 100}%` }} />
                             <div className="bg-red-300" style={{ width: `${(i.dels / Math.max(1, ...selImpact.map((x) => x.adds + x.dels))) * 100}%` }} />
                           </div>
-                          <span className="tnum w-14 shrink-0 text-right text-[9.5px] text-slate-400">
+                          <span className="tnum w-14 shrink-0 text-right text-micro text-slate-400">
                             <i className="not-italic text-emerald-500">+{i.adds}</i>{' '}
                             <i className="not-italic text-red-400">-{i.dels}</i>
                           </span>
@@ -314,7 +314,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                 )}
 
                 <div className="border-b border-slate-100 px-4 py-3">
-                  <p className="mb-1.5 text-[10.5px] font-bold text-slate-400">关联评审</p>
+                  <p className="mb-1.5 text-cap font-bold text-slate-400">关联评审</p>
                   {approvals.length === 0 ? (
                     <p className="text-[11px] text-slate-300">该任务没有经过审批关（自动模式或尚未到达）。</p>
                   ) : (
@@ -322,14 +322,14 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                       {approvals.map((a) => (
                         <div key={a.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-1.5">
                           <div>
-                            <p className="mono text-[10px] text-slate-600">{a.id}</p>
-                            <p className="mt-0.5 text-[9.5px] text-slate-400">
+                            <p className="mono text-micro text-slate-600">{a.id}</p>
+                            <p className="mt-0.5 text-micro text-slate-400">
                               {GATE_LABEL[a.gate] ?? a.gate} · {absTime(a.decidedAt)}
                               {a.note ? ` · ${a.note}` : ''}
                             </p>
                           </div>
                           <span
-                            className={`rounded-full px-1.5 py-px text-[9px] font-semibold ${
+                            className={`rounded-full px-1.5 py-px text-micro font-semibold ${
                               a.decision === 'approved'
                                 ? 'bg-emerald-50 text-emerald-600'
                                 : a.decision === 'rejected'
@@ -347,10 +347,10 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
 
                 {(sel.result?.result?.summary || (sel.result?.warnings?.length ?? 0) > 0) && (
                   <div className="px-4 py-3">
-                    <p className="mb-1.5 text-[10.5px] font-bold text-slate-400">备注</p>
+                    <p className="mb-1.5 text-cap font-bold text-slate-400">备注</p>
                     {sel.result?.result?.summary && <p className="text-[11px] leading-4 text-slate-600">{sel.result.result.summary}</p>}
                     {sel.result?.warnings?.map((w, i) => (
-                      <p key={i} className="mt-1 text-[10px] leading-4 text-amber-600">⚠ {w}</p>
+                      <p key={i} className="mt-1 text-micro leading-4 text-amber-600">⚠ {w}</p>
                     ))}
                   </div>
                 )}
@@ -360,7 +360,7 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
         </div>
       </div>
       {/* 底条 */}
-      <div className="flex items-center justify-center gap-1 border-t border-slate-100 bg-slate-50/60 py-1.5 text-[10px] text-slate-400">
+      <div className="flex items-center justify-center gap-1 border-t border-slate-100 bg-slate-50/60 py-1.5 text-micro text-slate-400">
         <History size={10} /> 全程留痕 · 可回放
       </div>
     </div>

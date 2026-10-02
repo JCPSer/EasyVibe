@@ -166,11 +166,11 @@ export function WorkbenchPage({
       {/* 左栏：会话列表（三态行 + 待审批角标） */}
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[12.5px] font-bold text-slate-700">会话</span>
+          <span className="text-[13px] font-bold text-slate-700">会话</span>
           <button
             onClick={createConv}
             disabled={!backendRepo}
-            className="flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-[10.5px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+            className="flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-cap font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
             <Plus size={10} /> 新建会话
           </button>
@@ -196,7 +196,7 @@ export function WorkbenchPage({
                 {c.title ?? '未命名会话'}
               </span>
               {c.runtime.pendingConfirmations > 0 && (
-                <span className="tnum shrink-0 rounded-full bg-red-500 px-1.5 text-[9px] font-bold leading-4 text-white">
+                <span className="tnum shrink-0 rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">
                   {c.runtime.pendingConfirmations}
                 </span>
               )}
@@ -211,21 +211,21 @@ export function WorkbenchPage({
         {activeTask && (
           <div className="border-b border-slate-100 bg-white px-4 py-2.5">
             <div className="flex items-center justify-between">
-              <p className="truncate text-[11.5px] font-semibold text-slate-600">{activeTask.title}</p>
-              <span className="shrink-0 text-[10px] text-slate-400">{STATUS_LABEL[activeTask.status] ?? activeTask.status}</span>
+              <p className="truncate text-[12px] font-semibold text-slate-600">{activeTask.title}</p>
+              <span className="shrink-0 text-micro text-slate-400">{STATUS_LABEL[activeTask.status] ?? activeTask.status}</span>
             </div>
             {/* 计划进度条：三道关（gate 状态由任务系统真实驱动） */}
             <div className="mt-1.5 flex items-center gap-1">
               {GATE_STEPS.map((g, i) => (
                 <div key={g.key} className="flex flex-1 items-center gap-1">
                   <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro font-bold ${
                       i < gateIndex ? 'bg-emerald-500 text-white' : i === gateIndex ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'
                     }`}
                   >
                     {i < gateIndex ? <CheckCircle2 size={10} /> : i + 1}
                   </span>
-                  <span className={`text-[10px] ${i <= gateIndex ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>{g.label}</span>
+                  <span className={`text-micro ${i <= gateIndex ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>{g.label}</span>
                   {i < GATE_STEPS.length - 1 && <span className={`h-px flex-1 ${i < gateIndex ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
                 </div>
               ))}
@@ -247,34 +247,34 @@ export function WorkbenchPage({
       {/* 右栏：影响面（diff 按模块聚合） */}
       <aside className="flex w-64 shrink-0 flex-col border-l border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[12.5px] font-bold text-slate-700">影响面</span>
-          <p className="mt-0.5 text-[9.5px] text-slate-400">{diffTaskId ? '来自该会话最近任务的变更' : '任务执行后此处显示模块影响'}</p>
+          <span className="text-[13px] font-bold text-slate-700">影响面</span>
+          <p className="mt-0.5 text-micro text-slate-400">{diffTaskId ? '来自该会话最近任务的变更' : '任务执行后此处显示模块影响'}</p>
         </div>
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3">
           {impact.length === 0 && (
             <p className="py-8 text-center text-[11px] leading-5 text-slate-400">
               暂无变更数据
               <br />
-              <span className="text-[9.5px]">从对话「转为任务」开始一次修复</span>
+              <span className="text-micro">从对话「转为任务」开始一次修复</span>
             </p>
           )}
           {impact.map((im) => (
             <div key={im.name} className="rounded-lg border border-slate-100 p-2.5">
               <div className="flex items-center justify-between">
-                <span className="truncate text-[11.5px] font-semibold text-slate-700">{im.name}</span>
-                <span className="tnum shrink-0 text-[10px] text-slate-400">{im.files} 文件</span>
+                <span className="truncate text-[12px] font-semibold text-slate-700">{im.name}</span>
+                <span className="tnum shrink-0 text-micro text-slate-400">{im.files} 文件</span>
               </div>
               <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <span className="bg-emerald-500" style={{ width: `${(im.adds / maxImpact) * 100}%` }} />
                 <span className="bg-red-400" style={{ width: `${(im.dels / maxImpact) * 100}%` }} />
               </div>
-              <p className="tnum mt-1 text-[10px] text-slate-500">
+              <p className="tnum mt-1 text-micro text-slate-500">
                 <span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span>
               </p>
             </div>
           ))}
           {impact.length > 0 && diffTaskId && (
-            <p className="flex items-center gap-1 pt-1 text-[9.5px] text-slate-300">
+            <p className="flex items-center gap-1 pt-1 text-micro text-slate-300">
               <GitBranch size={9} /> 任务 {diffTaskId.slice(-8)}
             </p>
           )}

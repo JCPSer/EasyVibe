@@ -152,10 +152,10 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
         <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800">
           <ShieldCheck size={15} className="text-blue-500" /> 任务与审批
         </h2>
-        <p className="mt-0.5 text-[10.5px] text-slate-400">三道关：计划审批 → Diff 审批 → 审查报告；自动模式直通留痕</p>
+        <p className="mt-0.5 text-cap text-slate-400">三道关：计划审批 → Diff 审批 → 审查报告；自动模式直通留痕</p>
       </div>
 
-      {!backendRepo && <p className="py-6 text-center text-[11.5px] text-slate-400">需要本地后端在线</p>}
+      {!backendRepo && <p className="py-6 text-center text-[12px] text-slate-400">需要本地后端在线</p>}
       {loading && !tasks && (
         <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-slate-400">
           <Loader2 size={14} className="animate-spin" /> 加载任务…
@@ -164,7 +164,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
       {/* 空态 = 说明 + 主行动（验收清单⑪） */}
       {tasks?.length === 0 && !loadError && (
         <div className="flex flex-col items-center gap-2 py-6">
-          <p className="text-[11.5px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>
+          <p className="text-[12px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>
           {emptyAction && (
             <button
               onClick={emptyAction.onClick}
@@ -177,7 +177,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
       )}
       {tasks?.length === 0 && loadError && (
         <div className="py-6 text-center">
-          <p className="text-[11.5px] text-red-500">任务列表加载失败（需要本地后端在线）</p>
+          <p className="text-[12px] text-red-500">任务列表加载失败（需要本地后端在线）</p>
           <button onClick={load} className="mt-2 rounded-lg border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:bg-slate-50">
             重试
           </button>
@@ -190,31 +190,31 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
         return (
           <div key={t.id} className="rounded-lg border border-slate-200 p-3">
             <div className="flex items-center gap-2">
-              <span className={`rounded-full px-2 py-px text-[9.5px] font-bold ${st.cls}`}>{st.label}</span>
+              <span className={`rounded-full px-2 py-px text-micro font-bold ${st.cls}`}>{st.label}</span>
               {t.status === 'awaiting_approval' && t.gate && (
-                <span className="rounded-full bg-amber-50 px-2 py-px text-[9.5px] font-semibold text-amber-600">
+                <span className="rounded-full bg-amber-50 px-2 py-px text-micro font-semibold text-amber-600">
                   {GATE_LABEL[t.gate] ?? t.gate}
                 </span>
               )}
-              <span className={`ml-auto rounded-full px-1.5 py-px text-[9px] ${t.trust === 'auto' ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600'}`}>
+              <span className={`ml-auto rounded-full px-1.5 py-px text-micro ${t.trust === 'auto' ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600'}`}>
                 {t.trust === 'auto' ? '自动' : '手动'}
               </span>
             </div>
             <div className="mt-1.5 text-[12px] font-semibold leading-5 text-slate-800">{t.title}</div>
             {/* S1-2 计划关不盲批：第一道关展示完整需求（不截断）+ 验收标准 */}
-            <p className={`mt-0.5 text-[10.5px] leading-4 text-slate-500 ${t.gate === 'plan' ? '' : 'line-clamp-2'}`}>
+            <p className={`mt-0.5 text-cap leading-4 text-slate-500 ${t.gate === 'plan' ? '' : 'line-clamp-2'}`}>
               {t.description}
             </p>
             {t.gate === 'plan' && t.status === 'awaiting_approval' && !riskNotes[t.id] && (
               <RiskNoteLoader taskId={t.id} backendRepo={backendRepo} onLoaded={(note) => setRiskNotes((p) => ({ ...p, [t.id]: note }))} />
             )}
             {t.gate === 'plan' && riskNotes[t.id] && (
-              <p className="mt-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] leading-4 text-amber-700">
+              <p className="mt-1 rounded bg-amber-50 px-1.5 py-0.5 text-micro leading-4 text-amber-700">
                 ⚠ {riskNotes[t.id]}
               </p>
             )}
             {t.gate === 'plan' && t.acceptance && (
-              <p className="mt-1 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] leading-4 text-slate-600">
+              <p className="mt-1 rounded bg-slate-50 px-1.5 py-0.5 text-micro leading-4 text-slate-600">
                 <span className="font-semibold text-slate-500">验收标准：</span>
                 {t.acceptance}
               </p>
@@ -231,7 +231,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                     context: {},
                   })
                 }
-                className="mt-1.5 flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-50"
+                className="mt-1.5 flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-micro font-semibold text-slate-500 hover:bg-slate-50"
                 title="以本任务为模板创建新任务（原驳回记录保留，D3 拍板）"
               >
                 <Copy size={9} /> 复制为新任务
@@ -242,12 +242,12 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
               <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 p-2">
                 {/* 实弹#3 防线：agent 未按协议产出 RESULT 行——审批人须警惕空执行/归因错位 */}
                 {t.result.warnings?.map((w, i) => (
-                  <p key={i} className="mb-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] leading-4 text-amber-700">
+                  <p key={i} className="mb-1 rounded bg-amber-50 px-1.5 py-0.5 text-micro leading-4 text-amber-700">
                     ⚠ {w}
                   </p>
                 ))}
                 {t.result.result?.summary && (
-                  <p className="text-[10.5px] leading-4 text-slate-700">
+                  <p className="text-cap leading-4 text-slate-700">
                     <span className="font-semibold text-slate-500">agent 总结：</span>
                     {t.result.result.summary}
                   </p>
@@ -255,7 +255,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                 {t.result.result?.changed_modules && t.result.result.changed_modules.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {t.result.result.changed_modules.map((m) => (
-                      <span key={m} className="rounded-full bg-white px-1.5 py-px font-mono text-[9px] text-blue-600 shadow-sm">
+                      <span key={m} className="rounded-full bg-white px-1.5 py-px font-mono text-micro text-blue-600 shadow-sm">
                         {m}
                       </span>
                     ))}
@@ -263,10 +263,10 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                 )}
                 {t.result.diffStat && (
                   <details className="mt-1.5">
-                    <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                    <summary className="cursor-pointer text-micro font-semibold text-slate-500 hover:text-slate-700">
                       变更摘要（git）
                     </summary>
-                    <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-white p-1.5 font-mono text-[9.5px] leading-4 text-slate-600">
+                    <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-white p-1.5 font-mono text-micro leading-4 text-slate-600">
                       {t.result.diffStat}
                     </pre>
                   </details>
@@ -279,27 +279,27 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                       if ((e.target as HTMLDetailsElement).open) loadDiff(t.id)
                     }}
                   >
-                    <summary className="cursor-pointer text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                    <summary className="cursor-pointer text-micro font-semibold text-slate-500 hover:text-slate-700">
                       <FileDiff size={9} className="mr-0.5 inline" />
                       完整 diff
                     </summary>
                     {diffLoading === t.id ? (
-                      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+                      <p className="mt-1 flex items-center gap-1 text-micro text-slate-400">
                         <Loader2 size={10} className="animate-spin" /> 读取中…
                       </p>
                     ) : t.id in diffs ? (
                       diffs[t.id] ? (
-                        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-slate-800 p-2 font-mono text-[9.5px] leading-4 text-emerald-200">
+                        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-slate-800 p-2 font-mono text-micro leading-4 text-emerald-200">
                           {diffs[t.id]}
                         </pre>
                       ) : (
-                        <p className="mt-1 text-[10px] text-slate-400">（无变更或未采集到 diff）</p>
+                        <p className="mt-1 text-micro text-slate-400">（无变更或未采集到 diff）</p>
                       )
                     ) : null}
                   </details>
                 )}
                 {t.result.archivedPath && (
-                  <p className="mt-1 truncate text-[9px] text-slate-400" title={t.result.archivedPath}>
+                  <p className="mt-1 truncate text-micro text-slate-400" title={t.result.archivedPath}>
                     已归档：{t.result.archivedPath}
                   </p>
                 )}
@@ -307,7 +307,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                   <button
                     onClick={recheck}
                     disabled={rechecking}
-                    className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                    className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-micro font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                     title="任务成功 ≠ 架构变好：触发一次巡检，改动模块的健康变化将在详情页趋势条中可见"
                   >
                     <RefreshCw size={9} className={rechecking ? 'animate-spin' : ''} />
@@ -368,7 +368,7 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
                       setRejectingId(null)
                       setRejectReason('')
                     }}
-                    className="rounded-full px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-600"
+                    className="rounded-full px-2 py-0.5 text-micro text-slate-400 hover:text-slate-600"
                   >
                     取消
                   </button>
@@ -377,11 +377,11 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
             )}
             {(t.status === 'running' || t.status === 'pending') && (
               <div className="mt-1.5">
-                <p className="flex items-center gap-1 text-[10px] text-blue-500">
+                <p className="flex items-center gap-1 text-micro text-blue-500">
                   <Clock size={9} className="animate-pulse" /> agent 执行中，完成后进入下一关
                 </p>
                 {t.sessionId && taskLines[t.sessionId]?.filter((l) => l.startsWith('[err]')).slice(-1).map((l, i) => (
-                  <p key={i} className="mt-0.5 truncate font-mono text-[9px] text-red-500">{l}</p>
+                  <p key={i} className="mt-0.5 truncate font-mono text-micro text-red-500">{l}</p>
                 ))}
               </div>
             )}

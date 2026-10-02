@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Clock3, Coins, RefreshCw } from 'lucide-react'
 import { onFreshnessEvent } from '@/lib/growthBus'
 import { relTime } from '@/lib/diffStat'
+import { toast } from '@/lib/toast'
 
 // M4-3 漂移洞察整页（按 ui-mockups/漂移洞察原型.png 施工）：
 // 跨仓库的保鲜仪表盘——KPI（需重归纳/平均落后提交/最近巡检）+ 仓库漂移排名
@@ -54,12 +55,15 @@ function driftPercent(f: Freshness, now: number): number | null {
 export function DriftPage() {
   const [rows, setRows] = useState<RepoDrift[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [now] = useState(() => Date.now()) // 渲染期纯度：漂移百分比以进入页面时刻为锚
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const reposRes = await fetch('/api/repos')
-      const reposData: { data?: RepoInfo[] } | null = reposRes.ok ? await reposRes.json() : null
+      if (!reposRes.ok) throw new Error(`HTTP ${reposRes.status}`)
+      const reposData: { data?: RepoInfo[] } | null = await reposRes.json()
       const repos = reposData?.data ?? []
       const settled = await Promise.all(
         repos.map(async (repo) => {
@@ -74,8 +78,11 @@ export function DriftPage() {
         }),
       )
       setRows(settled)
+      setLoadError(null)
     } catch {
-      setRows([])
+      // 错误归因（审查 2#9）：后端离线 ≠ 没有仓库——两者文案必须区分
+      setRows(null)
+      setLoadError('backend-offline')
     } finally {
       setLoading(false)
     }
@@ -84,9 +91,19 @@ export function DriftPage() {
   useEffect(() => {
     load()
   }, [load])
-  useEffect(() => onFreshnessEvent(() => load()), [load])
+  // 审查 2#8：freshness 事件风暴会放大成 2N+1 请求风暴——5s 尾随防抖合并连续事件
+  useEffect(() => {
+    let timer: number | undefined
+    const off = onFreshnessEvent(() => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(load, 5000)
+    })
+    return () => {
+      window.clearTimeout(timer)
+      off()
+    }
+  }, [load])
 
-  const now = Date.now()
   const sorted = useMemo(() => {
     if (!rows) return []
     const rank = { stale: 0, drifting: 1, fresh: 2, unknown: 3 }
@@ -115,7 +132,11 @@ export function DriftPage() {
   const reinduce = async (repoId: string) => {
     setRows((rs) => rs?.map((r) => (r.repo.id === repoId ? { ...r, reinducing: true } : r)) ?? null)
     try {
-      await fetch(`/api/repos/${encodeURIComponent(repoId)}/reinduce`, { method: 'POST' })
+      const r = await fetch(`/api/repos/${encodeURIComponent(repoId)}/reinduce`, { method: 'POST' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) toast(d?.error ?? '重新归纳发起失败', 'error')
+    } catch {
+      toast('重新归纳发起失败（需要后端在线）', 'error')
     } finally {
       await load()
     }
@@ -149,9 +170,9 @@ export function DriftPage() {
           <div key={k.label} className="lift flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${k.chip}`}>{k.icon}</div>
             <div>
-              <p className="text-[10.5px] text-slate-400">{k.label}</p>
+              <p className="text-cap text-slate-400">{k.label}</p>
               <p className="tnum text-[17px] font-bold leading-5 text-slate-800">
-                {k.value ?? '—'} {k.unit && <span className="text-[10.5px] font-normal text-slate-400">{k.unit}</span>}
+                {k.value ?? '—'} {k.unit && <span className="text-cap font-normal text-slate-400">{k.unit}</span>}
               </p>
             </div>
           </div>
@@ -161,7 +182,7 @@ export function DriftPage() {
       {/* 仓库漂移排名 */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-4 py-2.5">
-          <span className="text-[12.5px] font-bold text-slate-700">仓库漂移排名</span>
+          <span className="text-[13px] font-bold text-slate-700">仓库漂移排名</span>
         </div>
         <table className="w-full text-left">
           <thead>
@@ -180,7 +201,7 @@ export function DriftPage() {
                 <tr key={r.repo.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                   <td className="px-4 py-3">
                     <span
-                      className={`tnum inline-flex h-5 w-5 items-center justify-center rounded-md text-[10.5px] font-bold ${
+                      className={`tnum inline-flex h-5 w-5 items-center justify-center rounded-md text-cap font-bold ${
                         i < 3 ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-400'
                       }`}
                     >
@@ -188,11 +209,11 @@ export function DriftPage() {
                     </span>
                   </td>
                   <td className="px-3 py-3">
-                    <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700">
+                    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700">
                       {r.repo.name}
                       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
                     </p>
-                    <p className="tnum mt-0.5 text-[10.5px] text-slate-400">
+                    <p className="tnum mt-0.5 text-cap text-slate-400">
                       {typeof r.freshness?.commitsSinceMap === 'number'
                         ? `落后 ${r.freshness.commitsSinceMap} 提交`
                         : '落后提交数未知'}
@@ -216,7 +237,7 @@ export function DriftPage() {
                     <button
                       onClick={() => reinduce(r.repo.id)}
                       disabled={r.reinducing}
-                      className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10.5px] font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                      className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                     >
                       {r.reinducing ? '归纳中…' : '重新归纳'}
                     </button>
@@ -226,8 +247,12 @@ export function DriftPage() {
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-[11.5px] text-slate-400">
-                  {rows === null ? '加载中…' : '暂无注册仓库，请先在设置中添加仓库。'}
+                <td colSpan={4} className="px-4 py-10 text-center text-[12px] text-slate-400">
+                  {loadError
+                    ? '后端不在线——请确认 EasyVibe 服务已启动后点「刷新」重试。'
+                    : rows === null
+                      ? '加载中…'
+                      : '暂无注册仓库，请先在顶栏项目选择器中添加仓库。'}
                 </td>
               </tr>
             )}

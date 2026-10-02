@@ -61,18 +61,18 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
       <div className="flex h-12 items-center gap-2 border-b border-slate-200/70 px-4">
         <UnfoldVertical size={14} className="text-blue-500" />
         <span className="text-[13px] font-bold text-slate-800">{mod.name}</span>
-        <span className="text-[10px] text-slate-400">内部结构</span>
+        <span className="text-micro text-slate-400">内部结构</span>
         <span className="ml-1 h-2 w-2 rounded-full" style={{ background: color }} />
-        <span className="text-[10.5px] font-semibold" style={{ color }}>
+        <span className="text-cap font-semibold" style={{ color }}>
           {mod.health.score}
         </span>
         {data.loading ? (
-          <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-slate-400">
+          <span className="ml-auto flex items-center gap-1.5 text-cap text-slate-400">
             <Loader2 size={12} className="animate-spin" /> 归纳子模块中…（约 1-3 分钟）
           </span>
         ) : data.error ? (
           <span className="ml-auto flex flex-col items-end gap-1">
-            <span className="flex items-center gap-1.5 text-[10.5px] text-red-500">
+            <span className="flex items-center gap-1.5 text-cap text-red-500">
               <AlertTriangle size={11} />
               {data.onAnalyze ? '暂无内部结构分析' : '子图加载失败'}
               {data.onAnalyze && (
@@ -102,11 +102,11 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
             </span>
             {/* M4-1 诚实三态：失败原因必须显式呈现，不允许只给"失败"两个字 */}
             {data.analyzeError && (
-              <span className="max-w-[420px] text-right text-[9.5px] leading-4 text-red-400">{data.analyzeError}</span>
+              <span className="max-w-[420px] text-right text-micro leading-4 text-red-400">{data.analyzeError}</span>
             )}
           </span>
         ) : (
-          <span className="ml-auto flex items-center gap-1 text-[10.5px] text-slate-400">
+          <span className="ml-auto flex items-center gap-1 text-cap text-slate-400">
             <ChevronDown size={11} /> {data.subCount} 个子模块 · 点工具栏可收起
           </span>
         )}
@@ -115,7 +115,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
       {data.loading && data.agentLines && data.agentLines.length > 0 && (
         <div className="mt-1.5 space-y-0.5 border-t border-slate-100 pt-1.5">
           {data.agentLines.slice(-3).map((l, i) => (
-            <p key={i} className="truncate font-mono text-[9px] leading-3.5 text-slate-400">
+            <p key={i} className="truncate font-mono text-micro leading-3.5 text-slate-400">
               <span className="text-emerald-500">›</span> {l}
             </p>
           ))}

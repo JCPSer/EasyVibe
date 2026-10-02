@@ -39,14 +39,14 @@ const MermaidBlock = memo(function MermaidBlock({ chart }: { chart: string }) {
     }
   }, [chart])
 
-  if (failed) return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-[10.5px]">{chart}</pre>
+  if (failed) return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-cap">{chart}</pre>
   return <div ref={ref} className="my-1 overflow-x-auto rounded bg-white p-1 [&>svg]:mx-auto" />
 })
 
 // 对话消息的 Markdown 渲染：GFM（表格/列表/粗体）+ mermaid 代码块
 export const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
   return (
-    <div className="text-[11.5px] leading-5 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-[10.5px] [&_h1]:text-[13px] [&_h1]:font-bold [&_h2]:text-[12px] [&_h2]:font-bold [&_li]:ml-3 [&_li]:list-disc [&_p]:my-1 [&_pre]:my-1 [&_strong]:font-semibold [&_table]:my-1 [&_td]:border [&_td]:border-slate-200 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:font-semibold">
+    <div className="text-[12px] leading-5 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-cap [&_h1]:text-[13px] [&_h1]:font-bold [&_h2]:text-[12px] [&_h2]:font-bold [&_li]:ml-3 [&_li]:list-disc [&_p]:my-1 [&_pre]:my-1 [&_strong]:font-semibold [&_table]:my-1 [&_td]:border [&_td]:border-slate-200 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:font-semibold">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -56,7 +56,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: { cont
             const cls = code?.className ?? ''
             const text = Array.isArray(code?.children) ? code.children.join('') : (code?.children ?? '')
             if (cls.includes('language-mermaid')) return <MermaidBlock chart={String(text).trim()} />
-            return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-[10.5px]">{children}</pre>
+            return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-cap">{children}</pre>
           },
         }}
       >
