@@ -54,6 +54,9 @@ interface Props {
   embedded?: boolean
   /** M4-2：当前会话变化通知（工作台据此加载该会话的任务/影响面） */
   onConvChange?: (id: string | null) => void
+  /** R3 B1：受控会话 id——传入后组件进入受控模式（工作台左栏驱动中栏联动），
+   * 内部切换只经 onConvChange 上报父级；不传则维持内部自治 */
+  activeConvId?: string | null
 }
 
 interface ChatRestore {
@@ -68,7 +71,7 @@ interface ChatRestore {
 // 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
 // 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -96,7 +99,17 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
 
   // ---- M4-2 多会话状态 ----
   const [convs, setConvs] = useState<ConversationSummary[]>([])
-  const [convId, setConvId] = useState<string | null>(null) // null = 后端回落（最近活跃）
+  // R3 B1：受控/非受控双模式。受控（activeConvId 传入）时内部态不生效，
+  // 一切切换经 setConvId → onConvChange 上报父级（工作台左栏与中栏联动的契约）
+  const [internalConvId, setInternalConvId] = useState<string | null>(null) // null = 后端回落（最近活跃）
+  const convId = activeConvId !== undefined ? activeConvId : internalConvId
+  const setConvId = useCallback(
+    (id: string | null) => {
+      if (activeConvId === undefined) setInternalConvId(id)
+      onConvChange?.(id)
+    },
+    [activeConvId, onConvChange],
+  )
   const [convMenuOpen, setConvMenuOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
@@ -105,6 +118,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
 
   const convQ = convId ? `?conv=${encodeURIComponent(convId)}` : ''
   const convBody = convId ? { conv: convId } : {}
+  // R3 #5：会话归属守卫——发送后立刻切会话，回复不得追加进新会话的消息列表（串台污染）
+  const convIdRef = useRef<string | null>(convId)
+  useEffect(() => {
+    convIdRef.current = convId
+  }, [convId])
 
   const loadConvs = useCallback(() => {
     if (!backendRepo) return
@@ -141,10 +159,9 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         setConvId(d.data.id)
         setConvMenuOpen(false)
         loadConvs()
-        onConvChange?.(d.data.id)
       })
       .catch(() => toast('新建会话失败', 'error'))
-  }, [backendRepo, loadConvs])
+  }, [backendRepo, loadConvs, setConvId])
 
   const switchConv = useCallback((id: string | null) => {
     setConvId(id)
@@ -152,8 +169,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     setClarify(null)
     setPendingApprovals([])
     setDecided({})
-    onConvChange?.(id)
-  }, [onConvChange])
+  }, [setConvId])
 
   const renameConv = useCallback(() => {
     if (!backendRepo || !convId || !renameVal.trim()) return
@@ -236,7 +252,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         setDecided({})
         if (d.data.conversation?.id) {
           setConvId(d.data.conversation.id)
-          onConvChange?.(d.data.conversation.id)
         }
         setMessages(
           d.data.messages.map((m) => ({
@@ -354,6 +369,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
+    const sentConvId = convId // 归属锚点：响应到达时比对当前会话
     fetch(`/api/repos/${backendRepo}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -365,6 +381,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         return r.json()
       })
       .then((d: { data: { reply: string; refs: string[]; compaction: string | null; clarify: Clarify | null; usage: { promptTokens: number; completionTokens: number } } }) => {
+        if (convIdRef.current !== sentConvId) {
+          // 会话已切换：回复属于旧会话（服务端已落库），不污染当前列表
+          loadConvs()
+          return
+        }
         setUsage(d.data.usage)
         setClarify(d.data.clarify)
         setMessages((prev) => [
@@ -377,6 +398,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         loadConvs()
       })
       .catch((e) => {
+        if (convIdRef.current !== sentConvId) return // 会话已切换：错误也不得追加进新会话
         if (ac.signal.aborted) {
           setMessages((prev) => [...prev, { role: 'system', content: '已停止生成（后端调用已发出，token 已计费）', refs: [] }])
         } else {

@@ -559,6 +559,13 @@ function Canvas({
   const [submapErrors, setSubmapErrors] = useState<Record<string, string>>({})
   const [freshnessInfo, setFreshnessInfo] = useState<{ commitsSinceMap?: number | null }>({})
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
+  // R3 B2：draft 序号——每次打开新表单 +1 作 key，强制重置组件实例，
+  // 杜绝「留在画布」后再发起任务时复用旧实例（旧草稿+假"已创建"横幅残留）
+  const [draftSeq, setDraftSeq] = useState(0)
+  const openTaskDraft = (d: TaskDraft) => {
+    setDraftSeq((s) => s + 1)
+    setTaskDraft(d)
+  }
   const growthRef = useRef<GrowthState | null>(null)
   const submapsRef = useRef<typeof submaps | null>(null)
   useEffect(() => {
@@ -1139,7 +1146,7 @@ function Canvas({
               onTabChange={handleTabChange}
               submaps={submaps}
               backendRepo={backendRepo}
-              onCreateTask={(d) => setTaskDraft(d)}
+              onCreateTask={openTaskDraft}
               onLocateModule={focusModule}
               onOpenView={openView}
               onClose={() => onPanelOpenChange(false)}
@@ -1162,6 +1169,7 @@ function Canvas({
       {/* 任务表单（指哪打哪：模块/问题/层入口预填）；创建成功后跳任务页（由壳接管） */}
       {taskDraft && (
         <TaskFormPanel
+          key={`canvas-draft-${draftSeq}`}
           backendRepo={backendRepo}
           draft={taskDraft}
           map={map}
@@ -1349,7 +1357,9 @@ export default function App() {
   const [repos, setRepos] = useState<{ id: string; name: string }[]>([])
   const [reloadTick, setReloadTick] = useState(0)
   // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
-  const [serverVersion, setServerVersion] = useState<string | null>(null)
+  // R3 #4：WS effect 不重跑，onopen 闭包读 state 永远是初值——版本比对存 ref
+  // （首次连接为 null 时比较被短路、后端热重启后前端永远拿不到"请刷新"提示的问题）
+  const serverVersionRef = useRef<string | null>(null)
 
   // D5-2：桌面壳自动更新（仅 Tauri 环境生效，浏览器 no-op）
   useEffect(() => {
@@ -1383,6 +1393,12 @@ export default function App() {
     () => typeof window !== 'undefined' && localStorage.getItem('ev.m4.guide') === '1',
   )
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
+  // R3 B2：draft 序号——每次打开新表单 +1 作 key，强制重置组件实例（同 Canvas 层逻辑）
+  const [draftSeq, setDraftSeq] = useState(0)
+  const openTaskDraft = (d: TaskDraft) => {
+    setDraftSeq((s) => s + 1)
+    setTaskDraft(d)
+  }
   const [viewRequest, setViewRequest] = useState<string[] | null>(null)
   // 右栏开合/宽度提升到 App：随项目持久化（settings_repo 的 repo scope，后端已有设施）
   const [panelOpen, setPanelOpen] = useState(true)
@@ -1488,7 +1504,7 @@ export default function App() {
           fetch('/api/health')
             .then((r) => (r.ok ? r.json() : null))
             .then((h: { data?: { version?: string } } | null) => {
-              if (!cancelled && h?.data?.version) setServerVersion(h.data.version)
+              if (!cancelled && h?.data?.version) serverVersionRef.current = h.data.version
             })
             .catch(() => {})
         })
@@ -1525,10 +1541,13 @@ export default function App() {
           .then((r) => r.json())
           .then((h: { data?: { version?: string } }) => {
             const v = h.data?.version
-            if (v && serverVersion && v !== serverVersion) {
-              toast(`后端已更新（${serverVersion} → ${v}），刷新页面以加载新界面`, 'error')
+            const prev = serverVersionRef.current
+            if (v && prev && v !== prev) {
+              toast(`后端已更新（${prev} → ${v}），刷新页面以加载新界面`, 'error')
             }
-            if (v) setServerVersion(v)
+            if (v) {
+              serverVersionRef.current = v
+            }
           })
           .catch(() => {})
       }
@@ -1854,17 +1873,17 @@ export default function App() {
     tasks: (
       <div className="h-full overflow-y-auto p-5">
         <h2 className="mb-3 text-[15px] font-bold text-slate-800">任务</h2>
-        <TaskPanel backendRepo={backendRepo} onCreateTask={(d) => setTaskDraft(d)} emptyAction={{ label: '去地图看看', onClick: () => handlePageChange('map') }} />
+        <TaskPanel backendRepo={backendRepo} onCreateTask={openTaskDraft} emptyAction={{ label: '去地图看看', onClick: () => handlePageChange('map') }} />
       </div>
     ),
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
-    workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} onLocateModule={() => handlePageChange('map')} />,
-    todo: <TodoPage backendRepo={backendRepo} onOpenReview={() => handlePageChange('review')} onCreateTask={(d) => setTaskDraft(d)} />,
-    review: <ReviewPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} />,
+    workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onLocateModule={() => handlePageChange('map')} />,
+    todo: <TodoPage backendRepo={backendRepo} onOpenReview={() => handlePageChange('review')} onCreateTask={openTaskDraft} />,
+    review: <ReviewPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
-    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={(d) => setTaskDraft(d)} />,
+    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,
     deps: (
       <PlaceholderPage
@@ -1892,7 +1911,12 @@ export default function App() {
     <>
       <CanvasBoundary>
         <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} badges={{ review: pendingApprovals || undefined }}>
-          {PAGES[page]}
+          {/* R3 B3：地图页 keep-alive——切页只隐藏不卸载，保住选中/过滤/展开子图/右栏对话草稿。
+              审批典型动线「看 diff → 评审 → 回地图对照」此前每轮都被重置逼着重来 */}
+          <div className="h-full" style={page === 'map' ? undefined : { display: 'none' }}>
+            {PAGES.map}
+          </div>
+          {page !== 'map' && PAGES[page]}
         </AppShell>
       </CanvasBoundary>
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
@@ -1929,7 +1953,7 @@ export default function App() {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={(d) => { setOverlay(null); setTaskDraft(d) }} />
+              <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={(d) => { setOverlay(null); openTaskDraft(d) }} />
             </div>
           </div>
         </div>
@@ -1937,6 +1961,7 @@ export default function App() {
       {/* 任务表单（全局：地图/建议/工作区页共用） */}
       {taskDraft && (
         <TaskFormPanel
+          key={`app-draft-${draftSeq}`}
           backendRepo={backendRepo}
           draft={taskDraft}
           map={map}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, AlertTriangle, Plus, CheckCircle2, GitBranch } from 'lucide-react'
 import { ChatPanel, type ConversationSummary } from '@/components/ChatPanel'
 import { onTaskEvent } from '@/lib/growthBus'
+import { toast } from '@/lib/toast'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 
@@ -112,7 +113,7 @@ export function WorkbenchPage({
         setActiveConv(d.data.id)
         loadConvs()
       })
-      .catch(() => {})
+      .catch(() => toast('新建会话失败', 'error'))
   }
 
   // 计划进度条：活跃任务（运行中/等待审批优先，否则最近一个）的三道关进度
@@ -237,6 +238,7 @@ export function WorkbenchPage({
             backendRepo={backendRepo}
             map={map}
             embedded
+            activeConvId={activeConv}
             onConvChange={setActiveConv}
             onLocateModule={onLocateModule}
             onCreateTask={onCreateTask}

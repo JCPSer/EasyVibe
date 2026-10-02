@@ -78,7 +78,10 @@ export function TaskPanel({ backendRepo, onCreateTask, emptyAction }: Props) {
     if (!backendRepo) return
     setLoading(true)
     fetch(`/api/repos/${backendRepo}/tasks`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status)) // R3 #8：5xx 时不得静默空白（四态失守）
+        return r.json()
+      })
       .then((d: { data: TaskItem[] }) => {
         setTasks(d.data)
         setLoadError(false)
