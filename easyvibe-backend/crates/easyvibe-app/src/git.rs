@@ -234,7 +234,11 @@ pub async fn commit_all(repo: &Path, message: &str) -> Result<String, ApiError> 
     if message.is_empty() {
         return Err(ApiError::BadRequest("提交说明不能为空".into()));
     }
-    git(repo, &["add", "-A"]).await?;
+    // R3 C5：产品账簿（地图/归档/会话产物）不进用户提交历史——
+    // ① .easyvibe/ 含巡检写回的 map.json，add -A 提交会立刻触发 freshness 自反漂移（越健康越亮警告）
+    // ② .claude/ 是 agent STAR 归档，与 .easyvibe/development_docs/ 是同一留痕的两份副本
+    // pathspec 魔法符 :(exclude) 需置于最后；无账簿目录的仓库行为与 add -A 等价
+    git(repo, &["add", "-A", "--", ".", ":(exclude).easyvibe", ":(exclude).claude"]).await?;
     git(repo, &["commit", "-m", message]).await?;
     git(repo, &["rev-parse", "--short", "HEAD"]).await.map(|s| s.trim().to_string())
 }
@@ -459,6 +463,43 @@ mod tests {
         // 空提交说明被拒
         assert!(commit_all(&repo, "   ").await.is_err());
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[tokio::test]
+    async fn commit_all_excludes_bookkeeping_dirs() {
+        // R3 C5 回归：把关台提交不得带入 .easyvibe/（巡检写回的 map.json——否则 freshness 立刻自反漂移）
+        // 与 .claude/（agent STAR 归档）——产品账簿不进用户提交历史
+        let dir = std::env::temp_dir().join("ev-commit-exclude-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".easyvibe/map")).unwrap();
+        std::fs::create_dir_all(dir.join(".claude/development_docs")).unwrap();
+        // 故意不写 .gitignore：排除必须来自 commit_all 的 pathspec，而非 gitignore 的副作用
+        let git_sync = |args: &[&str]| {
+            assert!(std::process::Command::new("git").args(args).current_dir(&dir).status().unwrap().success())
+        };
+        git_sync(&["init", "-q"]);
+        git_sync(&["config", "user.email", "t@t"]);
+        git_sync(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git_sync(&["add", "."]);
+        git_sync(&["commit", "-q", "-m", "init"]);
+
+        // 用户改动 + 账簿变动（等价于巡检写回 map.json 与 STAR 归档）
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(dir.join(".easyvibe/map/map.json"), "{}").unwrap();
+        std::fs::write(dir.join(".claude/development_docs/t1.json"), "{}").unwrap();
+
+        let short = commit_all(&dir, "feature").await.unwrap();
+        assert_eq!(short.len(), 7);
+        let rows = log(&dir, 5).await.unwrap();
+        assert!(rows[0].files.contains(&"a.txt".to_string()), "用户改动必须提交: {:?}", rows[0].files);
+        assert!(
+            !rows[0].files.iter().any(|f| f.starts_with(".easyvibe") || f.starts_with(".claude")),
+            "产品账簿不得进用户提交历史: {:?}",
+            rows[0].files
+        );
+        assert!(dir.join(".easyvibe/map/map.json").exists() && dir.join(".claude/development_docs/t1.json").exists(), "账簿文件必须留在磁盘（不被提交也不被吞掉）");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

@@ -169,6 +169,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     setClarify(null)
     setPendingApprovals([])
     setDecided({})
+    setRejectingApproval(null)
+    setRejectNote('')
   }, [setConvId])
 
   const renameConv = useCallback(() => {
@@ -199,21 +201,28 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   }, [backendRepo, convId, loadConvs])
 
   // 内联审批：选项即按钮，提交后原地变"✓ 已回复"（AionUI PermissionRequestPanel 模式）
+  // R3 C4：驳回必须带理由（后端 400 强制）——卡内展开理由输入，失败 toast 带后端归因
+  const [rejectingApproval, setRejectingApproval] = useState<PendingApproval | null>(null)
+  const [rejectNote, setRejectNote] = useState('')
   const decide = useCallback(
-    (p: PendingApproval, decision: 'approved' | 'rejected') => {
+    (p: PendingApproval, decision: 'approved' | 'rejected', note?: string) => {
       if (!backendRepo) return
       fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(p.taskId)}/decide`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, note }),
       })
-        .then((r) => {
-          if (!r.ok) throw new Error(String(r.status))
+        .then((r) =>
+          r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? `HTTP ${r.status}`))),
+        )
+        .then(() => {
           setDecided((prev) => ({ ...prev, [p.taskId + ':' + (p.gate ?? '')]: decision }))
           setPendingApprovals((prev) => prev.filter((x) => x.taskId !== p.taskId))
+          setRejectingApproval(null)
+          setRejectNote('')
           loadConvs()
         })
-        .catch(() => toast('审批操作失败', 'error'))
+        .catch((e) => toast(`审批操作失败：${String(e).replace(/^Error:\s*/, '').slice(0, 60)}`, 'error'))
     },
     [backendRepo, loadConvs],
   )
@@ -692,6 +701,34 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 <p className="mt-1.5 flex items-center gap-1 text-cap font-semibold text-emerald-600">
                   <CheckCircle2 size={11} /> 已{decided[p.taskId + ':' + (p.gate ?? '')] === 'approved' ? '通过' : '驳回'}
                 </p>
+              ) : rejectingApproval?.taskId === p.taskId && rejectingApproval.gate === p.gate ? (
+                <div className="mt-1.5 space-y-1.5">
+                  <textarea
+                    value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                    rows={2}
+                    placeholder="驳回理由（必填，留痕可追溯）"
+                    className="w-full resize-none rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[11px] leading-4 text-slate-700 outline-none focus:border-red-400"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => decide(p, 'rejected', rejectNote.trim())}
+                      disabled={!rejectNote.trim()}
+                      className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                    >
+                      确认驳回
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRejectingApproval(null)
+                        setRejectNote('')
+                      }}
+                      className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-slate-50"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="mt-1.5 flex gap-2">
                   <button
@@ -701,7 +738,10 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                     通过
                   </button>
                   <button
-                    onClick={() => decide(p, 'rejected')}
+                    onClick={() => {
+                      setRejectingApproval(p)
+                      setRejectNote('')
+                    }}
                     className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50"
                   >
                     驳回

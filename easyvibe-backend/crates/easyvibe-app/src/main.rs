@@ -73,6 +73,23 @@ pub enum BusEvent {
     Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
     /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
     SessionOutput { session_id: String, line: String },
+    /// R3 C1：巡检终态（健康历史落库后广播）——前端据此解除"巡检中"、刷新看板，
+    /// 让"体检报告出来了"成为产品事件而不是用户刷新的猜测
+    PatrolFinished { repo: String, run_id: String, status: String },
+}
+
+/// R3 C3：统一事件出口。broadcast 的 send 仅在"零订阅者"时失败（缓冲满不报错，而是 recv 端
+/// Lagged——ws_handler 已记 warn）；关键事件（合约红线/预警）在此留痕，送达承诺必须可观测
+pub(crate) fn publish(bus: &broadcast::Sender<BusEvent>, event: BusEvent) {
+    let critical = matches!(
+        event,
+        BusEvent::TaskContractViolated { .. } | BusEvent::TaskContractAlert { .. }
+    );
+    if let Err(e) = bus.send(event) {
+        if critical {
+            tracing::warn!("[bus] 关键事件无订阅者被丢弃（红线送达承诺依赖可观测性）: {:?}", e.0);
+        }
+    }
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -485,7 +502,13 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                     Ok(_) => easyvibe_api_types::SessionStatus::Succeeded,
                     Err(_) => easyvibe_api_types::SessionStatus::Failed,
                 };
-                st2.session_manager.note_status(SessionStatusChanged { repo: repo2.id, session_id: run_id_task, status }).await;
+                st2.session_manager.note_status(SessionStatusChanged { repo: repo2.id.clone(), session_id: run_id_task.clone(), status }).await;
+                // R3 C1：巡检终态广播——前端解除"巡检中"并刷新健康看板
+                publish(&st2.event_bus, BusEvent::PatrolFinished {
+                    repo: repo2.id,
+                    run_id: run_id_task,
+                    status: format!("{:?}", status).to_lowercase(),
+                });
                 if let Err(e) = result {
                     tracing::warn!("[patrol] 失败: {e}");
                 }
@@ -524,6 +547,12 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                     if let Err(e) = result {
                         tracing::warn!("[patrol] 健康历史落库失败: {e}");
                     }
+                    // R3 C1：巡检终态广播（健康历史已落库）——前端解除"巡检中"并刷新看板
+                    publish(&st2.event_bus, BusEvent::PatrolFinished {
+                        repo: repo2.id.clone(),
+                        run_id: run_id_task.clone(),
+                        status: format!("{:?}", s.status).to_lowercase(),
+                    });
                     break;
                 }
             });
@@ -814,7 +843,7 @@ struct DecideRequest {
 
 async fn decide_task(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>, Json(body): Json<DecideRequest>) -> Result<Response, AppError> {
     let task = st.executor.decide(&tid, &body.decision, body.note.as_deref(), body.gate.as_deref()).await?;
-    let _ = st.event_bus.send(BusEvent::TaskStatus {
+    publish(&st.event_bus, BusEvent::TaskStatus {
         repo: id,
         task_id: tid,
         status: task.status.clone(),
@@ -1481,6 +1510,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "session.output".into(),
                     data: serde_json::json!({ "sessionId": session_id, "line": line }),
                 },
+                BusEvent::PatrolFinished { repo, run_id, status } => WsMessage {
+                    name: "patrol.finished".into(),
+                    data: serde_json::json!({ "repo": repo, "runId": run_id, "status": status }),
+                },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -1565,7 +1598,7 @@ async fn spawn_repo_pipeline(
         while grx.changed().await.is_ok() {
             let batch = grx.borrow().clone();
             for event in batch {
-                let _ = bus.send(BusEvent::Growth { repo: repo_id.clone(), event });
+                publish(&bus, BusEvent::Growth { repo: repo_id.clone(), event });
             }
         }
     });
@@ -1578,7 +1611,7 @@ async fn spawn_repo_pipeline(
         while prx.changed().await.is_ok() {
             let progress = prx.borrow().clone();
             if progress.is_null() { continue; }
-            let _ = bus.send(BusEvent::Progress { repo: repo_id.clone(), progress });
+            publish(&bus, BusEvent::Progress { repo: repo_id.clone(), progress });
         }
     });
 }
@@ -1644,7 +1677,7 @@ async fn main() {
     let bus = event_bus.clone();
     tokio::spawn(async move {
         while let Some(s) = session_rx.recv().await {
-            let _ = bus.send(BusEvent::SessionStatus(s));
+            publish(&bus, BusEvent::SessionStatus(s));
         }
     });
     let session_manager = SessionManager::new(session_tx);
@@ -1654,7 +1687,7 @@ async fn main() {
         let bus = event_bus.clone();
         tokio::spawn(async move {
             while let Ok(o) = rx.recv().await {
-                let _ = bus.send(BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
+                publish(&bus, BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
             }
         });
     }
@@ -1769,7 +1802,7 @@ async fn main() {
                     let status = f.status.as_str().to_string();
                     let changed = last.get(&repo.id).map(|p| p != &status).unwrap_or(true);
                     if changed || status != "fresh" {
-                        let _ = bus.send(BusEvent::Freshness {
+                        publish(&bus, BusEvent::Freshness {
                             repo: repo.id.clone(),
                             status: status.clone(),
                             latest_commit_at: f.latest_commit_at,

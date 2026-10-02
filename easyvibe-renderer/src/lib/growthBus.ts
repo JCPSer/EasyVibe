@@ -79,3 +79,16 @@ export function onSessionOutput(l: SessionOutputListener): () => void {
     outputListeners.delete(l)
   }
 }
+
+// R3 C1：巡检终态（patrol.finished）——解除"巡检中"、驱动健康看板刷新
+export type PatrolFinishedListener = (event: { repo: string; runId: string; status: string }) => void
+const patrolListeners = new Set<PatrolFinishedListener>()
+export function emitPatrolFinished(e: { repo: string; runId: string; status: string }) {
+  for (const l of patrolListeners) l(e)
+}
+export function onPatrolFinished(l: PatrolFinishedListener): () => void {
+  patrolListeners.add(l)
+  return () => {
+    patrolListeners.delete(l)
+  }
+}

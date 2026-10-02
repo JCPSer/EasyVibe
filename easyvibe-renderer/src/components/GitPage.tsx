@@ -6,6 +6,7 @@ import {
 import { toast } from '@/lib/toast'
 import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/lib/diffStat'
 import { healthColor } from '@/lib/layout'
+import { onPatrolFinished } from '@/lib/growthBus'
 import type { CodeMap } from '@/types/map'
 
 // M4-4 Git 工作树（按 ui-mockups/Git工作树原型-v3.png 施工）：
@@ -83,7 +84,7 @@ export function GitPage({
   const [generating, setGenerating] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [busy, setBusy] = useState<'pull' | 'push' | null>(null)
-  const [patrolAfter, setPatrolAfter] = useState(false)
+  const [patrolAfter, setPatrolAfter] = useState(true)
   const [patroling, setPatroling] = useState(false)
 
   const api = (p: string) => `/api/repos/${encodeURIComponent(backendRepo ?? '')}${p}`
@@ -121,6 +122,16 @@ export function GitPage({
   useEffect(() => {
     load()
   }, [load])
+
+  // R3 C1：提交后巡检跑完会写回 map.json——状态/历史/新鲜度全部重载（此前 toast 之后无下文）
+  useEffect(
+    () =>
+      onPatrolFinished((evt) => {
+        if (evt.repo !== backendRepo) return
+        load()
+      }),
+    [backendRepo, load],
+  )
 
   // 改动来源归因：任务 diffStat 文件路径匹配（启发式）+ .easyvibe/ → 巡检/归纳写回
   const taskByPath = useMemo(() => {
@@ -393,7 +404,7 @@ export function GitPage({
                   disabled={patroling}
                   className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 disabled:opacity-40"
                 >
-                  {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 巡检受影响模块
+                  {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 全量巡检
                 </button>
                 <button
                   onClick={onOpenReview}

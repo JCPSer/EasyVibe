@@ -41,7 +41,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitFreshnessEvent, emitGrowthEvent, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
+import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
@@ -659,9 +659,20 @@ function Canvas({
         })
         if (evt.status !== 'succeeded' && evt.status !== 'failed') return
         setInducing(false)
+        // R3 C1：stub 模式会话 id 带 patrol- 前缀可在此解除；真实模式（ind-N）统一走 patrol.finished 事件
         if (evt.sessionId.startsWith('patrol-')) onPatrollingChange(false)
       }),
     [],
+  )
+
+  // R3 C1：巡检终态事件——真实模式会话 id 是 ind-N，前缀判定永远等不到，此前"巡检中"永不解除
+  useEffect(
+    () =>
+      onPatrolFinished((evt) => {
+        if (evt.repo !== backendRepo) return
+        onPatrollingChange(false)
+      }),
+    [backendRepo, onPatrollingChange],
   )
 
   // 直播订阅：WS 到达的 growth.event 追加进当前生长会话；未在生长模式则点亮"归纳活动"指示
@@ -1562,6 +1573,10 @@ export default function App() {
           }
           if (msg.name === 'session.output') {
             emitSessionOutput({ sessionId: msg.data.sessionId, line: msg.data.line })
+          }
+          if (msg.name === 'patrol.finished') {
+            // R3 C1：巡检终态成为产品事件（真实模式会话 id 是 ind-N，靠事件而非前缀判定）
+            emitPatrolFinished({ repo: msg.data.repo, runId: msg.data.runId, status: msg.data.status })
           }
           if (msg.name === 'freshness.changed' && msg.data?.repo === backendRepo) {
             emitFreshnessEvent({

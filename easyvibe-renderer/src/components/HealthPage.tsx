@@ -4,6 +4,7 @@ import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 import { absTime } from '@/lib/diffStat'
 import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
+import { onPatrolFinished } from '@/lib/growthBus'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
@@ -127,9 +128,19 @@ export function HealthPage({
       await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' })
     } finally {
       setStarting(false)
-      setTimeout(load, 1500)
+      // R3 C1：巡检是分钟级 LLM 任务，1.5s 刷新必然空转——改由 patrol.finished 事件驱动刷新
     }
   }
+
+  // R3 C1：体检报告出来了 = 产品事件：自动刷新看板数据并解除按钮态
+  useEffect(
+    () =>
+      onPatrolFinished((evt) => {
+        if (evt.repo !== backendRepo) return
+        load()
+      }),
+    [backendRepo, load],
+  )
 
   if (!backendRepo) {
     return (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, CircleDot, Copy, Loader2, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
-import { onTaskEvent } from '@/lib/growthBus'
+import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
 import { absTime } from '@/lib/diffStat'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -29,10 +29,11 @@ interface Approval {
   decidedAt: string
 }
 
-type FilterKey = 'all' | 'running' | 'awaiting' | 'done' | 'failed'
+type FilterKey = 'all' | 'recheck' | 'running' | 'awaiting' | 'done' | 'failed'
 
 const FILTERS: { key: FilterKey; label: string; match: (t: TodoTask) => boolean }[] = [
   { key: 'all', label: '全部', match: () => true },
+  { key: 'recheck', label: '待复检', match: () => true }, // 实际判定依赖 recheckIds（见下），此处仅占位
   { key: 'running', label: '运行中', match: (t) => t.status === 'running' || t.status === 'pending' },
   { key: 'awaiting', label: '等待审批', match: (t) => t.status === 'awaiting_approval' },
   { key: 'done', label: '已完成', match: (t) => t.status === 'done' },
@@ -66,6 +67,8 @@ export function TodoPage({
 }) {
   const [tasks, setTasks] = useState<TodoTask[] | null>(null)
   const [loadError, setLoadError] = useState(false)
+  // R3 C2 复检闭环：最近一次成功巡检时间——done 且声明了模块、完成晚于它的任务 = 待复检
+  const [lastPatrolAt, setLastPatrolAt] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterKey>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   // 审批记录快照（同 ChangesPage 模式）；驳回理由按任务记录
@@ -86,25 +89,46 @@ export function TodoPage({
         setTasks([])
         setLoadError(true)
       })
+    // 复检判定的另一半数据：最近一次成功巡检（无成功记录 = 所有 done 任务都待复检）
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/health-dashboard`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { runs?: { finishedAt: string | null; status: string }[] } } | null) => {
+        const last = (d?.data?.runs ?? []).find((r) => r.status === 'succeeded' && r.finishedAt)
+        setLastPatrolAt(last?.finishedAt ?? null)
+      })
+      .catch(() => {})
   }, [backendRepo])
 
   useEffect(() => {
     load()
   }, [load])
   useEffect(() => onTaskEvent(load), [load])
+  // 复检成功后（巡检终态）重算待复检集合——闭环在自己页内完成
+  useEffect(() => onPatrolFinished((evt) => { if (evt.repo === backendRepo) load() }), [backendRepo, load])
+
+  // R3 C2：待复检 = done + 声明了影响模块 + 完成晚于最近一次成功巡检（治理闭环的"验证改善"入口）
+  const recheckIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of tasks ?? []) {
+      if (t.status !== 'done' || !t.modules?.length) continue
+      if (!lastPatrolAt || t.updatedAt > lastPatrolAt) ids.add(t.id)
+    }
+    return ids
+  }, [tasks, lastPatrolAt])
 
   const counts = useMemo(() => {
-    const c: Record<FilterKey, number> = { all: tasks?.length ?? 0, running: 0, awaiting: 0, done: 0, failed: 0 }
+    const c = { all: tasks?.length ?? 0, recheck: recheckIds.size, running: 0, awaiting: 0, done: 0, failed: 0 } as Record<FilterKey, number>
     for (const t of tasks ?? []) {
-      for (const f of FILTERS) if (f.key !== 'all' && f.match(t)) c[f.key] += 1
+      for (const f of FILTERS) if (f.key !== 'all' && f.key !== 'recheck' && f.match(t)) c[f.key] += 1
     }
     return c
-  }, [tasks])
+  }, [tasks, recheckIds])
 
   const rows = useMemo(() => {
+    if (filter === 'recheck') return [...(tasks ?? [])].filter((t) => recheckIds.has(t.id)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const f = FILTERS.find((x) => x.key === filter)!
     return [...(tasks ?? [])].filter(f.match).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  }, [tasks, filter])
+  }, [tasks, filter, recheckIds])
 
   const expand = (t: TodoTask) => {
     const open = expanded === t.id
@@ -326,7 +350,7 @@ export function TodoPage({
         })}
         {rows.length === 0 && (
           <p className="py-14 text-center text-[12px] text-slate-300">
-            {tasks === null ? '加载中…' : loadError ? '后端不在线，稍后自动重试。' : '这个分类下没有任务。'}
+            {tasks === null ? '加载中…' : loadError ? '后端不在线，稍后自动重试。' : filter === 'recheck' ? '没有待复检任务——修复已完成且巡检验证过改善。' : '这个分类下没有任务。'}
           </p>
         )}
       </div>

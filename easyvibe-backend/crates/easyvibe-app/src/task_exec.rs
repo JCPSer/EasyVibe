@@ -268,7 +268,7 @@ impl TaskExecutor {
                             if !fresh.is_empty() {
                                 warn!("[task-exec] 任务 {} 过程越界预警：{}", task_id, fresh.join("、"));
                                 if let Some(tx) = &this.events {
-                                    let _ = tx.send(crate::BusEvent::TaskContractAlert {
+                                    crate::publish(tx, crate::BusEvent::TaskContractAlert {
                                         repo: repo_name.clone(),
                                         task_id: task_id.clone(),
                                         files: fresh,
@@ -299,7 +299,7 @@ impl TaskExecutor {
                                             if !files.is_empty() {
                                                 if let Some(tx) = &this.events {
                                                     // broadcast::Sender::send 是同步方法
-                                                    let _ = tx.send(crate::BusEvent::TaskContractViolated {
+                                                    crate::publish(tx, crate::BusEvent::TaskContractViolated {
                                                         repo: repo_name.clone(),
                                                         task_id: task_id.clone(),
                                                         files,
