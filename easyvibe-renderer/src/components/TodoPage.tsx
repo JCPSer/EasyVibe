@@ -129,7 +129,7 @@ export function TodoPage({
       const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(t.id)}/decide`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined }),
+        body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined, gate: t.gate }),
       })
       const d = await r.json().catch(() => null)
       if (!r.ok) {

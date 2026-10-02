@@ -373,7 +373,7 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
         .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());
     let session = st
         .session_manager
-        .start_induction(&repo.id, &repo.root, &prompt, &st.agent_command, &st.agent_args)
+        .start_induction(&repo.id, &repo.root, &prompt, &st.agent_command, &st.agent_args, None)
         .await?;
     info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
@@ -389,7 +389,7 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
     let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
     let session = st
         .session_manager
-        .start_induction(&repo.id, &repo.root, &st.prompt_template, &st.agent_command, &st.agent_args)
+        .start_induction(&repo.id, &repo.root, &st.prompt_template, &st.agent_command, &st.agent_args, None)
         .await?;
 
     // 终态后产物核验
@@ -492,7 +492,7 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
             // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
             let session = st
                 .session_manager
-                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &st.agent_command, &st.agent_args)
+                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &st.agent_command, &st.agent_args, None)
                 .await?;
             // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
             // run_id 用时间戳独立生成，不复用 session_id——会话计数器在后端重启后归零，
@@ -799,10 +799,14 @@ struct DecideRequest {
     decision: String, // approved / rejected
     #[serde(default)]
     note: Option<String>,
+    /// N27：用户所见关卡（防双击穿透——任务已推进后，针对旧关卡的重复 decide 必须 409）。
+    /// 缺省回退服务端当前关卡（兼容旧客户端）。
+    #[serde(default)]
+    gate: Option<String>,
 }
 
 async fn decide_task(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>, Json(body): Json<DecideRequest>) -> Result<Response, AppError> {
-    let task = st.executor.decide(&tid, &body.decision, body.note.as_deref()).await?;
+    let task = st.executor.decide(&tid, &body.decision, body.note.as_deref(), body.gate.as_deref()).await?;
     let _ = st.event_bus.send(BusEvent::TaskStatus {
         repo: id,
         task_id: tid,
@@ -1520,7 +1524,7 @@ async fn spawn_repo_pipeline(
     if map_service.cached(&r.id).await.is_none() {
         info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
         if let Err(e) = session_manager
-            .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args)
+            .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args, None)
             .await
         {
             tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);

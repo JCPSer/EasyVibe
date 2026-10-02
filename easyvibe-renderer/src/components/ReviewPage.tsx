@@ -167,7 +167,7 @@ export function ReviewPage({
     fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(sel.id)}/decide`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined }),
+      body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined, gate: sel.gate }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))

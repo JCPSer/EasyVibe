@@ -1469,28 +1469,39 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    let timer: number | undefined
     // 后端探测：/api/repos 取仓库列表（Y7 回归修复——此前误把 /api/health 的响应当 repos 解析，
     // data 无 length 恒为演示模式，桌面壳与浏览器一并中招）
-    fetch('/api/repos')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
-      .then((d: { data?: { id: string; name: string }[] }) => {
-        if (!cancelled && d.data && d.data.length > 0) {
+    // R2 P0 两轮老账：探测只跑一次，后端晚启动（桌面壳冷启动 30s 内常见）永不可达只能刷新——
+    // 现在探测成功前每 5 秒重试，永不死心。
+    const probe = () => {
+      fetch('/api/repos')
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
+        .then((d: { data?: { id: string; name: string }[] }) => {
+          if (!d.data || d.data.length === 0) {
+            if (!cancelled) timer = window.setTimeout(probe, 5000)
+            return
+          }
           setRepos(d.data)
           setBackendRepo((cur) => cur ?? d.data![0].id) // 保留当前选择（切换器驱动）
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setBackendRepo(null)
-      })
-    // 版本感知（Y7）：仅取 version，不参与后端模式判定
-    fetch('/api/health')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((h: { data?: { version?: string } } | null) => {
-        if (!cancelled && h?.data?.version) setServerVersion(h.data.version)
-      })
-      .catch(() => {})
+          // 版本感知（Y7）：仅取 version，不参与后端模式判定
+          fetch('/api/health')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((h: { data?: { version?: string } } | null) => {
+              if (!cancelled && h?.data?.version) setServerVersion(h.data.version)
+            })
+            .catch(() => {})
+        })
+        .catch(() => {
+          if (cancelled) return
+          setBackendRepo(null)
+          timer = window.setTimeout(probe, 5000)
+        })
+    }
+    probe()
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [])
 

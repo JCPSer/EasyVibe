@@ -457,6 +457,15 @@ pub struct TaskRow {
 pub trait TaskRepository: Send + Sync {
     fn create(&self, t: &TaskRow) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// N27 原子关卡推进：UPDATE ... WHERE status='awaiting_approval' AND gate IS ?——
+    /// 影响行数为 0 即并发审批/状态漂移，调用方返回 409。check-then-act 无锁竞态的消解点。
+    fn try_advance_gate(
+        &self,
+        id: &str,
+        expected_gate: Option<&str>,
+        new_gate: Option<&str>,
+        new_status: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
     fn list(&self, repo: &str, limit: i64) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
     /// M4-2：会话关联任务（工作台影响面/待审批聚合）
     fn list_by_conversation(&self, conversation_id: &str) -> impl std::future::Future<Output = Result<Vec<TaskRow>, ApiError>> + Send;
@@ -508,6 +517,22 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(&t.session_id).bind(&t.gate).bind(t.prompt_tokens).bind(t.completion_tokens).bind(&t.result).bind(&t.created_at).bind(&t.updated_at).bind(&t.conversation_id)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
+    }
+
+    async fn try_advance_gate(&self, id: &str, expected_gate: Option<&str>, new_gate: Option<&str>, new_status: Option<&str>) -> Result<u64, ApiError> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string();
+        let r = sqlx::query(
+            "UPDATE tasks SET gate = COALESCE(?, gate), status = COALESCE(?, status), updated_at = ? WHERE id = ? AND status = 'awaiting_approval' AND gate IS ?",
+        )
+        .bind(new_gate)
+        .bind(new_status)
+        .bind(&now)
+        .bind(id)
+        .bind(expected_gate)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(r.rows_affected())
     }
 
     async fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> Result<(), ApiError> {

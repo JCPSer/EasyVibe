@@ -153,6 +153,8 @@ impl SessionManager {
 
     /// 启动一次归纳会话（v2.2 协议执行者 = 外部 agent CLI）。
     /// 单会话纪律：一个仓库同时只允许一个活动会话。
+    /// timeout：N26 按槽位分类——透明槽位（归纳/巡检/子图）用默认 30min，
+    /// 任务槽（自由 coding 常态 40-60 分钟）传 Some(90min)；None = 默认。
     pub async fn start_induction(
         &self,
         repo_id: &str,
@@ -160,6 +162,7 @@ impl SessionManager {
         prompt_template: &str,
         command: &str,
         args: &[String],
+        timeout: Option<std::time::Duration>,
     ) -> Result<SessionStatusChanged, ApiError> {
         let session_id = format!("ind-{}", self.counter.fetch_add(1, Ordering::SeqCst));
         // 单会话纪律：与巡检等地图写操作共用（try_register 内含活动会话检查）
@@ -211,7 +214,7 @@ impl SessionManager {
         // P0：终止通道（主动 kill / 超时共用）——notify 幂等，重复 kill 无副作用
         let kill_notify = Arc::new(tokio::sync::Notify::new());
         self.killers.write().await.insert(session_id.clone(), kill_notify.clone());
-        let timeout = self.timeout;
+        let timeout = timeout.unwrap_or(self.timeout);
 
         self.set_status(repo_id, &session_id, SessionStatus::Running).await;
 
@@ -363,15 +366,15 @@ mod tests {
         let dir = std::env::temp_dir();
         // 第一个会话：用 sleep 占住（macOS/Linux 均有）
         let s1 = mgr
-            .start_induction("repo1", &dir, "test", "sleep", &["30".to_string()])
+            .start_induction("repo1", &dir, "test", "sleep", &["30".to_string()], None)
             .await
             .unwrap();
         assert_eq!(s1.status, SessionStatus::Running);
         // 同仓库第二个会话必须被拒
-        let err = mgr.start_induction("repo1", &dir, "test", "sleep", &["1".to_string()]).await;
+        let err = mgr.start_induction("repo1", &dir, "test", "sleep", &["1".to_string()], None).await;
         assert!(matches!(err, Err(ApiError::Conflict(_))));
         // 其他仓库不受影响
-        assert!(mgr.start_induction("repo2", &dir, "test", "sleep", &["1".to_string()]).await.is_ok());
+        assert!(mgr.start_induction("repo2", &dir, "test", "sleep", &["1".to_string()], None).await.is_ok());
     }
 
     // 收事件直到终态（队列里有 Starting/Running 前态）
@@ -393,7 +396,7 @@ mod tests {
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
         // 归纳会话占住仓库
-        let _s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        let _s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()], None).await.unwrap();
         // 巡检注册必须被拒（跨类型的写互斥）
         let err = mgr
             .try_register(SessionStatusChanged {
@@ -420,14 +423,14 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
-        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()], None).await.unwrap();
         mgr.kill(&s.session_id).await.unwrap();
         let evt = recv_terminal(&mut rx).await;
         assert_eq!(evt.session_id, s.session_id);
         assert!(matches!(evt.status, SessionStatus::Failed));
         // 终态后再 kill → 409；互斥随终态释放（新会话可启动）
         assert!(matches!(mgr.kill(&s.session_id).await, Err(ApiError::Conflict(_))));
-        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()]).await.is_ok());
+        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()], None).await.is_ok());
         // 不存在的会话 → 404
         assert!(matches!(mgr.kill("nope").await, Err(ApiError::NotFound(_))));
     }
@@ -438,11 +441,11 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
         let mgr = SessionManager::new_with_timeout(tx, std::time::Duration::from_millis(150));
         let dir = std::env::temp_dir();
-        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()]).await.unwrap();
+        let s = mgr.start_induction("repo1", &dir, "t", "sleep", &["30".to_string()], None).await.unwrap();
         let evt = recv_terminal(&mut rx).await;
         assert_eq!(evt.session_id, s.session_id);
         assert!(matches!(evt.status, SessionStatus::Failed), "超时必须判 Failed");
-        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()]).await.is_ok(), "互斥已释放");
+        assert!(mgr.start_induction("repo1", &dir, "t", "sleep", &["0".to_string()], None).await.is_ok(), "互斥已释放");
         // 终态清理：首个会话的 kill 通道已回收（第二个会话自己的通道随其终态回收）
         assert!(!mgr.killers.read().await.contains_key(&s.session_id));
     }
@@ -468,7 +471,7 @@ mod tests {
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
         // 不存在的命令 → spawn 失败 → 会话必须被判 Failed 并释放（审查 Y1）
-        let err = mgr.start_induction("repo1", &dir, "t", "definitely-not-a-real-cmd-xyz", &[]).await;
+        let err = mgr.start_induction("repo1", &dir, "t", "definitely-not-a-real-cmd-xyz", &[], None).await;
         assert!(matches!(err, Err(ApiError::Internal(_))));
         // 终态 Failed 事件已发布
         let mut saw_failed = false;
@@ -490,7 +493,7 @@ mod tests {
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
         // true 命令立即成功退出
-        let s = mgr.start_induction("repo1", &dir, "test", "true", &[]).await.unwrap();
+        let s = mgr.start_induction("repo1", &dir, "test", "true", &[], None).await.unwrap();
         assert_eq!(s.status, SessionStatus::Running);
         let final_evt = recv_terminal(&mut rx).await;
         assert_eq!(final_evt.status, SessionStatus::Succeeded);
@@ -503,7 +506,7 @@ mod tests {
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
         // echo 忽略 stdin 直接打印——stdout 必须被捕获供 M4-1 解析 [EASYVIBE-RESULT]
-        let s = mgr.start_induction("repo1", &dir, "ignored", "echo", &["hello-easyvibe [EASYVIBE-RESULT] {\"summary\":\"x\"}".to_string()]).await.unwrap();
+        let s = mgr.start_induction("repo1", &dir, "ignored", "echo", &["hello-easyvibe [EASYVIBE-RESULT] {\"summary\":\"x\"}".to_string()], None).await.unwrap();
         let _ = recv_terminal(&mut rx).await;
         let out = mgr.output_of(&s.session_id).await.expect("stdout 应被捕获");
         assert!(out.contains("hello-easyvibe"), "捕获内容: {out}");
@@ -517,7 +520,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
         let mgr = SessionManager::new(tx);
         let dir = std::env::temp_dir();
-        let _ = mgr.start_induction("repo1", &dir, "test", "false", &[]).await.unwrap();
+        let _ = mgr.start_induction("repo1", &dir, "test", "false", &[], None).await.unwrap();
         let final_evt = recv_terminal(&mut rx).await;
         assert_eq!(final_evt.status, SessionStatus::Failed);
     }
