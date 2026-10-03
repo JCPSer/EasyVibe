@@ -24,11 +24,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: 前端构建
-        working-directory: easyvibe-renderer
-        run: |
-          npm ci
-          npm run build
+      # 前端 dist / 提示词 / 后端 sidecar 的同步与构建由 tauri.conf 的
+      # beforeBuildCommand（scripts/sync-desktop.sh）统一完成，此处不重复
 
       - name: Tauri 打包
         uses: tauri-apps/tauri-action@v0

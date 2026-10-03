@@ -23,6 +23,11 @@ echo "▶ 构建后端 sidecar（release，$TARGET）"
 
 echo "▶ 复制 sidecar 二进制"
 mkdir -p "$DESKTOP/src-tauri/binaries"
-cp "$ROOT/easyvibe-backend/target/release/easyvibe-backend" \
-   "$DESKTOP/src-tauri/binaries/easyvibe-backend-$TARGET"
-echo "✔ 同步完成（tauri build 即可打包 .app/.dmg）"
+# Windows 目标必须带 .exe 后缀（tauri externalBin 约定），否则壳找不到 sidecar
+EXT=""
+case "$TARGET" in
+  *windows*) EXT=".exe" ;;
+esac
+cp "$ROOT/easyvibe-backend/target/release/easyvibe-backend$EXT" \
+   "$DESKTOP/src-tauri/binaries/easyvibe-backend-$TARGET$EXT"
+echo "✔ 同步完成（tauri build 即可打包 .app/.dmg/安装包）"
