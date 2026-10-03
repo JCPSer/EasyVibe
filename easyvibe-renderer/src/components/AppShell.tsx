@@ -9,9 +9,7 @@ import {
   Radar,
   HeartPulse,
   MonitorCog,
-  ListChecks,
   ClipboardList,
-  ShieldCheck,
   History,
   BookOpen,
   ScrollText,
@@ -55,9 +53,7 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
     group: '工作区',
     items: [
       { id: 'workbench', label: '开发工作台', icon: MonitorCog },
-      { id: 'tasks', label: '任务', icon: ListChecks },
-      { id: 'todo', label: '任务编排', icon: ClipboardList },
-      { id: 'review', label: '任务工作流', icon: ShieldCheck },
+      { id: 'tasks', label: '任务', icon: ClipboardList },
       { id: 'changes', label: '变更记录', icon: History },
       { id: 'git', label: 'Git', icon: GitBranch },
     ],
@@ -75,14 +71,16 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
 interface Props {
   page: PageId
   onPageChange: (p: PageId) => void
-  /** 页签徽标（如 评审 的待审批数） */
-  badges?: Partial<Record<PageId, number>>
+  /** 页签徽标：数字=红底待审批数；{alert, info}=双徽标（红=等你审批，蓝=执行中） */
+  badges?: Partial<Record<PageId, number | { alert: number; info: number }>>
+  /** v4 全局注意力条（有待审批时出现；null 不渲染） */
+  attentionBar?: React.ReactNode
   /** 顶栏内容（项目选择器 + 全局动作），由 App 注入 */
   topBar: React.ReactNode
   children: React.ReactNode
 }
 
-export function AppShell({ page, onPageChange, badges, topBar, children }: Props) {
+export function AppShell({ page, onPageChange, badges, attentionBar, topBar, children }: Props) {
   // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）；折叠选择持久化（真人测试建议#5）
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && localStorage.getItem('ev.nav.collapsed') === '1')
   const toggleCollapsed = () => {
@@ -134,6 +132,9 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
                 {g.items.map((it) => {
                   const active = page === it.id
                   const badge = badges?.[it.id]
+                  // v4：双徽标——红=待审批（等你），蓝=执行中（活着）；折叠态只显红点
+                  const alert = typeof badge === 'object' ? badge.alert : badge
+                  const info = typeof badge === 'object' ? badge.info : undefined
                   return (
                     <button
                       key={it.id}
@@ -145,8 +146,14 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
                     >
                       <it.icon size={15} className="shrink-0" />
                       {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>}
-                      {!collapsed && badge ? (
-                        <span className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{badge}</span>
+                      {alert ? (
+                        <span key="a" className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{alert}</span>
+                      ) : null}
+                      {info && !collapsed ? (
+                        <span key="i" className="flex items-center gap-1 rounded-full bg-blue-100 px-1.5 text-micro font-bold leading-4 text-blue-600">
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
+                          {info}
+                        </span>
                       ) : null}
                     </button>
                   )
@@ -181,7 +188,11 @@ export function AppShell({ page, onPageChange, badges, topBar, children }: Props
           </div>
         </nav>
         {/* 页面容器 */}
-        <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* v4 全局注意力条：有待审批时出现在任何页面顶部，只说用户要做什么（数据 App 注入） */}
+          {attentionBar}
+          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+        </main>
       </div>
     </div>
   )

@@ -1,17 +1,136 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { terminalLines } from '@/lib/terminalBuffer'
-import { stageOf, STAGES } from '@/lib/taskStage'
+import { stageOf, gateLabel, STAGES } from '@/lib/taskStage'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
-// 任务工作流页（方案 v3 §4.2 施工，取代旧「评审」页）：
-// 五阶段管道头 + 阶段单态主区（计划关任务书 / 实施终端 / diff / 报告 / 归档）+
+// 任务工作流页（方案 v3 §4.2 施工 + 2026-10-03 分阶段流扩展）：
+// 五阶段管道头 + 阶段单态主区。分阶段后 ①② 各有三态：
+//   plan（任务书待批）/ p:analysis·p:solution（agent 正在产文档，走终端）/
+//   analysis·solution（文档待评审，走全文评审卡——通过才进下一阶段）。
 // 实时终端（模块级环形缓冲，切页不丢；断线无回放显灰条不造假）。
 // 阶段判定走 lib/taskStage 的 status 优先映射（failed 残留 gate 不制造假阶段）。
+
+/** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体） */
+function PhaseDocReview({
+  backendRepo,
+  taskId,
+  dirHint,
+  title,
+  deciding,
+  onDecide,
+}: {
+  backendRepo: string
+  taskId: string
+  /** 产物目录特征串：1_requirements_matrix / 2_requirements_solutions */
+  dirHint: string
+  title: string
+  deciding: string | null
+  onDecide: (d: 'approved' | 'rejected', note?: string) => void
+}) {
+  const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
+  const [missing, setMissing] = useState(false)
+  const [rejecting, setRejecting] = useState(false)
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    let dead = false
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-docs?taskId=${encodeURIComponent(taskId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (d: { data?: { docs?: { path: string; mtime: number }[] } } | null) => {
+        const hit = (d?.data?.docs ?? [])
+          .filter((x) => x.path.includes(dirHint))
+          .sort((a, b) => b.mtime - a.mtime)[0]
+        if (!hit) {
+          if (!dead) setMissing(true)
+          return
+        }
+        const full = await fetch(
+          `/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(hit.path)}`,
+        ).then((r) => (r.ok ? r.json() : null))
+        if (!dead) setDoc({ path: hit.path, content: full?.data?.content ?? '' })
+      })
+      .catch(() => {})
+    return () => {
+      dead = true
+    }
+  }, [backendRepo, taskId, dirHint])
+
+  return (
+    <div className="m-4 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <FileText size={13} className="text-blue-600" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-bold text-slate-800">{title}</p>
+          {doc && <p className="mono mt-0.5 truncate text-[10px] text-slate-400">{doc.path}</p>}
+        </div>
+        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待你的评审</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {!doc && !missing && (
+          <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400">
+            <Loader2 size={13} className="animate-spin" /> 正在加载产物文档…
+          </p>
+        )}
+        {missing && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
+            未找到本阶段产物文档（agent 未按规范路径产出）。你可以打回要求重做，或通过进入下一阶段（实施时将无矩阵/方案可依）。
+          </div>
+        )}
+        {doc && (
+          <pre className="whitespace-pre-wrap font-mono text-[11.5px] leading-5 text-slate-700">{doc.content}</pre>
+        )}
+      </div>
+      <div className="border-t border-slate-100 p-3">
+        {rejecting ? (
+          <div className="space-y-1.5">
+            <textarea
+              autoFocus
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="打回意见（必填）——agent 将带着意见重做本阶段"
+              className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => onDecide('rejected', note.trim())}
+                disabled={!!deciding || !note.trim()}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+              >
+                确认打回本阶段
+              </button>
+              <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={() => onDecide('approved')}
+              disabled={!!deciding}
+              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {deciding === 'approved' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} 评审通过，进入下一阶段
+            </button>
+            <button
+              onClick={() => setRejecting(true)}
+              disabled={!!deciding}
+              className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+            >
+              打回重做…
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface TaskItem {
   id: string
@@ -142,7 +261,7 @@ export function TaskWorkflowPage({
   const activeFile = fileSel.taskId === selKey ? fileSel.file : null
   // 评审轮回（方案 §4.2）：approvals 按时间渲染留痕条——"第1轮打回：缺测试矩阵 → 第2轮通过"
   const reviewTrail = useMemo(() => {
-    const GLABEL: Record<string, string> = { plan: '计划', diff: 'Diff', report: '报告' }
+    const GLABEL: Record<string, string> = { plan: '任务书', analysis: '需求矩阵', solution: '方案', diff: 'Diff', report: '报告' }
     const DLABEL: Record<string, string> = { approved: '通过', rejected: '打回', skipped: '自动通过', flagged: '风险预评' }
     return [...approvals]
       .sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)))
@@ -187,9 +306,10 @@ export function TaskWorkflowPage({
     return [{ adds, dels, files: n }]
   }, [diffStat])
 
-  const decide = (decision: 'approved' | 'rejected') => {
+  const decide = (decision: 'approved' | 'rejected', noteArg?: string) => {
     if (!backendRepo || !sel || deciding) return
-    if (decision === 'rejected' && !rejectNote.trim()) {
+    const note = noteArg ?? rejectNote
+    if (decision === 'rejected' && !note.trim()) {
       toast('打回必须填写意见', 'error')
       return
     }
@@ -197,7 +317,7 @@ export function TaskWorkflowPage({
     fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(sel.id)}/decide`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined, gate: sel.gate }),
+      body: JSON.stringify({ decision, note: decision === 'rejected' ? note.trim() : undefined, gate: sel.gate }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
@@ -279,10 +399,8 @@ export function TaskWorkflowPage({
               </div>
               <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
                 <span>{STATUS_LABEL[t.status] ?? t.status}</span>
-                {t.gate && t.status === 'awaiting_approval' && (
-                  <span className="rounded-full bg-slate-100 px-1.5">
-                    {t.gate === 'plan' ? '计划审批' : t.gate === 'diff' ? 'Diff 审批' : '审查报告'}
-                  </span>
+                {gateLabel(t.status, t.gate) && (
+                  <span className="rounded-full bg-slate-100 px-1.5">{gateLabel(t.status, t.gate)}</span>
                 )}
                 <span className="tnum">{t.trust === 'auto' ? '自动' : t.trust === 'supervised' ? '监督' : '手动'}</span>
               </p>
@@ -355,12 +473,19 @@ export function TaskWorkflowPage({
             {/* 主区：阶段单态切换（同一时间只有一个阶段是 now） */}
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
-                {/* ①② 计划关：任务书 */}
-                {stage === 0 && (
+                {/* ① 需求分析：三子态——任务书待批 / 分析中终端 / 矩阵评审卡 */}
+                {stage === 0 && sel.gate === 'plan' && !isRunning && (
                   <div className="m-4 rounded-xl border border-slate-200 bg-white p-4">
                     <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
-                      <ClipboardList size={10} /> 任务书 · 已就绪，等待批准后启动
+                      <ClipboardList size={10} /> 任务书 · 已就绪，批准后先做需求分析
                     </p>
+                    {/* TaskPanel 碎片③：监督模式风险预评（flagged 留痕——审批人必见风险理由） */}
+                    {(() => {
+                      const flagged = approvals.find((a) => a.decision === 'flagged' && a.note)
+                      return flagged ? (
+                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-micro leading-4 text-amber-700">⚠ {flagged.note}</p>
+                      ) : null
+                    })()}
                     <p className="mt-2 line-clamp-6 text-[12px] leading-5 text-slate-700">{sel.description}</p>
                     {(sel.modules?.length ?? 0) > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
@@ -415,12 +540,38 @@ export function TaskWorkflowPage({
                   </div>
                 )}
 
-                {/* ③ 实施：实时终端 */}
-                {stage === 2 && (
+                {/* ① analysis 关：需求矩阵全文评审 */}
+                {stage === 0 && sel.gate === 'analysis' && backendRepo && (
+                  <PhaseDocReview
+                    backendRepo={backendRepo}
+                    taskId={sel.id}
+                    dirHint="1_requirements_matrix"
+                    title="需求矩阵评审"
+                    deciding={deciding}
+                    onDecide={(d, note) => decide(d, note)}
+                  />
+                )}
+
+                {/* ② solution 关：方案设计全文评审 */}
+                {stage === 1 && sel.gate === 'solution' && backendRepo && (
+                  <PhaseDocReview
+                    backendRepo={backendRepo}
+                    taskId={sel.id}
+                    dirHint="2_requirements_solutions"
+                    title="方案设计评审"
+                    deciding={deciding}
+                    onDecide={(d, note) => decide(d, note)}
+                  />
+                )}
+
+                {/* ③ 实施（及 ①② 产文档期间）：实时终端——按阶段标记换标题 */}
+                {(stage === 2 || isRunning) && (
                   <div className="flex min-h-0 flex-1 flex-col p-4">
                     <div className="mb-2 flex items-center gap-2 text-micro text-slate-400">
                       <Terminal size={11} />
-                      <span className="font-bold uppercase tracking-wider">实时执行</span>
+                      <span className="font-bold uppercase tracking-wider">
+                        {sel.gate === 'p:analysis' ? '需求分析产出中' : sel.gate === 'p:solution' ? '方案设计产出中' : '实时执行'}
+                      </span>
                       <span className="tnum ml-auto flex items-center gap-1.5">
                         <span className="flex h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> LIVE · 已运行 {duration(sel)}
                       </span>
@@ -446,7 +597,11 @@ export function TaskWorkflowPage({
                       </div>
                     </pre>
                     <p className="mt-1.5 text-[10px] text-slate-400">
-                      改动文件列表在任务完成后由 Diff 呈现（实时全量文件流为后置需求）
+                      {sel.gate === 'p:analysis'
+                        ? '需求矩阵将写入 .easyvibe/development_docs/1_requirements_matrix/，产出后在此评审'
+                        : sel.gate === 'p:solution'
+                          ? '方案设计将写入 2_requirements_solutions/，产出后在此评审'
+                          : '改动文件列表在任务完成后由 Diff 呈现（实时全量文件流为后置需求）'}
                     </p>
                   </div>
                 )}
@@ -588,7 +743,7 @@ export function TaskWorkflowPage({
                   </div>
                 )}
 
-                {/* done：归档摘要 */}
+                {/* done：归档摘要（迁入 TaskPanel 独有碎片：复检按钮 + archivedPath） */}
                 {stage === 'done' && (
                   <div className="m-4 overflow-y-auto rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
                     <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-emerald-600">
@@ -599,7 +754,24 @@ export function TaskWorkflowPage({
                         变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件 · 完成于 {absTime(sel.updatedAt ?? '')}
                       </p>
                     ))}
+                    {/* TaskPanel 碎片②：归档路径（P1 留在 done 卡，P2 挪治理视图） */}
+                    {(sel as unknown as { result?: { archivedPath?: string | null } }).result?.archivedPath && (
+                      <p className="mono mt-1 truncate text-micro text-slate-400" title={(sel as unknown as { result?: { archivedPath?: string } }).result?.archivedPath}>
+                        已归档：{(sel as unknown as { result?: { archivedPath?: string } }).result?.archivedPath}
+                      </p>
+                    )}
                     <p className="mt-1 text-micro text-slate-400">STAR 记忆与操作日志见右侧产物文档。</p>
+                    {/* TaskPanel 碎片①：重新巡检验证改动效果（治理闭环入口不能丢） */}
+                    <button
+                      onClick={() => {
+                        if (!backendRepo) return
+                        fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' }).catch(() => {})
+                        toast('巡检已启动——稍后到健康看板验证改善', 'info')
+                      }}
+                      className="mt-2 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50"
+                    >
+                      重新巡检验证改动效果
+                    </button>
                   </div>
                 )}
 

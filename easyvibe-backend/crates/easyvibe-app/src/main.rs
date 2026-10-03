@@ -135,6 +135,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/dev-docs", get(get_dev_docs))
+        .route("/repos/{id}/dev-doc", get(get_dev_doc))
         .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
@@ -1005,6 +1006,27 @@ async fn get_dev_docs(
     }
     docs.sort_by(|a, b| b["mtime"].as_i64().unwrap_or(0).cmp(&a["mtime"].as_i64().unwrap_or(0)));
     Ok(Json(serde_json::json!({ "success": true, "data": { "docs": docs, "indices": indices } })).into_response())
+}
+
+/// 产物文档全文（analysis/solution 关评审用——摘要不够，要看全文才能批）。
+/// path 必须是 .easyvibe/development_docs/ 下的相对路径（canonicalize 后前缀校验，防目录穿越）。
+async fn get_dev_doc(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let rel = q.get("path").cloned().unwrap_or_default();
+    let docs_root = repo.root.join(".easyvibe/development_docs");
+    let full = docs_root.join(&rel);
+    let (Ok(canonical), Ok(docs_canon)) = (full.canonicalize(), docs_root.canonicalize()) else {
+        return Err(AppError(ApiError::NotFound("文档不存在".into())));
+    };
+    if !canonical.starts_with(&docs_canon) || !canonical.is_file() {
+        return Err(AppError(ApiError::NotFound("文档不存在（路径越界或非文件）".into())));
+    }
+    let content = std::fs::read_to_string(&canonical).map_err(|e| ApiError::Internal(format!("文档读取失败: {e}")))?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel, "content": content } })).into_response())
 }
 
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），

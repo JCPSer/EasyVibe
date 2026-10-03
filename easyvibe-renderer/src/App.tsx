@@ -28,13 +28,11 @@ import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
 import { WorkbenchPage } from '@/components/WorkbenchPage'
-import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
+import { TaskPage } from '@/components/TaskPage'
 import { DriftPage } from '@/components/DriftPage'
 import { HealthPage } from '@/components/HealthPage'
 import { ChangesPage } from '@/components/ChangesPage'
 import { GitPage } from '@/components/GitPage'
-import { TaskBoardPage } from '@/components/TaskBoardPage'
-import { TaskPanel } from '@/components/TaskPanel'
 import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
@@ -1384,18 +1382,32 @@ export default function App() {
 
   // P1 审查 2#16：AppShell 徽标曾是被定义却从不传入的死功能——
   // 待审批计数实时接通：初始拉取 + WS 任务事件驱动（信息架构明写"评审（徽标）"）
+  // v4 扩展：双计数（待审批 + 执行中）+ 注意力条数据（第一个待审批任务的话术）
   const [pendingApprovals, setPendingApprovals] = useState(0)
+  const [runningCount, setRunningCount] = useState(0)
+  const [attention, setAttention] = useState<{ count: number; sample: string } | null>(null)
   useEffect(() => {
     if (!backendRepo) {
       setPendingApprovals(0)
+      setRunningCount(0)
+      setAttention(null)
       return
     }
+    const GL: Record<string, string> = { plan: '任务书审批', analysis: '需求矩阵评审', solution: '方案评审', diff: 'Diff 审批', report: '审查报告' }
     const load = () =>
       fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { data?: { status: string }[] } | null) =>
-          setPendingApprovals((d?.data ?? []).filter((t) => t.status === 'awaiting_approval').length),
-        )
+        .then((d: { data?: { status: string; title: string; gate?: string | null }[] } | null) => {
+          const ts = d?.data ?? []
+          setPendingApprovals(ts.filter((t) => t.status === 'awaiting_approval').length)
+          setRunningCount(ts.filter((t) => t.status === 'running').length)
+          const waiting = ts.filter((t) => t.status === 'awaiting_approval')
+          setAttention(
+            waiting.length > 0
+              ? { count: waiting.length, sample: `「${waiting[0].title}」停在${GL[waiting[0].gate ?? ''] ?? '审批'}` }
+              : null,
+          )
+        })
         .catch(() => {})
     load()
     return onTaskEvent(load)
@@ -1914,17 +1926,14 @@ export default function App() {
         </ReactFlowProvider>
       </CanvasBoundary>
     ),
-    tasks: (
-      <div className="h-full overflow-y-auto p-5">
-        <h2 className="mb-3 text-[15px] font-bold text-slate-800">任务</h2>
-        <TaskPanel backendRepo={backendRepo} onCreateTask={openTaskDraft} emptyAction={{ label: '去地图看看', onClick: () => handlePageChange('map') }} />
-      </div>
-    ),
+    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
     workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onLocateModule={() => handlePageChange('map')} />,
-    todo: <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => handlePageChange('review')} onCreateTask={openTaskDraft} />,
-    review: <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    // v4 P1：任务编排/任务工作流两个旧页签删除，统一从「任务」页进入（视图切换）；
+    // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
+    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
     health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
@@ -1954,7 +1963,27 @@ export default function App() {
   return (
     <>
       <CanvasBoundary>
-        <AppShell page={page} onPageChange={handlePageChange} topBar={topBar} badges={{ review: pendingApprovals || undefined }}>
+        <AppShell
+          page={page}
+          onPageChange={handlePageChange}
+          topBar={topBar}
+          badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
+          attentionBar={
+            attention && page !== 'tasks' ? (
+              <button
+                onClick={() => handlePageChange('tasks')}
+                className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-left transition-colors hover:bg-amber-100"
+              >
+                <span className="flex h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                <span className="text-[11px] font-bold text-amber-800">
+                  {attention.count} 项任务等你审批
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">—— {attention.sample}</span>
+                <span className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white">去处理 →</span>
+              </button>
+            ) : undefined
+          }
+        >
           {/* R3 B3：地图页 keep-alive——切页只隐藏不卸载，保住选中/过滤/展开子图/右栏对话草稿。
               审批典型动线「看 diff → 评审 → 回地图对照」此前每轮都被重置逼着重来 */}
           <div className="h-full" style={page === 'map' ? undefined : { display: 'none' }}>

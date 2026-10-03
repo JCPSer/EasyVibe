@@ -106,7 +106,7 @@ impl TaskExecutor {
                     self.record_approval(&task.id, "plan", "skipped", Some(&format!("监督模式风险预评估：{reason}——低危，计划关自动通过"))).await;
                     info!("[task-exec] 任务 {} 风险预评估低危，计划关自动通过；执行后停 diff 关（supervised）", task.id);
                     let _ = self.task_repo.update_status(&task.id, "running", None).await;
-                    self.spawn_and_watch(task).await;
+                    self.spawn_and_watch(task, 0).await;
                     return;
                 }
                 _ => {}
@@ -115,7 +115,7 @@ impl TaskExecutor {
                 self.record_approval(&task.id, gate, "skipped", Some("自动模式直通，全程留痕")).await;
             }
             let _ = self.task_repo.update_status(&task.id, "running", None).await;
-            self.spawn_and_watch(task).await;
+            self.spawn_and_watch(task, 0).await;
         }
     }
 
@@ -144,9 +144,14 @@ impl TaskExecutor {
         let gate = expected_gate.map(str::to_string).unwrap_or_else(|| task.gate.clone().unwrap_or_else(|| "plan".into()));
         // N27 原子化：先算目标态，再用条件 UPDATE 一次性抢占——影响行数 0 = 并发审批/状态漂移，409。
         // 审批留痕挪到抢占成功之后（此前先留痕再迁移，双击会双留痕 + 双 spawn）。
+        // 分阶段执行（2026-10-03 用户裁定）：manual 批准后不再一口气跑完——
+        // plan → 阶段1 需求矩阵（p:analysis）→ 评审 → 阶段2 方案（p:solution）→ 评审 → 阶段3 实施。
+        // 需求矩阵/方案设计在实施前必须经用户评审（rule_development 2.1/2.2 硬规定）。
         let (new_gate, new_status) = match (decision, gate.as_str()) {
             ("rejected", _) => (Some("rejected"), Some("rejected")),
-            (_, "plan") => (Some("diff"), Some("running")),
+            (_, "plan") => (Some("p:analysis"), Some("running")),
+            (_, "analysis") => (Some("p:solution"), Some("running")),
+            (_, "solution") => (Some("p:implement"), Some("running")),
             (_, "diff") => (Some("report"), None),
             (_, "report") => (Some("done"), Some("done")),
             _ => return Err(ApiError::BadRequest(format!("未知关卡 {gate}"))),
@@ -156,8 +161,16 @@ impl TaskExecutor {
             return Err(ApiError::Conflict("该任务刚被并发审批或状态已变化，请刷新后重试".into()));
         }
         self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
-        if decision != "rejected" && gate == "plan" {
-            self.clone().spawn_and_watch(task.clone()).await;
+        if decision != "rejected" {
+            let phase = match gate.as_str() {
+                "plan" => 1u8,
+                "analysis" => 2,
+                "solution" => 3,
+                _ => 0, // diff/report 审批不触发 spawn（会话已终态）
+            };
+            if phase > 0 {
+                self.clone().spawn_and_watch(task.clone(), phase).await;
+            }
         }
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
@@ -179,7 +192,12 @@ impl TaskExecutor {
     }
 
     /// spawn agent 并看门：终态后 manual 任务回到审批流（diff 关），auto 直接 done
-    async fn spawn_and_watch(self: Arc<Self>, task: TaskRow) {
+    /// spawn agent 并看门。phase：0=单次直通（auto/supervised，一口气跑完）；
+    /// 1=需求矩阵 2=方案设计 3=实施（manual 分阶段——需求矩阵/方案设计在实施前
+    /// 必须经用户评审，rule_development 2.1/2.2 硬规定，2026-10-03 用户裁定）。
+    /// 阶段 1/2 成功后停 analysis/solution 关等评审（不采集 diff、不走审查 agent）；
+    /// 阶段 0/3 走完整实施链（采集 → 审查 agent → diff 关）。
+    async fn spawn_and_watch(self: Arc<Self>, task: TaskRow, phase: u8) {
         // 盲测 P0：执行成功后需要人工把关的任务 = 非 auto（manual 全前置审批；supervised 执行后停 diff/report 关）
         let review_after = task.trust != "auto";
         let repo = match self.map_service.find_repo(&task.repo).await {
@@ -222,9 +240,15 @@ impl TaskExecutor {
         }
         // L2 哨兵原料：合约边界 + 基线（过程巡检用；终态采集另有权威计算）
         let contract = contract_patterns_from_context(&task.context);
-        let prompt = {
-            let h = self.harness.read().await;
-            assemble_task_prompt(&h.framework_transparent, &task)
+        // 阶段化 prompt：1/2 只产出文档（禁改代码），3 才是完整实施 prompt
+        let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+        let prompt = match phase {
+            1 => assemble_phase1_prompt(&task, &user),
+            2 => assemble_phase2_prompt(&task, &user),
+            _ => {
+                let h = self.harness.read().await;
+                assemble_task_prompt(&h.framework_transparent, &task)
+            }
         };
         // Y5 清债：任务槽位参数覆盖——settings `agent.args.task`（JSON 数组）优先于全局，
         // 可把任务执行从 skip-permissions 收紧为带确认（归纳/巡检等透明槽位不受影响）
@@ -259,6 +283,7 @@ impl TaskExecutor {
                 tokio::spawn(async move {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     let review_after = review_after;
+                    let phase = phase;
                     // B 案：审查槽参数（settings `agent.args.review` 可换便宜模型/收紧权限）
                     let review_args = slot_args(&this.settings_repo, "review", &this.agent_args).await;
                     // L2 哨兵状态：已上报越界集合 + 巡检节拍器
@@ -299,8 +324,10 @@ impl TaskExecutor {
                             {
                                 let failed = s.status == easyvibe_api_types::SessionStatus::Failed;
                                 // M4-1：执行成功 → 产物采集（RESULT 行 + git 摘要 + development_docs 归档），
-                                // 供 diff 关审批展示；采集失败不阻断终态回写
-                                if !failed {
+                                // 供 diff 关审批展示；采集失败不阻断终态回写。
+                                // 阶段 1/2 只产文档不改代码——跳过采集（diff 语义不适用）。
+                                // 采集适用于单次直通（phase 0）与实施阶段（phase 3）。
+                                if !failed && (phase == 0 || phase == 3) {
                                     let baseline = this.baselines.lock().ok().and_then(|mut m| m.remove(&task_id)).unwrap_or_default();
                                     if let Some(json) =
                                         collect_task_result(&this.session_manager, &session_id, &repo_root, &task_id, &this.task_repo, &baseline).await
@@ -327,6 +354,12 @@ impl TaskExecutor {
                                 }
                                 let (status, gate) = if failed {
                                     ("failed", None)
+                                } else if phase == 1 {
+                                    // 需求矩阵完成 → 停 analysis 关等用户评审（不采集 diff、不走审查 agent）
+                                    ("awaiting_approval", Some("analysis"))
+                                } else if phase == 2 {
+                                    // 方案设计完成 → 停 solution 关等用户评审
+                                    ("awaiting_approval", Some("solution"))
                                 } else if review_after {
                                     // manual/supervised：执行成功 → 独立子agent审查（B案，harness 2.3.2）
                                     // → 通过才回审批流（diff 关）；fail 自动打回（rejected，理由入留痕）
@@ -427,6 +460,63 @@ impl TaskExecutor {
             }
         }
     }
+}
+
+/// 阶段 1 prompt：只产出需求矩阵，禁改代码（rule_development 2.1）。
+/// 产出后由用户在 analysis 关评审——评审通过才进阶段 2。
+fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
+    let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
+    format!(
+        r#"你是需求分析 agent（harness 规则正文 2.1 的执行者）。**只做需求分析，禁止修改任何代码文件。**
+
+## 任务书
+- 需求描述：{description}
+- 影响模块：{modules}
+- 验收标准：{acceptance}
+
+## 要求
+1. 研读仓库代码与 .easyvibe/map/map.json，将需求拆解为需求矩阵（背景、目标、描述、优先级、难度、风险）。
+2. 需求矩阵写入 .easyvibe/development_docs/{user}/1_requirements_matrix/<yyyy-MM-dd-hh-mm>-<brief>.md，
+   文档必须含「评审意见栏」（留空待用户填写）。
+3. 更新同目录 INDEX-<yyyy-MM>.md 索引。
+4. 不要实施任何代码改动——实施发生在用户评审通过之后。
+5. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"需求矩阵已产出：一句话概括","changed_modules":[]}}"#,
+        description = task.description,
+        modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
+        acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
+        user = user,
+    )
+}
+
+/// 阶段 2 prompt：只产出方案设计，禁改代码（rule_development 2.2）。
+/// 基于已评审通过的需求矩阵；产出后由用户在 solution 关评审——通过才进阶段 3 实施。
+fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
+    let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
+    format!(
+        r#"你是方案设计 agent（harness 规则正文 2.2 的执行者）。**只做方案设计，禁止修改任何代码文件。**
+
+## 任务书
+- 需求描述：{description}
+- 影响模块：{modules}
+- 验收标准：{acceptance}
+
+## 输入
+- 已评审通过的需求矩阵：.easyvibe/development_docs/{user}/1_requirements_matrix/ 下最新文档（先读它）
+
+## 要求
+1. 针对需求矩阵中的每个子需求进行方案设计：背景、目标、描述、详细方案设计。
+2. 方案用伪代码或流程图表述，**禁止大段真实代码**（保证方案可读性）。
+3. 涉及 UI 变动的部分必须包含 UI 设计说明。
+4. 方案写入 .easyvibe/development_docs/{user}/2_requirements_solutions/<yyyy-MM-dd-hh-mm>-<brief>.md，
+   文档必须含「评审意见栏」（留空待用户填写）。
+5. 更新同目录 INDEX-<yyyy-MM>.md 索引。
+6. 不要实施任何代码改动——实施发生在用户评审通过之后。
+7. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"方案设计已产出：一句话概括","changed_modules":[]}}"#,
+        description = task.description,
+        modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
+        acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
+        user = user,
+    )
 }
 
 /// 独立子 agent 代码审查（用户裁定「全做」B 案，harness 2.3.2 的独立可信落地）：
@@ -555,10 +645,15 @@ pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
 {context}
 ```
 
+## 已评审通过的输入（分阶段评审的产物——先读再动手，严格按方案实施）
+
+- 需求矩阵：.easyvibe/development_docs/{user}/1_requirements_matrix/ 下最新文档
+- 方案设计：.easyvibe/development_docs/{user}/2_requirements_solutions/ 下最新文档（若有）
+
 ## 执行要求
 
 - 工作目录即仓库根目录；框架与规则正文中的路径已适配到本机，直接 cat 读取。
-- 需求类型（功能开发 / Bug 修复 / 重构）由你按框架路由决断，选择对应规则正文执行。
+- **严格按已评审通过的方案实施**，不要偏离方案另作设计；发现方案有硬伤时停下来在 [EASYVIBE-RESULT] 的 summary 中说明。
 - 改动规模评估与是否走完整评审流程由你决断（框架内的豁免条款），全程留痕。
 - 统计/验证类结论用工具数准，禁止估算。
 - 实施完成后对接口/界面进行测试，测试结果写入 .easyvibe/development_docs/{user}/3_test_results/（规范路径，含 INDEX 索引）——对应规则正文 2.3.1。
@@ -1504,26 +1599,33 @@ mod tests {
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "awaiting_approval");
         assert_eq!(t.gate.as_deref(), Some("plan"));
-        // 通过计划关 → 执行（true 立即成功）→ 回审批流（diff 关）
-        executor.decide("task-t1", "approved", None, None).await.unwrap();
-        // 等看门任务回写（2s 轮询）
-        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
-        for _ in 0..10 {
-            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("diff") { break }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        // 分阶段执行流（2026-10-03）：plan → 阶段1 需求矩阵 → analysis 关 →
+        // 阶段2 方案 → solution 关 → 阶段3 实施 →（审查不可用：true 无输出）→ diff → report → done。
+        // true 立即成功，每关都异步回写——统一等关助手。
+        async fn wait_gate(task_repo: &easyvibe_db::SqliteTaskRepository, want: &str) -> easyvibe_db::TaskRow {
+            let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+            for _ in 0..40 {
+                if t.status == "awaiting_approval" && t.gate.as_deref() == Some(want) { return t }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                t = task_repo.get("task-t1").await.unwrap().unwrap();
+            }
+            panic!("未等到 {want} 关（当前 {:?}/{:?}）", t.status, t.gate);
         }
-        assert_eq!(t.gate.as_deref(), Some("diff"), "执行成功后应停在 diff 关");
-        // diff → report → done
-        executor.decide("task-t1", "approved", None, None).await.unwrap();
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // plan → 阶段1
+        wait_gate(&task_repo, "analysis").await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // analysis → 阶段2
+        wait_gate(&task_repo, "solution").await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // solution → 阶段3 实施
+        wait_gate(&task_repo, "diff").await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // diff → report
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.gate.as_deref(), Some("report"));
-        executor.decide("task-t1", "approved", None, None).await.unwrap();
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // report → done
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "done");
-        // 留痕：plan/diff/report 三条 approved
+        // 留痕：plan/analysis/solution/diff/report 五条 approved（分阶段全链路）
         let aps = approvals.list_by_task("task-t1").await.unwrap();
-        assert_eq!(aps.len(), 3);
+        assert_eq!(aps.len(), 5);
         assert!(aps.iter().all(|a| a.decision == "approved"));
     }
 
@@ -1559,14 +1661,23 @@ mod tests {
         task.trust = "manual".into();
         task_repo.create(&task).await.unwrap();
         executor.clone().enqueue_pending(Some("ev-task-review-fail-test")).await;
-        // 过计划关 → 执行（echo 立即成功）→ 审查会话（echo 打 fail）→ 自动打回
-        executor.decide("task-t1", "approved", None, None).await.unwrap();
-        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
-        for _ in 0..20 {
-            if t.status == "rejected" { break }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        // 分阶段流：plan → analysis → solution 三关都过，阶段3 实施后审查会话（echo 打 fail）→ 自动打回
+        async fn wait_status(task_repo: &easyvibe_db::SqliteTaskRepository, want_status: &str, want_gate: Option<&str>) -> easyvibe_db::TaskRow {
+            let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+            for _ in 0..60 {
+                let gate_ok = want_gate.map_or(true, |g| t.gate.as_deref() == Some(g));
+                if t.status == want_status && gate_ok { return t }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                t = task_repo.get("task-t1").await.unwrap().unwrap();
+            }
+            panic!("未等到 {want_status}/{want_gate:?}（当前 {:?}/{:?}）", t.status, t.gate);
         }
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // plan → 阶段1
+        wait_status(&task_repo, "awaiting_approval", Some("analysis")).await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // analysis → 阶段2
+        wait_status(&task_repo, "awaiting_approval", Some("solution")).await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // solution → 阶段3 实施
+        let t = wait_status(&task_repo, "rejected", None).await;
         assert_eq!(t.status, "rejected", "审查 fail 必须自动打回，不进 diff 关");
         assert!(t.error.as_deref().unwrap_or("").contains("存在阻断性问题"), "打回理由必须入 error 留痕");
         // 留痕：diff 关有一条 rejected 审批（审查打回），用户可见可溯源
@@ -1605,13 +1716,22 @@ mod tests {
         task.trust = "manual".into();
         task_repo.create(&task).await.unwrap();
         executor.clone().enqueue_pending(Some("ev-task-review-na-test")).await;
-        executor.decide("task-t1", "approved", None, None).await.unwrap();
-        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
-        for _ in 0..20 {
-            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("diff") { break }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        // 分阶段流三关走通；阶段3 实施后审查会话（true 无输出）拿不到结论 → 不阻断
+        async fn wait_gate2(task_repo: &easyvibe_db::SqliteTaskRepository, want: &str) -> easyvibe_db::TaskRow {
+            let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+            for _ in 0..60 {
+                if t.status == "awaiting_approval" && t.gate.as_deref() == Some(want) { return t }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                t = task_repo.get("task-t1").await.unwrap().unwrap();
+            }
+            panic!("未等到 {want} 关（当前 {:?}/{:?}）", t.status, t.gate);
         }
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // plan → 阶段1
+        wait_gate2(&task_repo, "analysis").await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // analysis → 阶段2
+        wait_gate2(&task_repo, "solution").await;
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // solution → 阶段3 实施
+        let t = wait_gate2(&task_repo, "diff").await;
         assert_eq!(t.gate.as_deref(), Some("diff"), "审查不可用不得阻断 diff 关");
     }
 

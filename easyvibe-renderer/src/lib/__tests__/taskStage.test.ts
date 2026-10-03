@@ -5,12 +5,20 @@ import { stageOf } from '../taskStage'
 // 核心纪律：status 优先——failed 残留 gate 值不得制造假阶段（复审意见）。
 
 describe('stageOf', () => {
-  it('计划关：manual 任务 spawn 前停在此，①②同体', () => {
+  it('计划关与矩阵评审同属①需求分析（分阶段流）', () => {
     expect(stageOf('awaiting_approval', 'plan')).toBe(0)
+    expect(stageOf('awaiting_approval', 'analysis')).toBe(0)
   })
 
-  it('实施中：running 直通③，①②不算 now', () => {
+  it('方案评审属②需求方案', () => {
+    expect(stageOf('awaiting_approval', 'solution')).toBe(1)
+  })
+
+  it('运行期按阶段标记：p:analysis→① p:solution→② 实施→③', () => {
+    expect(stageOf('running', 'p:analysis')).toBe(0)
+    expect(stageOf('running', 'p:solution')).toBe(1)
     expect(stageOf('running', null)).toBe(2)
+    expect(stageOf('running', 'p:implement')).toBe(2)
     expect(stageOf('running', 'plan'), 'supervised 低危 running 可能残留 plan gate').toBe(2)
   })
 
@@ -24,9 +32,10 @@ describe('stageOf', () => {
   })
 
   it('status 优先：failed 残留 gate 值不制造假阶段', () => {
-    // update_status 不清 gate——failed 任务可能带着 gate=diff
+    // update_status 不清 gate——failed 任务可能带着 gate=diff 或 p:analysis
     expect(stageOf('failed', 'diff')).toBe('error')
     expect(stageOf('failed', 'plan')).toBe('error')
+    expect(stageOf('failed', 'p:analysis')).toBe('error')
   })
 
   it('未启动/驳回/中断是灰态', () => {

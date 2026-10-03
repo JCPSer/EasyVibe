@@ -44,7 +44,8 @@ function colOf(t: BoardTask): { col: ColKey; failed: boolean } {
     case 'pending':
       return { col: 'backlog', failed: false }
     case 'awaiting_approval':
-      return { col: t.gate === 'plan' ? 'plan' : 'review', failed: false }
+      // 分阶段流：plan/analysis/solution 三关都属"分析与方案"阶段带
+      return { col: ['plan', 'analysis', 'solution'].includes(t.gate ?? '') ? 'plan' : 'review', failed: false }
     case 'running':
       return { col: 'running', failed: false }
     case 'done':
