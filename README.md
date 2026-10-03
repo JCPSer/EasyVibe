@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./主界面示意图渲染.png" alt="EasyVibe — The VibeCoding IDE with built-in architecture governance" width="100%">
+  <img src="./resources/主界面示意图渲染.png" alt="EasyVibe — The VibeCoding IDE with built-in architecture governance" width="100%">
 </p>
 
 <p align="center">
@@ -59,7 +59,7 @@
 | Setup | — | **Zero config — single binary, double-click, UI embedded** |
 
 <p align="center">
-  <img src="./ui-mockups/工作区重组原型-v4.png" alt="EasyVibe Workspace" width="820">
+  <img src="./resources/工作区重组原型-v4.png" alt="EasyVibe Workspace" width="820">
 </p>
 
 ---
@@ -74,7 +74,7 @@ An LLM-generated architecture map, stored **inside the repo** (`.easyvibe/map/`)
 - **Live updates** — file watching streams map growth to the UI in real time; re-induction is one click
 
 <p align="center">
-  <img src="./ui-mockups/视图渲染原型.png" alt="Architecture Map Rendering" width="820">
+  <img src="./resources/视图渲染原型.png" alt="Architecture Map Rendering" width="820">
 </p>
 
 ---
@@ -88,7 +88,7 @@ Every module healthy ≠ the architecture is healthy. EasyVibe assesses health a
 - **Freshness tracking** — git change detection ranks how stale each module has become since its last audit
 
 <p align="center">
-  <img src="./ui-mockups/健康看板原型.png" alt="Health Dashboard" width="820">
+  <img src="./resources/健康看板原型.png" alt="Health Dashboard" width="820">
 </p>
 
 ---
@@ -103,7 +103,7 @@ Every development task — feature or bugfix — flows through the harness: **re
 - **Remediation loop** — failed reviews send tasks back with structured feedback, not dead ends
 
 <p align="center">
-  <img src="./ui-mockups/任务工作流与编排看板原型-v1.png" alt="Task Workflow & Orchestration Board" width="820">
+  <img src="./resources/任务工作流与编排看板原型-v1.png" alt="Task Workflow & Orchestration Board" width="820">
 </p>
 
 ---
@@ -116,7 +116,7 @@ Every development task — feature or bugfix — flows through the harness: **re
 - **Auto-detection & connection testing** — the app finds installed agents and verifies connectivity before you spend a token
 
 <p align="center">
-  <img src="./ui-mockups/对话面板原型.png" alt="Agent Chat" width="820">
+  <img src="./resources/对话面板原型.png" alt="Agent Chat" width="820">
 </p>
 
 ---
@@ -126,7 +126,7 @@ Every development task — feature or bugfix — flows through the harness: **re
 Worktree support, change tracking and history — plus first-class multi-repo workspaces: register local repositories, switch between them, and get per-repo maps and health baselines.
 
 <p align="center">
-  <img src="./ui-mockups/Git工作树原型-v3.png" alt="Git Worktree" width="820">
+  <img src="./resources/Git工作树原型-v3.png" alt="Git Worktree" width="820">
 </p>
 
 ---

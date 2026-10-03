@@ -15,3 +15,15 @@ reference/
 
 # 桌面端 sidecar 二进制（跨平台编译产物，不入库）
 /easyvibe-desktop/binaries/
+
+# 内部文档与原型（本地保留，不入库）
+/docs/
+/ui-mockups/
+/EasyVibe产品需求文档-v0.3.md
+/EasyVibe地图数据格式规范-v1.0.md
+/EasyVibe项目交接说明.md
+/M1a-数据demo-评估记录.md
+/backend-audit-report.md
+/backend-design.md
+/code-bug-audit-report.md
+/ui-design.md

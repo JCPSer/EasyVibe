@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./主界面示意图渲染.png" alt="EasyVibe — 自带架构治理的 VibeCoding IDE" width="100%">
+  <img src="./resources/主界面示意图渲染.png" alt="EasyVibe — 自带架构治理的 VibeCoding IDE" width="100%">
 </p>
 
 <p align="center">
@@ -59,7 +59,7 @@
 | 上手成本 | — | **零配置——单文件双击即用，UI 内嵌** |
 
 <p align="center">
-  <img src="./ui-mockups/工作区重组原型-v4.png" alt="EasyVibe 工作区" width="820">
+  <img src="./resources/工作区重组原型-v4.png" alt="EasyVibe 工作区" width="820">
 </p>
 
 ---
@@ -74,7 +74,7 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 - **实时生长**——文件监听把地图生长直播到 UI；重新归纳一键触发
 
 <p align="center">
-  <img src="./ui-mockups/视图渲染原型.png" alt="架构地图渲染" width="820">
+  <img src="./resources/视图渲染原型.png" alt="架构地图渲染" width="820">
 </p>
 
 ---
@@ -88,7 +88,7 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 - **新鲜度追踪**——结合 git 变更计算各模块自上次审计以来的落后程度并排序
 
 <p align="center">
-  <img src="./ui-mockups/健康看板原型.png" alt="健康看板" width="820">
+  <img src="./resources/健康看板原型.png" alt="健康看板" width="820">
 </p>
 
 ---
@@ -103,7 +103,7 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 - **修复闭环**——审查不通过带结构化反馈打回，不是死胡同
 
 <p align="center">
-  <img src="./ui-mockups/任务工作流与编排看板原型-v1.png" alt="任务工作流与编排看板" width="820">
+  <img src="./resources/任务工作流与编排看板原型-v1.png" alt="任务工作流与编排看板" width="820">
 </p>
 
 ---
@@ -116,7 +116,7 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 - **自动探测与测试连接**——自动发现已装 agent，先测连通再烧钱
 
 <p align="center">
-  <img src="./ui-mockups/对话面板原型.png" alt="Agent 对话" width="820">
+  <img src="./resources/对话面板原型.png" alt="Agent 对话" width="820">
 </p>
 
 ---
@@ -126,7 +126,7 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 工作树支持、变更追踪与历史记录；多仓库工作区是一等公民：注册本地仓库、随切随换，每个仓库有自己的地图与健康基线。
 
 <p align="center">
-  <img src="./ui-mockups/Git工作树原型-v3.png" alt="Git 工作树" width="820">
+  <img src="./resources/Git工作树原型-v3.png" alt="Git 工作树" width="820">
 </p>
 
 ---
