@@ -18,7 +18,8 @@ import type { TaskDraft } from '@/lib/taskContext'
 // 实时终端（模块级环形缓冲，切页不丢；断线无回放显灰条不造假）。
 // 阶段判定走 lib/taskStage 的 status 优先映射（failed 残留 gate 不制造假阶段）。
 
-/** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体） */
+/** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
+ *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮 */
 function PhaseDocReview({
   backendRepo,
   taskId,
@@ -26,6 +27,8 @@ function PhaseDocReview({
   title,
   deciding,
   review,
+  compareDirHint,
+  compareTitle,
   onDecide,
 }: {
   backendRepo: string
@@ -36,6 +39,9 @@ function PhaseDocReview({
   deciding: string | null
   /** 子 agent 阶段初审结论（2026-10-03：到人工关前的预筛，fail 不自动打回——人终审） */
   review?: { verdict: string; summary: string } | null
+  /** 对照文档（上一阶段产物，只读回看） */
+  compareDirHint?: string
+  compareTitle?: string
   onDecide: (d: 'approved' | 'rejected', note?: string) => void
 }) {
   const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
@@ -45,6 +51,10 @@ function PhaseDocReview({
   const [retryTick, setRetryTick] = useState(0)
   const [rejecting, setRejecting] = useState(false)
   const [note, setNote] = useState('')
+  // 对照回看（2026-10-03 用户反馈：到方案阶段后无法回看需求矩阵）
+  const [compareDoc, setCompareDoc] = useState<{ path: string; content: string } | null>(null)
+  const [compareMissing, setCompareMissing] = useState(false)
+  const [tab, setTab] = useState<'main' | 'compare'>('main')
 
   useEffect(() => {
     let dead = false
@@ -81,6 +91,35 @@ function PhaseDocReview({
     }
   }, [backendRepo, taskId, dirHint, retryTick])
 
+  // 对照文档加载（独立 effect：不阻塞主文档，缺失静默；任务切换由父级 key 重挂载兜底）
+  useEffect(() => {
+    if (!compareDirHint) return
+    let dead = false
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-docs?taskId=${encodeURIComponent(taskId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (d: { data?: { docs?: { path: string; mtime: number }[] } } | null) => {
+        if (!dead) {
+          setCompareMissing(false)
+          setCompareDoc(null)
+        }
+        const hit = (d?.data?.docs ?? [])
+          .filter((x) => x.path.includes(compareDirHint))
+          .sort((a, b) => b.mtime - a.mtime)[0]
+        if (!hit) {
+          if (!dead) setCompareMissing(true)
+          return
+        }
+        const full = await fetch(
+          `/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(hit.path)}`,
+        ).then((r) => (r.ok ? r.json().catch(() => null) : null))
+        if (!dead && full?.data) setCompareDoc({ path: hit.path, content: full.data.content ?? '' })
+      })
+      .catch(() => {})
+    return () => {
+      dead = true
+    }
+  }, [backendRepo, taskId, compareDirHint, retryTick])
+
   return (
     <div className="m-4 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white">
       <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
@@ -91,9 +130,41 @@ function PhaseDocReview({
         </div>
         <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待你的评审</span>
       </div>
+      {/* 对照回看标签栏：方案评审时可回看需求矩阵（只读）；缺失时标签不出现 */}
+      {compareDirHint && !compareMissing && (
+        <div className="flex items-center gap-1 border-b border-slate-100 px-4 py-1.5">
+          {(
+            [
+              ['main', `${title}（评审中）`],
+              ['compare', compareTitle ?? '上一阶段产物'],
+            ] as ['main' | 'compare', string][]
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                tab === k ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {/* 子 agent 阶段初审横幅：与 diff 关"子agent初审"同款语义——
-            fail 只是预筛警报，最终裁决仍是下方的人工通过/打回 */}
+        {tab === 'compare' ? (
+          compareDoc ? (
+            /* 对照文档只读——裁决按钮只对当前阶段产物 */
+            <MarkdownMessage content={compareDoc.content} />
+          ) : (
+            <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400">
+              <Loader2 size={13} className="animate-spin" /> 正在加载对照文档…
+            </p>
+          )
+        ) : (
+          <>
+            {/* 子 agent 阶段初审横幅：与 diff 关"子agent初审"同款语义——
+                fail 只是预筛警报，最终裁决仍是下方的人工通过/打回 */}
         {review && (
           <div
             className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
@@ -140,8 +211,13 @@ function PhaseDocReview({
           /* Markdown 渲染（非裸文本——2026-10-03 用户反馈：矩阵/方案是 md，pre 纯文本看不清结构） */
           <MarkdownMessage content={doc.content} />
         )}
+          </>
+        )}
       </div>
       <div className="border-t border-slate-100 p-3">
+        {tab === 'compare' && (
+          <p className="mb-1.5 text-center text-[10px] text-slate-400">正在对照回看——下方通过/打回作用于「{title}」</p>
+        )}
         {rejecting ? (
           <div className="space-y-1.5">
             <textarea
@@ -598,6 +674,7 @@ export function TaskWorkflowPage({
                 {/* ① analysis 关：需求矩阵全文评审 */}
                 {stage === 0 && sel.gate === 'analysis' && backendRepo && (
                   <PhaseDocReview
+                    key={sel.id}
                     backendRepo={backendRepo}
                     taskId={sel.id}
                     dirHint="1_requirements_matrix"
@@ -611,12 +688,16 @@ export function TaskWorkflowPage({
                 {/* ② solution 关：方案设计全文评审 */}
                 {stage === 1 && sel.gate === 'solution' && backendRepo && (
                   <PhaseDocReview
+                    key={sel.id}
                     backendRepo={backendRepo}
                     taskId={sel.id}
                     dirHint="2_requirements_solutions"
                     title="方案设计评审"
                     deciding={deciding}
                     review={sel.result?.phaseReviews?.solution ?? null}
+                    /* 对照回看：方案评审时随时回看已评审的需求矩阵（2026-10-03 用户反馈） */
+                    compareDirHint="1_requirements_matrix"
+                    compareTitle="需求矩阵（已评审）"
                     onDecide={(d, note) => decide(d, note)}
                   />
                 )}
