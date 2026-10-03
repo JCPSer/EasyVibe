@@ -54,6 +54,52 @@ fn session_timeout() -> std::time::Duration {
         .unwrap_or(std::time::Duration::from_secs(30 * 60))
 }
 
+/// claude `--output-format stream-json` 事件 → 可读文本。
+/// 只取 assistant 事件的正文/思考块（进度可见）；result 事件是全量回放，跳过防双份。
+/// 返回 None = 该事件无可展示内容（system/user/result 或解析失败）。
+fn parse_stream_event(line: &str) -> Option<String> {
+    let ev: serde_json::Value = serde_json::from_str(line).ok()?;
+    if ev["type"].as_str() != Some("assistant") {
+        return None;
+    }
+    let content = &ev["message"]["content"];
+    let blocks = content.as_array().cloned().unwrap_or_default();
+    let mut out = String::new();
+    if blocks.is_empty() {
+        // 兼容 content 为纯字符串的形态
+        if let Some(t) = content.as_str() {
+            out.push_str(t);
+        }
+    }
+    for b in blocks {
+        match b["type"].as_str() {
+            Some("text") => {
+                if let Some(t) = b["text"].as_str() {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(t);
+                }
+            }
+            Some("thinking") => {
+                if let Some(t) = b["thinking"].as_str() {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str("[思考] ");
+                    out.push_str(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 impl SessionManager {
     pub fn new(events: SessionEventSender) -> Arc<Self> {
         let (output_tx, _) = tokio::sync::broadcast::channel(512);
@@ -269,6 +315,10 @@ impl SessionManager {
         let killers = self.killers.clone();
         let repo = repo_id.to_string();
         let session_id_task = session_id.clone();
+        // 2026-10-03 实弹：claude --output-format stream-json 时每行是一个 JSON 事件——
+        // 还原成可读文本再进直播/缓冲，否则终端刷原始 JSON、[EASYVIBE-RESULT] 协议行
+        // 也会被 JSON 转义而解析不到。由 args 自动探测，老参数（纯文本）行为不变。
+        let stream_json = args.iter().any(|a| a.contains("stream-json"));
         tokio::spawn(async move {
             use tokio::io::AsyncBufReadExt as _;
             let out_id = session_id_task.clone();
@@ -281,23 +331,42 @@ impl SessionManager {
                         match reader.read_line(&mut line).await {
                             Ok(0) => break,
                             Ok(_) => {
+                                // stream-json 模式：JSON 事件 → 可读文本（无可展示内容则跳过该行）
+                                let payload: String = if stream_json {
+                                    match parse_stream_event(&line) {
+                                        Some(text) => text,
+                                        None => {
+                                            line.clear();
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    line.clone()
+                                };
                                 lines += 1;
                                 if lines <= 3 || lines % 50 == 0 {
-                                    let peek: String = line.chars().take(200).collect();
+                                    let peek: String = payload.chars().take(200).collect();
                                     info!("[session {out_id}] stdout#{lines}: {peek}");
                                 }
                                 // 改进#2：过程直播——行截断 200 字符广播（行率不高，直接发）
-                                let _ = out_output_tx.send(SessionOutput {
-                                    session_id: out_session_id.clone(),
-                                    line: line.chars().take(200).collect(),
-                                });
-                                // M4-1：捕获进缓冲（1MB 封顶，保头丢尾——RESULT 行在末尾）
+                                for pl in payload.lines() {
+                                    let _ = out_output_tx.send(SessionOutput {
+                                        session_id: out_session_id.clone(),
+                                        line: pl.chars().take(200).collect(),
+                                    });
+                                }
+                                // M4-1：捕获进缓冲（1MB 封顶，保头丢尾——RESULT 行在末尾）。
+                                // stream-json 模式缓冲的是还原后的文本——协议行保持纯文本形态，
+                                // take_output 消费方（RESULT/REVIEW 解析）零改动
                                 if let Ok(mut buf) = stdout_buf.lock() {
                                     if buf.len() < 1_048_576 {
-                                        buf.push_str(&line);
-                                    } else if line.contains("[EASYVIBE-RESULT]") {
+                                        buf.push_str(&payload);
+                                        if !payload.ends_with('\n') {
+                                            buf.push('\n');
+                                        }
+                                    } else if payload.contains("[EASYVIBE-RESULT]") {
                                         // 超帽时仍保留 RESULT 归档行（短行，替换式保底）
-                                        let trimmed: String = line.chars().take(4096).collect();
+                                        let trimmed: String = payload.chars().take(4096).collect();
                                         buf.push_str(&trimmed);
                                     }
                                 }
@@ -570,5 +639,28 @@ mod tests {
         let _ = mgr.start_induction("repo1", &dir, "test", "false", &[], None).await.unwrap();
         let final_evt = recv_terminal(&mut rx).await;
         assert_eq!(final_evt.status, SessionStatus::Failed);
+    }
+
+    #[test]
+    fn stream_event_extracts_assistant_text_and_skips_result() {
+        // stream-json → 文本还原：assistant 正文/思考块提取；result/system 跳过（防双份）
+        let text_ev = r###"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"先读文件"},{"type":"text","text":"## 交付摘要\n改动完成"}]}}"###;
+        let out = parse_stream_event(text_ev).expect("assistant 事件必须有文本");
+        assert!(out.contains("[思考] 先读文件"), "思考块保留: {out}");
+        assert!(out.contains("## 交付摘要"), "正文保留: {out}");
+
+        // 协议行在文本块内保持纯文本形态——take_output 的 RESULT/REVIEW 解析零改动
+        let proto_ev = r###"{"type":"assistant","message":{"content":[{"type":"text","text":"完成\n[EASYVIBE-RESULT] {\"summary\":\"ok\"}"}]}}"###;
+        let out = parse_stream_event(proto_ev).unwrap();
+        assert!(out.lines().any(|l| l.starts_with("[EASYVIBE-RESULT]")), "协议行必须是独立纯文本行: {out}");
+
+        // result 事件 = 全量回放，必须跳过（否则双份）
+        let result_ev = r#"{"type":"result","result":"全部内容回放"}"#;
+        assert!(parse_stream_event(result_ev).is_none());
+        // system 事件跳过
+        let sys_ev = r#"{"type":"system","subtype":"init"}"#;
+        assert!(parse_stream_event(sys_ev).is_none());
+        // 非 JSON 行（异常输出）→ None（不广播原始垃圾）
+        assert!(parse_stream_event("not json at all").is_none());
     }
 }

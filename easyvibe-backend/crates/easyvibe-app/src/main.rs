@@ -2052,9 +2052,13 @@ async fn main() {
     }
 
     // agent CLI 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）。
-    // 默认 -p --bare --dangerously-skip-permissions：bare 跳过宿主 hooks（防 grill-me 类
-    // 钩子把无人值守任务带偏成访谈模式）；skip-permissions 授予 Bash 等工具（实弹验证发现
-    // headless 下 Bash 默认被拒，agent 只能"分析后成功退出"什么都不写）。
+    // 默认 -p --bare --dangerously-skip-permissions --output-format stream-json：
+    // bare 跳过宿主 hooks（防 grill-me 类钩子把无人值守任务带偏成访谈模式）；
+    // skip-permissions 授予 Bash 等工具（实弹验证发现 headless 下 Bash 默认被拒，
+    // agent 只能"分析后成功退出"什么都不写）；
+    // stream-json --verbose = 流式输出（stream-json 必须配 verbose，否则 CLI 直接报错退出）——
+    // 否则 claude -p 完成前零输出，"实时终端"永远空白
+    // （2026-10-03 实弹：用户看着 LIVE 终端等全程，日志显示 stdout 全在退出瞬间到达）
     let agent_command = std::env::var("EASYVIBE_AGENT_CMD").unwrap_or_else(|_| "claude".into());
     // GUI 启动的进程 PATH 极薄（launchd 只有 /usr/bin:/bin:...），裸命令名 spawn 必败——
     // 实测桌面壳三个任务全部"spawn claude 失败: No such file or directory"。
@@ -2062,7 +2066,7 @@ async fn main() {
     let agent_command = resolve_agent_command(&agent_command);
     info!("[boot] agent CLI 解析为: {agent_command}");
     let agent_args: Vec<String> = std::env::var("EASYVIBE_AGENT_ARGS")
-        .unwrap_or_else(|_| "-p --bare --dangerously-skip-permissions".into())
+        .unwrap_or_else(|_| "-p --bare --dangerously-skip-permissions --output-format stream-json --verbose".into())
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
