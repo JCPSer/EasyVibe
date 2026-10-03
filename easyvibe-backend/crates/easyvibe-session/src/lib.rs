@@ -104,6 +104,37 @@ impl SessionManager {
         })
     }
 
+    /// grace 收尸（2026-10-03 重审 P1：归纳进度 100% 后 agent 不退出 = 僵尸进程泄漏）：
+    /// 杀进程，但终态必须记 Succeeded——产物已交付，判 Failed 是冤案（实弹#4 的原始诉求）。
+    /// 顺序保证：notify kill → 轮询等看门狗写出终态（Failed）→ note_status 覆盖为 Succeeded。
+    /// 覆盖放在"观察到终态之后"，消除与看门狗终态写的竞态。
+    pub async fn grace_finish(&self, session_id: &str) -> Result<(), ApiError> {
+        let s = self.by_id.read().await.get(session_id).cloned().ok_or_else(|| ApiError::NotFound(format!("会话 {session_id} 不存在")))?;
+        if !matches!(s.status, SessionStatus::Starting | SessionStatus::Running) {
+            return Err(ApiError::Conflict(format!("会话 {session_id} 已终态（{:?}）", s.status)));
+        }
+        let notify = self.killers.read().await.get(session_id).cloned().ok_or_else(|| {
+            ApiError::Conflict(format!("会话 {session_id} 无终止通道（外部注册会话不支持 kill）"))
+        })?;
+        notify.notify_one();
+        // 等看门狗把 Killed→Failed 的终态写出来（kill 是即时的，2.5s 上限宽到离谱）
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Some(cur) = self.by_id.read().await.get(session_id) {
+                if !matches!(cur.status, SessionStatus::Starting | SessionStatus::Running) {
+                    break;
+                }
+            }
+        }
+        self.note_status(SessionStatusChanged {
+            repo: s.repo,
+            session_id: session_id.to_string(),
+            status: SessionStatus::Succeeded,
+        })
+        .await;
+        Ok(())
+    }
+
     /// 订阅会话 stdout 行（app 层翻译为 WS session.output）
     pub fn subscribe_output(&self) -> tokio::sync::broadcast::Receiver<SessionOutput> {
         self.output_tx.subscribe()

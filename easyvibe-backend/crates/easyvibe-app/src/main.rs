@@ -49,6 +49,8 @@ pub struct AppState {
     pub schema_path: Arc<String>,
     /// 后端 → 前端事件总线（broadcast；WS handler 订阅）
     pub event_bus: broadcast::Sender<BusEvent>,
+    /// 库连接池直持（重审 P1：注销仓库 wipe_repo 跨表清除需要；repos 各自私有池不便借用）
+    pub pool: easyvibe_db::sqlx::SqlitePool,
 }
 
 /// LLM 客户端来源：stub（零成本验证）或 anthropic（真实 API）
@@ -108,7 +110,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
-        .route("/repos/{id}/patrol-runs", get(list_patrol_runs))
+        .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
         // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
         .route("/repos/{id}/events", axum::routing::post(ingest_event))
@@ -129,7 +131,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
         .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
         .route("/repos/{id}/views", get(list_views).post(save_view))
-        .route("/repos/{id}/views/{slug}", axum::routing::delete(delete_view))
+        .route("/repos/{id}/views/{slug}", axum::routing::delete(delete_view).put(rename_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
         .route("/repos/{id}/tasks/{tid}", axum::routing::delete(delete_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
@@ -274,14 +276,43 @@ async fn add_repo(State(st): State<AppState>, Json(body): Json<AddRepoRequest>) 
     Ok(Json(serde_json::json!({ "success": true, "data": { "id": repo.id, "name": repo.name, "root": repo.root.to_string_lossy() } })).into_response())
 }
 
-async fn remove_repo(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+async fn remove_repo(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未挂载")))?;
+    // 重审 P1：注销前杀活动会话——此前 running 的归纳/任务 agent 成孤儿，
+    // 仓库写互斥被占死，进程只能等超时或后端退出（kill_on_drop）才释放
+    if let Some(s) = st.session_manager.status_of(&id).await {
+        if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) {
+            let _ = st.session_manager.kill(&s.session_id).await;
+        }
+    }
+    // 任务会话兜底（active 槽位只记最后一个注册者；running/awaiting 的任务逐个点杀，
+    // 已终态会话 kill 返回 409 属预期，忽略）
+    use easyvibe_db::TaskRepository as _;
+    if let Ok(tasks) = st.task_repo.list(&id, 500).await {
+        for t in tasks.into_iter().filter(|t| matches!(t.status.as_str(), "running" | "awaiting_approval")) {
+            if let Some(sid) = t.session_id {
+                let _ = st.session_manager.kill(&sid).await;
+            }
+        }
+    }
+    // 数据清除（?wipe=true）：抹掉该仓库在本地库的全部痕迹
+    // （任务/审批/会话/消息/巡检历史/事件/仓库级设置）——默认保留，用户显式选择才清
+    let wiped = if q.get("wipe").map(|v| v == "true").unwrap_or(false) {
+        easyvibe_db::wipe_repo(&st.pool, &id).await?
+    } else {
+        0
+    };
     if !st.map_service.remove_repo(&id).await {
         return Err(AppError(ApiError::NotFound(format!("仓库 {id} 未挂载"))));
     }
     let remaining: Vec<_> = st.map_service.repos().await.into_iter().map(|r| r.root).collect();
     write_desktop_repos(&remaining);
-    info!("[repo-remove] 注销 {}", id);
-    Ok(Json(serde_json::json!({ "success": true })).into_response())
+    info!("[repo-remove] 注销 {}（数据清除 {} 行）", id, wiped);
+    Ok(Json(serde_json::json!({ "success": true, "data": { "wiped": wiped } })).into_response())
 }
 
 async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
@@ -445,23 +476,19 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
                     break;
                 }
                 // 实弹#4 防线：进度 100% 落盘超过 90s 但会话仍 Running（agent 已交付未自行退出）
-                // → 按成功收尸解除"归纳中"假卡住。产物合法性由 watcher 校验保证（不出残图），
-                // 进程资源由 kill_on_drop 在后端生命周期结束时兜底。巡逻无 progress.json，不误触。
+                // → 按成功收尸解除"归纳中"假卡住。产物合法性由 watcher 校验保证（不出残图）。
+                // 重审 P1 修订：收尸必须连进程一起杀（grace_finish）——此前只记终态不杀，
+                // 已交付但不退出的 claude 成为无法击杀的僵尸（kill 对已终态会话返回 409），
+                // 只能等自然退出或后端退出（kill_on_drop）才释放。
                 Some(s) => {
                     const GRACE_SECS: u64 = 90;
                     if let Some(ago) = progress_done_ago_secs(&repo2.root) {
                         if ago > GRACE_SECS {
                             tracing::warn!(
-                                "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸（agent 未自行退出，实弹#4）",
+                                "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸并终止进程（agent 未自行退出，实弹#4 + 重审 P1）",
                                 ago
                             );
-                            st2.session_manager
-                                .note_status(easyvibe_api_types::SessionStatusChanged {
-                                    repo: repo2.id.clone(),
-                                    session_id: s.session_id.clone(),
-                                    status: easyvibe_api_types::SessionStatus::Succeeded,
-                                })
-                                .await;
+                            let _ = st2.session_manager.grace_finish(&s.session_id).await;
                             break;
                         }
                     }
@@ -648,6 +675,22 @@ async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) ->
     use easyvibe_db::HealthRepository as _;
     let runs = st.health_repo.list_runs(&id, 20).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": runs })).into_response())
+}
+
+/// 巡检历史清理（重审 P1：两表只增不减，自动巡检开启后 module_health_history
+/// 行量 = 模块数 × 巡检次数）。DELETE /patrol-runs?keep=N——只留最近 N 次已终态
+/// 巡检，running 的永不进删除集。默认 keep=10，上限 200（防误传超大值）。
+async fn prune_patrol_runs(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    use easyvibe_db::HealthRepository as _;
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let keep: i64 = q.get("keep").and_then(|v| v.parse().ok()).unwrap_or(10).clamp(0, 200);
+    let deleted = st.health_repo.prune_runs(&id, keep).await?;
+    info!("[patrol-prune] {} 清理历史巡检 {} 条（保留最近 {} 次）", id, deleted, keep);
+    Ok(Json(serde_json::json!({ "success": true, "data": { "deleted": deleted, "keep": keep } })).into_response())
 }
 
 /// M4-3 健康看板数据面：近 20 次巡检（含各自模块平均分）+ 最近一次成功巡检的模块明细。
@@ -1239,9 +1282,11 @@ async fn list_tasks(
 ) -> Result<Response, AppError> {
     use easyvibe_db::TaskRepository as _;
     // M4-2：?conv=<id> 时会话级过滤（工作台影响面/计划进度）
+    // 重审 P1：?limit= 可调（默认 50 是"任务一多旧任务消失"的失控感来源），上限 500 防全表拉取
+    let limit: i64 = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 500);
     let tasks = match q.get("conv") {
         Some(cid) => st.task_repo.list_by_conversation(cid).await?,
-        None => st.task_repo.list(&id, 50).await?,
+        None => st.task_repo.list(&id, limit).await?,
     };
     let items: Vec<serde_json::Value> = tasks
         .into_iter()
@@ -1662,6 +1707,60 @@ async fn delete_view(State(st): State<AppState>, Path((id, slug)): Path<(String,
         std::fs::remove_file(&path).map_err(|e| ApiError::Internal(format!("删除视图失败: {e}")))?;
     }
     Ok(Json(serde_json::json!({ "success": true })).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct RenameViewRequest {
+    name: String,
+}
+
+/// 视图改名（重审 P1：此前只能删了重建——保存冲突还会静默另存新文件造成列表膨胀）。
+/// 改名 = 新 slug 写文件 + 删旧文件；slug 冲突 409（同 slug = 纯改名，原地更新 name 字段）。
+async fn rename_view(State(st): State<AppState>, Path((id, slug)): Path<(String, String)>, Json(body): Json<RenameViewRequest>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    // 旧 slug 校验与 delete_view 同防线
+    let safe_old: String = slug
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
+        .collect();
+    if safe_old.is_empty() || safe_old != slug {
+        return Err(AppError(ApiError::BadRequest("非法视图标识".into())));
+    }
+    if body.name.trim().is_empty() {
+        return Err(AppError(ApiError::BadRequest("视图名不能为空".into())));
+    }
+    let new_slug: String = body
+        .name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(40)
+        .collect();
+    let new_slug = if new_slug.is_empty() {
+        return Err(AppError(ApiError::BadRequest("视图名需至少含一个字母或数字".into())));
+    } else {
+        new_slug
+    };
+    let dir = repo.root.join(".easyvibe/views");
+    let old_path = dir.join(format!("{safe_old}.json"));
+    if !old_path.is_file() {
+        return Err(AppError(ApiError::NotFound(format!("视图 {slug} 不存在"))));
+    }
+    let new_path = dir.join(format!("{new_slug}.json"));
+    if new_slug != safe_old && new_path.exists() {
+        return Err(AppError(ApiError::Conflict(format!("已存在同名视图 {new_slug}，请换一个名字"))));
+    }
+    let raw = std::fs::read_to_string(&old_path).map_err(|e| ApiError::Internal(format!("读取视图失败: {e}")))?;
+    let mut v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("视图解析失败: {e}")))?;
+    v["name"] = serde_json::Value::String(body.name.trim().to_string());
+    std::fs::write(&new_path, serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw.clone()))
+        .map_err(|e| ApiError::Internal(format!("写入视图失败: {e}")))?;
+    if new_slug != safe_old {
+        let _ = std::fs::remove_file(&old_path);
+    }
+    Ok(Json(serde_json::json!({ "success": true, "data": { "slug": new_slug } })).into_response())
 }
 
 /// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
@@ -2120,6 +2219,7 @@ async fn main() {
         submap_prompt: Arc::new(submap_prompt),
         schema_path: Arc::new(schema_path),
         event_bus,
+        pool: database.pool().clone(),
     };
     let app = build_router(state.clone());
     // 定时巡检（默认关：adv.autoPatrolEnabled=true 开启，间隔 adv.autoPatrolHours 默认 24h）——
@@ -2246,6 +2346,7 @@ mod tests {
             submap_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),
             event_bus: bus,
+            pool: db.pool().clone(),
         }
     }
 
@@ -2913,6 +3014,90 @@ mod tests {
             axum::http::Request::post(format!("/api/repos/{repo}/tasks/{id2}/retry")).body(axum::body::Body::empty()).unwrap(),
         ).await.unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "awaiting_approval 不可重试");
+    }
+
+    #[tokio::test]
+    async fn view_rename_prune_and_repo_wipe() {
+        // 重审 P1：视图改名 / 巡检历史清理 / 注销仓库数据清除
+        use easyvibe_db::{ConversationRepository as _, HealthRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("p1-admin").await;
+        let app = build_router(state.clone());
+
+        // ── 视图：保存 → 改名 → 列表反映新 slug；冲突名 409 ──
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/views"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "name": "支付链路", "nodes": ["module:a"] }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CREATED);
+        let resp = app.clone().oneshot(
+            axum::http::Request::put(format!("/api/repos/{repo}/views/{}", urlencoding_encode("支付链路")))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "name": "支付链路v2" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "改名应成功");
+        let resp = app.clone().oneshot(
+            axum::http::Request::get(format!("/api/repos/{repo}/views")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let views = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        assert_eq!(views.as_array().unwrap().len(), 1, "改名是移动不是复制");
+        assert_eq!(views[0]["slug"].as_str().unwrap(), "支付链路v2");
+        assert_eq!(views[0]["name"].as_str().unwrap(), "支付链路v2");
+
+        // ── 巡检历史：4 次终态 + 1 次 running，keep=2 → 删 2 条，running 不动 ──
+        for (i, status) in ["succeeded", "succeeded", "failed", "succeeded"].iter().enumerate() {
+            let rid = format!("prune-run-{i}");
+            state.health_repo.create_run(&easyvibe_db::NewPatrolRun {
+                id: rid.clone(), repo: repo.clone(), started_at: format!("2026100{i}0000"), model: "stub".into(),
+            }).await.unwrap();
+            state.health_repo.finish_run(&easyvibe_db::FinishPatrolRun {
+                id: rid, finished_at: "1".into(), status: status.to_string(), arch_score: Some(60),
+                error: None, prompt_tokens: None, completion_tokens: None,
+            }).await.unwrap();
+            state.health_repo.insert_module_health(&easyvibe_db::ModuleHealthRow {
+                run_id: format!("prune-run-{i}"), module_id: "m1".into(), name: Some("m1".into()), score: 60,
+                coupling: None, complexity: None, churn: None,
+                decay_flags: "[]".into(), review_note: None, concerns: "[]".into(),
+            }).await.unwrap();
+        }
+        state.health_repo.create_run(&easyvibe_db::NewPatrolRun {
+            id: "prune-run-live".into(), repo: repo.clone(), started_at: "202610090000".into(), model: "stub".into(),
+        }).await.unwrap();
+        let resp = app.clone().oneshot(
+            axum::http::Request::delete(format!("/api/repos/{repo}/patrol-runs?keep=2")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let runs = state.health_repo.list_runs(&repo, 20).await.unwrap();
+        assert_eq!(runs.len(), 3, "保留最近 2 次终态 + running 1 次");
+        assert!(runs.iter().any(|r| r.id == "prune-run-live"), "running 永不进删除集");
+        let hist = state.health_repo.list_module_history(&repo, "m1", 20).await.unwrap();
+        assert_eq!(hist.len(), 2, "明细随主表级联清除");
+
+        // ── 注销仓库：wipe=true 抹掉任务/会话/巡检，仓库从列表消失 ──
+        state.task_repo.create(&easyvibe_db::TaskRow {
+            id: "wipe-task".into(), repo: repo.clone(), title: "t".into(), description: "d".into(),
+            modules: "[]".into(), acceptance: String::new(), source: "manual".into(), context: "{}".into(),
+            status: "done".into(), trust: "manual".into(), error: None, session_id: None, gate: None,
+            prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
+            created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
+            origin_task_id: None, successor_task_id: None,
+        }).await.unwrap();
+        let conv = state.conversation_repo.get_or_create(&repo).await.unwrap();
+        state.conversation_repo.append_message(&conv.id, "user", "hi", 0).await.unwrap();
+        let resp = app.clone().oneshot(
+            axum::http::Request::delete(format!("/api/repos/{repo}?wipe=true")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert!(state.task_repo.get("wipe-task").await.unwrap().is_none(), "任务必须被清除");
+        assert!(state.conversation_repo.list_by_repo(&repo).await.unwrap().is_empty(), "会话必须被清除");
+        assert!(state.health_repo.list_runs(&repo, 20).await.unwrap().is_empty(), "巡检历史必须被清除");
+        let resp = app.clone().oneshot(axum::http::Request::get("/api/repos").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let repos = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
+        assert!(repos.as_array().unwrap().iter().all(|r| r["id"] != repo), "仓库必须注销");
     }
 
     #[test]

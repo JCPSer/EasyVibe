@@ -139,6 +139,10 @@ pub trait HealthRepository: Send + Sync {
         &self,
         repo: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ModuleHealthRow>, ApiError>> + Send;
+    /// 历史清理（2026-10-03 重审 P1）：只保留最近 keep 次已终态巡检
+    /// （running 的不动——它是正在发生的事实），连带删 module_health_history。
+    /// 返回删除的 run 数。
+    fn prune_runs(&self, repo: &str, keep: i64) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
 }
 
 pub struct SqliteHealthRepository {
@@ -216,6 +220,36 @@ impl HealthRepository for SqliteHealthRepository {
         .await
         .map_err(db_err)?;
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn prune_runs(&self, repo: &str, keep: i64) -> Result<u64, ApiError> {
+        // 先删明细再删主表（子表无外键级联，手动序）；running 永不进删除集——
+        // "正在发生的事实"不能被清理动作抹掉
+        sqlx::query(
+            "DELETE FROM module_health_history WHERE run_id IN (
+                SELECT id FROM patrol_runs
+                WHERE repo = ? AND status != 'running'
+                ORDER BY started_at DESC LIMIT -1 OFFSET ?)",
+        )
+        .bind(repo)
+        .bind(keep.max(0))
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        let r = sqlx::query(
+            "DELETE FROM patrol_runs
+             WHERE repo = ? AND status != 'running' AND id NOT IN (
+                SELECT id FROM patrol_runs
+                WHERE repo = ? AND status != 'running'
+                ORDER BY started_at DESC LIMIT ?)",
+        )
+        .bind(repo)
+        .bind(repo)
+        .bind(keep.max(0))
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(r.rows_affected())
     }
 
     async fn list_module_history(&self, repo: &str, module_id: &str, limit: i64) -> Result<Vec<ModuleHealthRow>, ApiError> {
@@ -869,6 +903,27 @@ impl From<ConversationMessageRowSql> for ConversationMessageRow {
 
 fn now_secs() -> String {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
+}
+
+/// 注销仓库的数据清除（2026-10-03 重审 P1）：抹掉该仓库在本地库的全部痕迹。
+/// 删序：子表先、父表后（schema 无外键级联，全手动序）；settings 按 scope = repo id 清除。
+/// 返回删除总行数（粗粒度观测值，日志用）。
+pub async fn wipe_repo(pool: &sqlx::SqlitePool, repo: &str) -> Result<u64, ApiError> {
+    let mut n = 0u64;
+    macro_rules! del {
+        ($sql:expr) => {
+            n += sqlx::query($sql).bind(repo).execute(pool).await.map_err(db_err)?.rows_affected();
+        };
+    }
+    del!("DELETE FROM module_health_history WHERE run_id IN (SELECT id FROM patrol_runs WHERE repo = ?)");
+    del!("DELETE FROM patrol_runs WHERE repo = ?");
+    del!("DELETE FROM events WHERE repo = ?");
+    del!("DELETE FROM approvals WHERE task_id IN (SELECT id FROM tasks WHERE repo = ?)");
+    del!("DELETE FROM conversation_messages WHERE conversation_id IN (SELECT id FROM conversations WHERE repo = ?)");
+    del!("DELETE FROM conversations WHERE repo = ?");
+    del!("DELETE FROM tasks WHERE repo = ?");
+    del!("DELETE FROM settings WHERE scope = ?");
+    Ok(n)
 }
 
 impl ConversationRepository for SqliteConversationRepository {

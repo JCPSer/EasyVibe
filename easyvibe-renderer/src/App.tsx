@@ -1426,6 +1426,7 @@ export default function App() {
   const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
   const [repoPanelOpen, setRepoPanelOpen] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null) // 重审 P1：注销双选项确认（保留/清除数据）
   const [guideDismissed, setGuideDismissed] = useState(
     () => typeof window !== 'undefined' && localStorage.getItem('ev.m4.guide') === '1',
   )
@@ -1760,16 +1761,18 @@ export default function App() {
     }
   }, [refreshRepos])
 
-  const removeRepo = useCallback(async (id: string) => {
-    if (!window.confirm(`移除仓库 ${id}？（地图产物保留在磁盘，可随时重新添加）`)) return
+  // 重审 P1：移除仓库现在会杀活动会话（此前 running 的 agent 成孤儿占死写互斥）；
+  // wipe=true 额外抹掉该仓库在本地库的全部痕迹（任务/会话/审批/巡检/事件/仓库级设置）
+  const removeRepo = useCallback(async (id: string, wipe: boolean) => {
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const r = await fetch(`/api/repos/${encodeURIComponent(id)}${wipe ? '?wipe=true' : ''}`, { method: 'DELETE' })
       if (!r.ok) {
         toast('移除失败', 'error')
         return
       }
-      toast('已移除仓库')
+      toast(wipe ? '已移除仓库并清除其数据' : '已移除仓库（数据保留，重新添加后可见）')
       if (id === backendRepo) setMap(null)
+      setConfirmRemove(null)
       refreshRepos()
     } catch {
       toast('移除失败（需要后端在线）', 'error')
@@ -1809,24 +1812,61 @@ export default function App() {
             <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
-                <div key={r.id} className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-50">
-                  <button
-                    className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
-                    onClick={() => {
-                      switchRepo(r.id)
-                      setRepoPanelOpen(false)
-                    }}
-                    title={r.name}
-                  >
-                    {r.name}
-                  </button>
-                  <button
-                    onClick={() => removeRepo(r.id)}
-                    className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
-                    title="移除（地图产物保留在磁盘）"
-                  >
-                    <X size={12} />
-                  </button>
+                <div key={r.id} className="rounded-lg px-1.5 py-1 hover:bg-slate-50">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
+                      onClick={() => {
+                        switchRepo(r.id)
+                        setRepoPanelOpen(false)
+                      }}
+                      title={r.name}
+                    >
+                      {r.name}
+                    </button>
+                    {confirmRemove === r.id ? (
+                      <button
+                        onClick={() => setConfirmRemove(null)}
+                        className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600"
+                        title="取消"
+                      >
+                        <X size={12} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmRemove(confirmRemove === r.id ? null : r.id)}
+                        className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                        title="移除仓库…"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                  {/* 重审 P1：注销确认双选项——数据保留 or 连同清除（后端 wipe_repo），
+                      不再是无差别的 window.confirm（用户不知道数据去了哪） */}
+                  {confirmRemove === r.id && (
+                    <div className="mt-1 space-y-1 rounded-lg border border-red-100 bg-red-50/50 p-1.5">
+                      <p className="text-[10px] leading-4 text-slate-500">
+                        正在运行的任务/归纳会被终止。本地数据怎么处理？
+                      </p>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => void removeRepo(r.id, false)}
+                          className="flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                          title="任务/会话/巡检历史留在本地库，重新添加仓库后可见"
+                        >
+                          移除，保留数据
+                        </button>
+                        <button
+                          onClick={() => void removeRepo(r.id, true)}
+                          className="flex-1 rounded-md bg-red-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-red-600"
+                          title="抹掉该仓库的任务/会话/审批/巡检历史/事件/仓库级设置（不可恢复）"
+                        >
+                          移除并清除数据
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400">尚未挂载任何仓库</p>}

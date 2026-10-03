@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench } from 'lucide-react'
+import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench, Trash2, X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 import { absTime, toMs } from '@/lib/diffStat'
 import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import { onPatrolFinished } from '@/lib/growthBus'
+import { toast } from '@/lib/toast'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
@@ -86,6 +87,27 @@ export function HealthPage({
   const [data, setData] = useState<Dashboard | null>(null)
   const [loading, setLoading] = useState(false)
   const [starting, setStarting] = useState(false)
+  // 重审 P1：巡检历史清理（只保留最近 N 次）
+  const [confirmPrune, setConfirmPrune] = useState(false)
+  const [pruneKeep, setPruneKeep] = useState(10)
+  const [pruning, setPruning] = useState(false)
+
+  const prune = async () => {
+    if (!backendRepo || pruning) return
+    setPruning(true)
+    try {
+      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs?keep=${pruneKeep}`, { method: 'DELETE' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(d?.error ?? '清理失败')
+      toast(`已清理 ${d?.data?.deleted ?? 0} 条历史巡检（保留最近 ${pruneKeep} 次）`)
+      setConfirmPrune(false)
+      load()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '清理失败', 'error')
+    } finally {
+      setPruning(false)
+    }
+  }
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -272,8 +294,45 @@ export function HealthPage({
 
       {/* 巡检记录 */}
       <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-4 py-2.5">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
           <span className="text-[13px] font-bold text-slate-700">巡检记录</span>
+          {/* 重审 P1：历史只增不减——保留最近 N 次的显式清理（running 永不删，后端保证） */}
+          {hasAnyRun && (
+            <span className="ml-auto flex items-center gap-1">
+              {confirmPrune ? (
+                <>
+                  <span className="text-[10px] text-slate-400">保留最近</span>
+                  <select
+                    value={pruneKeep}
+                    onChange={(e) => setPruneKeep(Number(e.target.value))}
+                    className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-600 outline-none"
+                  >
+                    {[5, 10, 20, 50].map((n) => (
+                      <option key={n} value={n}>{n} 次</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => void prune()}
+                    disabled={pruning}
+                    className="rounded-md bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-red-600 disabled:opacity-40"
+                  >
+                    {pruning ? '清理中…' : '确认清理'}
+                  </button>
+                  <button onClick={() => setConfirmPrune(false)} className="rounded p-0.5 text-slate-400 hover:text-slate-600" title="取消">
+                    <X size={11} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setConfirmPrune(true)}
+                  className="flex items-center gap-0.5 rounded-md border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400 hover:border-red-300 hover:text-red-500"
+                  title="清理历史巡检记录（只保留最近 N 次，进行中的巡检不受影响）"
+                >
+                  <Trash2 size={10} /> 清理历史
+                </button>
+              )}
+            </span>
+          )}
         </div>
         <table className="w-full text-left">
           <thead>

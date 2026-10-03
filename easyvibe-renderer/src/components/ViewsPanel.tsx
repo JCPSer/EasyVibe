@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/lib/toast'
-import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download } from 'lucide-react'
+import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download, Pencil } from 'lucide-react'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 
 interface ViewItem {
@@ -29,6 +29,9 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  // 重审 P1：视图改名（此前只能删了重建——保存冲突还会静默另存新文件造成列表膨胀）
+  const [renamingSlug, setRenamingSlug] = useState<string | null>(null)
+  const [renameVal, setRenameVal] = useState('')
   const [openedSlug, setOpenedSlug] = useState<string | null>(null)
   const [zoomed, setZoomed] = useState<{ name: string; content: string } | null>(null)
 
@@ -73,6 +76,25 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
       })
       .catch(() => toast('删除视图失败', 'error'))
       .finally(() => setDeleting(null))
+  }
+
+  const rename = (slug: string) => {
+    if (!backendRepo || !renameVal.trim()) return
+    fetch(`/api/repos/${backendRepo}/views/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: renameVal.trim() }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const d = await r.json().catch(() => null)
+          throw new Error(d?.error ?? String(r.status))
+        }
+        setRenamingSlug(null)
+        toast('已改名')
+        load()
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : '改名失败', 'error'))
   }
 
   const open = (v: ViewItem) => {
@@ -142,7 +164,28 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
           <div key={v.slug} className="rounded-lg border border-slate-200 p-3">
             <div className="flex items-center gap-1.5">
               <Bookmark size={11} className="shrink-0 text-emerald-500" />
-              <span className="truncate text-[12px] font-semibold text-slate-800">{v.name}</span>
+              {renamingSlug === v.slug ? (
+                <span className="flex min-w-0 flex-1 items-center gap-1">
+                  <input
+                    autoFocus
+                    value={renameVal}
+                    onChange={(e) => setRenameVal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') rename(v.slug)
+                      if (e.key === 'Escape') setRenamingSlug(null)
+                    }}
+                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white px-1.5 py-px text-[12px] outline-none focus:border-blue-400"
+                  />
+                  <button onClick={() => rename(v.slug)} className="shrink-0 rounded bg-blue-600 p-0.5 text-white" title="保存新名称">
+                    <Check size={10} />
+                  </button>
+                  <button onClick={() => setRenamingSlug(null)} className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600" title="取消">
+                    <span className="text-[10px]">✕</span>
+                  </button>
+                </span>
+              ) : (
+                <span className="truncate text-[12px] font-semibold text-slate-800">{v.name}</span>
+              )}
               <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-micro text-slate-400">
                 {v.nodes === 0 && v.view.annotations?.some((a) => a.type === 'mermaid') ? '纯图视图' : `${v.nodes} 个模块`}
               </span>
@@ -194,6 +237,16 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                 title="下载视图文件（含流程图，资产可外带）"
               >
                 <Download size={10} />
+              </button>
+              <button
+                onClick={() => {
+                  setRenamingSlug(renamingSlug === v.slug ? null : v.slug)
+                  setRenameVal(v.name)
+                }}
+                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+                title="重命名视图"
+              >
+                <Pencil size={10} />
               </button>
               {confirming === v.slug ? (
                 <>
