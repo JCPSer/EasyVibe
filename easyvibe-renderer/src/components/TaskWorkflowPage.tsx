@@ -6,6 +6,7 @@ import { absTime, toMs } from '@/lib/diffStat'
 import { terminalLines } from '@/lib/terminalBuffer'
 import { stageOf, gateLabel } from '@/lib/taskStage'
 import { StagePipeline } from '@/components/StagePipeline'
+import { TaskAdminButtons } from '@/components/TaskAdminButtons'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -423,6 +424,17 @@ export function TaskWorkflowPage({
                   {STATUS_LABEL[sel.status] ?? sel.status}
                 </span>
                 <span className="tnum shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-micro font-semibold text-slate-500">{duration(sel)}</span>
+                {/* 管理三操作（重审 P0）：终止（活动）/ 重试（失败·中断）/ 删除（非运行） */}
+                <TaskAdminButtons
+                  repo={backendRepo}
+                  taskId={sel.id}
+                  status={sel.status}
+                  onDone={load}
+                  onDeleted={() => {
+                    setSelected(null)
+                    load()
+                  }}
+                />
               </div>
               {/* 五阶段管道：公共 StagePipeline（detail 档）——判定收敛到 taskStage 一处 */}
               <div className="mt-3">
@@ -760,28 +772,38 @@ export function TaskWorkflowPage({
                   </div>
                 )}
 
-                {/* 未启动/终态灰态：error + 复制入口 */}
+                {/* 未启动/终态灰态：error + 重试/复制入口 + 删除 */}
                 {stage === 'error' && (
                   <div className="m-4 rounded-xl border border-slate-200 bg-white p-4">
                     <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
                       <XCircle size={10} /> {STATUS_LABEL[sel.status] ?? sel.status}
                     </p>
                     {sel.error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-600">{sel.error}</p>}
-                    <button
-                      onClick={() =>
-                        onCreateTask({
-                          title: `${sel.title}（重提）`,
-                          description: sel.description,
-                          modules: sel.modules ?? [],
-                          acceptance: sel.acceptance ?? '',
-                          source: 'manual',
-                          context: { origin_task_id: sel.id },
-                        })
-                      }
-                      className="mt-3 flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
-                    >
-                      <Copy size={9} /> 复制为新任务
-                    </button>
+                    {/* 重审 P0：无 error 详情的终态卡不再是死胡同——把可走的路明说 */}
+                    {!sel.error && (
+                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-500">
+                        该任务没有产出错误详情（常见于后端重启或进程被终止）。可就地重试从头再跑，或复制为新任务。
+                      </p>
+                    )}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {/* 管理三操作（重审 P0）：失败/中断就地重试 + 删除——重试也可点上方标题栏的循环箭头 */}
+                      <TaskAdminButtons repo={backendRepo} taskId={sel.id} status={sel.status} onDone={load} onDeleted={() => { setSelected(null); load() }} />
+                      <button
+                        onClick={() =>
+                          onCreateTask({
+                            title: `${sel.title}（重提）`,
+                            description: sel.description,
+                            modules: sel.modules ?? [],
+                            acceptance: sel.acceptance ?? '',
+                            source: 'manual',
+                            context: { origin_task_id: sel.id },
+                          })
+                        }
+                        className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                      >
+                        <Copy size={9} /> 复制为新任务
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

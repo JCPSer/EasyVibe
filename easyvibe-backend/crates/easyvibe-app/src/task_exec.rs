@@ -179,6 +179,31 @@ impl TaskExecutor {
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
 
+    /// 就地重试（2026-10-03 现状重审 P0）：failed/interrupted → 清残留 → 重新入队。
+    /// 不走 decide（decide 白名单只认 awaiting_approval，那是审批状态机，不是重试通道）。
+    /// rejected 被刻意排除：驳回=用户已裁决返工，正确路径是"复制为新任务"（理由注入+反链）。
+    pub async fn retry(self: &Arc<Self>, task_id: &str) -> Result<TaskRow, ApiError> {
+        let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if !matches!(task.status.as_str(), "failed" | "interrupted") {
+            return Err(ApiError::Conflict(format!(
+                "任务当前状态 {} 不可重试（仅 failed/interrupted 可就地重试；驳回返工请复制为新任务）",
+                task.status
+            )));
+        }
+        let n = self.task_repo.reset_for_retry(task_id).await?;
+        if n == 0 {
+            return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
+        }
+        // 清内存基线残留（重启后 baselines 本已作废；此处防同进程内重复 retry 的脏基线）
+        if let Ok(mut m) = self.baselines.lock() {
+            m.remove(task_id);
+        }
+        self.publish_status(&task.repo, task_id, "pending", None).await;
+        info!("[task-exec] 任务 {} 就地重试（{} → pending），重新入队", task_id, task.status);
+        self.clone().enqueue_pending(Some(&task.repo)).await;
+        self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
     /// 任务状态广播统一出口（执行引擎侧）——前端列表/徽标/注意力条的事件源。
     /// P0 教训（ui-test-2026-10-03）：只写库不广播 = 任务在前端"凭空消失"。
     async fn publish_status(&self, repo: &str, task_id: &str, status: &str, gate: Option<&str>) {

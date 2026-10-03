@@ -4,6 +4,7 @@ import { toast } from '@/lib/toast'
 import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { stageOf } from '@/lib/taskStage'
+import { TaskAdminButtons } from '@/components/TaskAdminButtons'
 import type { TaskDraft } from '@/lib/taskContext'
 
 // 任务编排看板（方案 v3 §4.3 施工，取代旧「我的待办」列表）：
@@ -281,6 +282,8 @@ export function TaskBoardPage({
       <div className="mt-2 flex items-center gap-2">
         <Dots t={t} />
         <span className="tnum ml-auto text-[9px] text-slate-400">{duration(t)}</span>
+        {/* 管理三操作（重审 P0）：终止/重试/删除——按状态自动出现，两步确认 */}
+        <TaskAdminButtons repo={backendRepo!} taskId={t.id} status={t.status} onDone={load} />
       </div>
       {/* 待你评审卡：内联通过/打回（拖拽之外的等价入口） */}
       {colOf(t).col === 'review' && (
@@ -329,7 +332,23 @@ export function TaskBoardPage({
       )}
       {failed && (
         <div className="mt-2 flex items-center gap-1 border-t border-red-100 pt-2 text-[10px] text-red-400">
-          <Copy size={9} /> 拖到本列下方（待启动区）= 复制重提
+          {/* 重审 P0：复制重提从"隐藏拖拽语义"升级为显式按钮（拖拽仍保留为等价路径） */}
+          <button
+            onClick={() =>
+              onCreateTask({
+                title: `${t.title}（重提）`,
+                description: t.description ?? t.title,
+                modules: t.modules ?? [],
+                acceptance: '',
+                source: 'manual',
+                context: { origin_task_id: t.id },
+              })
+            }
+            className="flex items-center gap-0.5 rounded-md border border-red-200 px-1.5 py-0.5 font-bold text-red-500 hover:bg-red-50"
+          >
+            <Copy size={9} /> 复制重提
+          </button>
+          <span className="ml-auto">或拖到待启动区</span>
         </div>
       )}
     </div>

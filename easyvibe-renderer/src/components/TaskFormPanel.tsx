@@ -17,6 +17,8 @@ interface Props {
 
 // 任务表单（任务表单原型.png 的实现）：三字段极简 + 上下文注入预览 + 审批两档
 export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onLocateModule }: Props) {
+  // 重审 P0：标题曾是隐藏兜底（全部任务都叫"修复任务"）——显式输入，draft 预填可改
+  const [title, setTitle] = useState(draft.title || '')
   const [description, setDescription] = useState(draft.description)
   const [acceptance, setAcceptance] = useState(draft.acceptance)
   const [selected, setSelected] = useState<string[]>(draft.modules)
@@ -38,7 +40,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title: draft.title || '修复任务',
+        title: title.trim() || draft.title || '修复任务',
         description,
         modules: selected,
         acceptance,
@@ -89,6 +91,16 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
               <p className="text-slate-400">执行前 agent 会就模糊点向你提问澄清，请留意任务页的通知</p>
             </div>
           )}
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500">任务标题</label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="修复任务"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 outline-none focus:border-blue-300"
+          />
         </div>
 
         <div>

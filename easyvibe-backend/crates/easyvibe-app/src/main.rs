@@ -131,7 +131,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/views", get(list_views).post(save_view))
         .route("/repos/{id}/views/{slug}", axum::routing::delete(delete_view))
         .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
+        .route("/repos/{id}/tasks/{tid}", axum::routing::delete(delete_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
+        .route("/repos/{id}/tasks/{tid}/retry", axum::routing::post(post_task_retry))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/dev-docs", get(get_dev_docs))
@@ -156,7 +158,7 @@ pub fn build_router(state: AppState) -> Router {
                 .allow_origin(tower_http::cors::AllowOrigin::exact(
                     TAURI_ORIGIN.parse().expect("合法 origin"),
                 ))
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::DELETE])
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
                 .allow_headers(tower_http::cors::Any),
         )
         // Y6 清债：跨站请求防护—— evil 页面可对 127.0.0.1 发 simple POST（无 CORS 拦截）。
@@ -699,6 +701,43 @@ async fn post_task_kill(State(st): State<AppState>, Path((id, tid)): Path<(Strin
     let sid = task.session_id.ok_or_else(|| ApiError::BadRequest(format!("任务 {tid} 无关联会话（未开始执行）")))?;
     st.session_manager.kill(&sid).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+/// 管理闭环（2026-10-03 现状重审 P0）：删除任务。
+/// 有活动会话（running/awaiting_approval 挂起的 spawn）先 best-effort 终止，防孤儿 agent；
+/// 级联清 approvals（repo 内）；任务自有归档 development_docs/{tid}.json 一并删除
+/// （共享的 MEMORY/INDEX 文档不动）；返工链反链（origin/successor）指到已删任务的行
+/// 保留不动——链上其余任务的血缘可读性优先于悬空指针的洁癖。
+async fn delete_task(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    use easyvibe_db::TaskRepository as _;
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.task_repo.get(&tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
+    if matches!(task.status.as_str(), "running" | "awaiting_approval") {
+        if let Some(sid) = &task.session_id {
+            // best-effort：会话可能已自然终态（kill 返回 409/404），删除不该被拦
+            let _ = st.session_manager.kill(sid).await;
+        }
+    }
+    st.task_repo.delete(&tid).await?;
+    // 任务自有归档（diff 全文）随任务删除；读端对缺文件本就返回 diff=null
+    let archive = repo.root.join(".easyvibe/development_docs").join(format!("{tid}.json"));
+    if archive.is_file() {
+        let _ = std::fs::remove_file(&archive);
+    }
+    // 内存基线清残留（删除后采集永远不会来，留着只是泄漏）
+    if let Ok(mut m) = st.executor.baselines.lock() {
+        m.remove(&tid);
+    }
+    publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: "deleted".into(), gate: None });
+    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+}
+
+/// 就地重试：failed/interrupted → pending 重新入队（见 TaskExecutor::retry 的语义注释）
+async fn post_task_retry(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.executor.retry(&tid).await?;
+    publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: task.status.clone(), gate: task.gate.clone() });
+    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
 }
 
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
@@ -2807,6 +2846,75 @@ mod tests {
         let summary = state.event_repo.summary(&repo).await.unwrap();
         assert_eq!(summary.iter().find(|r| r.name == "ui.contractAlert.click").unwrap().count, 1);
     }
+    #[tokio::test]
+    async fn task_delete_cascades_and_retry_requeues() {
+        // 管理闭环（2026-10-03 现状重审 P0）：删除（级联 approvals）+ 就地重试（failed → 重新入队）
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("task-admin").await;
+        let app = build_router(state.clone());
+        let post = |body: serde_json::Value| {
+            let app = app.clone();
+            let repo = repo.clone();
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let create = |title: &str| {
+            let post = post(serde_json::json!({ "title": title, "description": "管理闭环测试", "trust": "manual" }));
+            async move {
+                let resp = post.await;
+                assert_eq!(resp.status(), axum::http::StatusCode::CREATED);
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string()
+            }
+        };
+
+        // ── 删除：造一条带审批留痕的任务，删后行与留痕都不存在 ──
+        let id1 = create("将被删除").await;
+        state.approval_repo.record(&easyvibe_db::ApprovalRow {
+            id: format!("ap-{id1}-plan-x"), task_id: id1.clone(), gate: "plan".into(),
+            decision: "approved".into(), note: Some("测试留痕".into()), decided_at: "0".into(),
+        }).await.unwrap();
+        let resp = app.clone().oneshot(
+            axum::http::Request::delete(format!("/api/repos/{repo}/tasks/{id1}")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "删除已终态任务应成功");
+        assert!(state.task_repo.get(&id1).await.unwrap().is_none(), "任务行必须删除");
+        assert!(state.approval_repo.list_by_task(&id1).await.unwrap().is_empty(), "审批留痕必须级联清空");
+
+        // 删除不存在 → 404
+        let resp = app.clone().oneshot(
+            axum::http::Request::delete(format!("/api/repos/{repo}/tasks/task-nope")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
+
+        // ── 重试：failed → pending →（manual  trust）重新停到 plan 关 ──
+        let id2 = create("将重试").await;
+        state.task_repo.update_status(&id2, "failed", Some("模拟失败")).await.unwrap();
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{id2}/retry")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "failed 任务应可重试");
+        let t = state.task_repo.get(&id2).await.unwrap().unwrap();
+        assert_eq!(t.status, "awaiting_approval", "manual 重试后重新停计划关");
+        assert_eq!(t.gate.as_deref(), Some("plan"));
+        assert!(t.error.is_none(), "重试必须清 error 残留");
+        assert!(t.session_id.is_none(), "重试必须清会话残留");
+
+        // 非 failed/interrupted 重试 → 409
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{id2}/retry")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "awaiting_approval 不可重试");
+    }
+
     #[test]
     fn agent_command_resolves_to_absolute_path() {
         // 桌面壳实弹回归（hover-client 三任务"spawn claude 失败"）：GUI 薄 PATH 下必须解析出绝对路径

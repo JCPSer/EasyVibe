@@ -3,6 +3,7 @@ import { Copy, Loader2 } from 'lucide-react'
 import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { stageOf, gateLabel } from '@/lib/taskStage'
+import { TaskAdminButtons } from '@/components/TaskAdminButtons'
 import type { TaskDraft } from '@/lib/taskContext'
 
 // 治理视图（v4 P2）：历史检索 + 失败治理 + 返工链可见。
@@ -195,6 +196,8 @@ export function TaskGovernancePage({
           <span className={`shrink-0 rounded-full px-2 py-px text-[10px] font-bold ${meta.cls}`}>
             {gateLabel(t.status, t.gate) ?? meta.label}
           </span>
+          {/* 管理三操作（重审 P0）：治理页是"管全部"的地方——终止/重试/删除必须在场 */}
+          <span className="shrink-0"><TaskAdminButtons repo={backendRepo} taskId={t.id} status={t.status} onDone={load} /></span>
         </div>
         {/* 返工子任务沿链缩进 */}
         {(chain.childrenOf.get(t.id) ?? [])

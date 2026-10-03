@@ -483,6 +483,14 @@ pub trait TaskRepository: Send + Sync {
     fn interrupt_running(&self) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
     /// R3 D2：返工链反链回填
     fn set_successor(&self, id: &str, successor: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 管理闭环（2026-10-03 现状重审 P0）：删除任务——级联清 approvals；
+    /// 归档文件由路由层按需清理（development_docs/{id}.json 是任务自有产物）。
+    /// 调用方负责先终止 running 会话。
+    fn delete(&self, id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 就地重试（failed/interrupted → pending 重新入队）：原子条件 UPDATE——
+    /// 状态不在白名单内影响行数 0，调用方返回 409。同时清 error/gate/session 残留，
+    /// 避免重试任务带着旧关卡/旧会话指针启动。
+    fn reset_for_retry(&self, id: &str) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
 }
 
 pub struct SqliteTaskRepository {
@@ -613,6 +621,25 @@ impl TaskRepository for SqliteTaskRepository {
             "UPDATE tasks SET status = 'interrupted', error = '后端重启，agent 会话已终止（kill_on_drop）；请重新发起任务', updated_at = ? WHERE status = 'running'",
         )
         .bind(now_secs())
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(res.rows_affected())
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), ApiError> {
+        // 级联先清审批留痕（外键无约束，手动级联）
+        sqlx::query("DELETE FROM approvals WHERE task_id = ?").bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        sqlx::query("DELETE FROM tasks WHERE id = ?").bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn reset_for_retry(&self, id: &str) -> Result<u64, ApiError> {
+        let res = sqlx::query(
+            "UPDATE tasks SET status = 'pending', error = NULL, gate = NULL, session_id = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'interrupted')",
+        )
+        .bind(now_secs())
+        .bind(id)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(res.rows_affected())
     }
