@@ -76,10 +76,13 @@ function Dots({ t }: { t: BoardTask }) {
 export function TaskBoardPage({
   backendRepo,
   onOpenWorkflow,
+  onSelectTask,
   onCreateTask,
 }: {
   backendRepo: string | null
   onOpenWorkflow: () => void
+  /** v4 修订：点卡跳流水线并选中该任务（看板→单任务全程的导航） */
+  onSelectTask: (taskId: string) => void
   onCreateTask: (d: TaskDraft) => void
 }) {
   const [tasks, setTasks] = useState<BoardTask[] | null>(null)
@@ -238,9 +241,15 @@ export function TaskBoardPage({
         setDragId(null)
         setOverCol(null)
       }}
+      onClick={(e) => {
+        // 点卡跳流水线选中该任务；卡内按钮（通过/打回/输入框）不触发跳转
+        if ((e.target as HTMLElement).closest('button, input, textarea, a')) return
+        onSelectTask(t.id)
+      }}
+      title="点击查看该任务的流水线全程"
       className={`rounded-xl border bg-white p-3 transition-shadow ${
         dragId === t.id ? 'opacity-40' : ''
-      } ${failed ? 'border-red-200 bg-red-50/40' : 'border-slate-200'} cursor-grab shadow-sm hover:shadow`}
+      } ${failed ? 'border-red-200 bg-red-50/40' : 'border-slate-200'} cursor-pointer shadow-sm hover:shadow-md`}
     >
       <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 text-[12px] font-bold leading-4 text-slate-700">{t.title}</span>

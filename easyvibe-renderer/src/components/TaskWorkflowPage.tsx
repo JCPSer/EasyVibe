@@ -177,14 +177,21 @@ export function TaskWorkflowPage({
   backendRepo,
   map,
   onCreateTask,
+  focusTask,
 }: {
   backendRepo: string | null
   map: CodeMap
   /** 打回/失败 → 复制为新任务（origin_task_id 血缘，D3 拍板语义） */
   onCreateTask: (d: TaskDraft) => void
+  /** v4 修订：看板点卡跳入——按 nonce 选中对应任务（首次挂载也生效） */
+  focusTask?: { id: string; nonce: number } | null
 }) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  // 看板点卡跳入：nonce 变化即选中（含组件常驻后的每次跳入）
+  useEffect(() => {
+    if (focusTask?.id) setSelected(focusTask.id)
+  }, [focusTask])
   // 详情快照（taskId 归属防过期响应，ChangesPage 同模式）
   const [detailFor, setDetailFor] = useState<{ taskId: string; approvals: Approval[]; diffFull: string | null; diffStat: string | null; docs: DevDoc[]; docsAt: number } | null>(null)
   const [fileSel, setFileSel] = useState<{ taskId: string | null; file: string | null }>({ taskId: null, file: null })

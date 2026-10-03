@@ -20,24 +20,23 @@ export function TaskPage({
   map: CodeMap
   onCreateTask: (d: TaskDraft) => void
 }) {
-  const [view, setView] = useState<View>('pipeline')
+  // v4 修订（用户裁定）：默认看板（多任务全景是首页心智），点卡跳流水线看单任务全程
+  const [view, setView] = useState<View>('board')
+  const [focusTask, setFocusTask] = useState<{ id: string; nonce: number } | null>(null)
+
+  const openPipeline = (taskId: string) => {
+    setFocusTask({ id: taskId, nonce: Date.now() })
+    setView('pipeline')
+  }
 
   return (
     <div className="flex h-full flex-col">
-      {/* 页头：标题 + 视图切换 + 新建 */}
+      {/* 页头：标题 + 视图切换 + 新建（看板第一顺位） */}
       <div className="flex items-center gap-3 border-b border-slate-100 bg-white px-4 py-2.5">
         <h2 className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800">
           <ClipboardList size={15} className="text-slate-500" /> 任务
         </h2>
         <div className="flex rounded-lg bg-slate-100 p-0.5">
-          <button
-            onClick={() => setView('pipeline')}
-            className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
-              view === 'pipeline' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Rows3 size={11} /> 流水线
-          </button>
           <button
             onClick={() => setView('board')}
             className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
@@ -46,9 +45,17 @@ export function TaskPage({
           >
             <LayoutGrid size={11} /> 看板
           </button>
+          <button
+            onClick={() => setView('pipeline')}
+            className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
+              view === 'pipeline' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Rows3 size={11} /> 流水线
+          </button>
         </div>
         <p className="hidden text-[10px] text-slate-400 lg:block">
-          {view === 'pipeline' ? '一个任务走 harness 五阶段的全程' : '全部任务的并行全景，拖拽即处分'}
+          {view === 'board' ? '全部任务的并行全景，拖拽即处分，点卡看单个任务全程' : '一个任务走 harness 五阶段的全程'}
         </p>
         <button
           onClick={() => onCreateTask({ title: '', description: '', modules: [], acceptance: '', source: 'manual', context: {} })}
@@ -59,10 +66,10 @@ export function TaskPage({
       </div>
       {/* 视图区（组件常驻，display 切换保状态——终端缓冲/选中不丢） */}
       <div className="min-h-0 flex-1" style={view === 'pipeline' ? undefined : { display: 'none' }}>
-        <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} />
+        <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} focusTask={focusTask} />
       </div>
       <div className="min-h-0 flex-1" style={view === 'board' ? undefined : { display: 'none' }}>
-        <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => setView('pipeline')} onCreateTask={onCreateTask} />
+        <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => setView('pipeline')} onSelectTask={openPipeline} onCreateTask={onCreateTask} />
       </div>
     </div>
   )
