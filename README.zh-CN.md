@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6C757D?style=flat-square&logo=apple&logoColor=white" alt="Platform">
   &nbsp;
-  <img src="https://img.shields.io/badge/license-TBD-orange?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-32CD32?style=flat-square&logo=apache&logoColor=white" alt="License">
   &nbsp;
   <img src="https://img.shields.io/badge/status-pre--alpha-blueviolet?style=flat-square" alt="Status">
 </p>
@@ -186,4 +186,4 @@ easyvibe-desktop   Tauri v2 桌面壳——macOS 与 Windows（Windows 安装包
 
 ## 📄 许可证
 
-许可证待定——首个公开发布前确定并补充。
+[Apache-2.0](./LICENSE)

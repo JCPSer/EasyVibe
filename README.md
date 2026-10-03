@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-6C757D?style=flat-square&logo=apple&logoColor=white" alt="Platform">
   &nbsp;
-  <img src="https://img.shields.io/badge/license-TBD-orange?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-32CD32?style=flat-square&logo=apache&logoColor=white" alt="License">
   &nbsp;
   <img src="https://img.shields.io/badge/status-pre--alpha-blueviolet?style=flat-square" alt="Status">
 </p>
@@ -186,4 +186,4 @@ Planned: self-hosted agent engine, team mode, plugin-extensible harness, exports
 
 ## 📄 License
 
-License pending — to be announced before the first public release.
+[Apache-2.0](./LICENSE)
