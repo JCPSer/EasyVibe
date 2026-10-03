@@ -4,7 +4,8 @@ import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { terminalLines } from '@/lib/terminalBuffer'
-import { stageOf, gateLabel, STAGES } from '@/lib/taskStage'
+import { stageOf, gateLabel } from '@/lib/taskStage'
+import { StagePipeline } from '@/components/StagePipeline'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -363,19 +364,6 @@ export function TaskWorkflowPage({
   const stage = sel ? stageOf(sel.status, sel.gate) : null
   const pendingCount = tasks.filter((t) => t.status === 'awaiting_approval').length
 
-  // 五阶段圆点态（①②同体：plan 关两格同亮；running 时①②直通 done 只亮③）
-  // status 优先映射在 stageOf——failed 残留 gate 不进入这里
-  const dotState = (i: number): 'done' | 'now' | 'todo' => {
-    if (stage === 'error' || stage === null) return 'todo'
-    if (stage === 'done') return 'done'
-    if (stage === 0) return i <= 1 ? 'now' : 'todo' // ①②同格点亮
-    if (i < stage) return 'done'
-    if (i === stage) return 'now'
-    return 'todo'
-  }
-  const dotCls = (s: 'done' | 'now' | 'todo') =>
-    s === 'done' ? 'bg-emerald-500 text-white' : s === 'now' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
-
   return (
     <div className="flex h-full">
       {/* 左列：任务列表 */}
@@ -436,22 +424,9 @@ export function TaskWorkflowPage({
                 </span>
                 <span className="tnum shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-micro font-semibold text-slate-500">{duration(sel)}</span>
               </div>
-              {/* 五阶段管道：status 优先映射（taskStage），①②同体 */}
-              <div className="mt-3 flex items-center gap-1">
-                {STAGES.map((s, i) => (
-                  <div key={s.key} className="flex flex-1 items-center gap-1">
-                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-micro font-bold ${dotCls(dotState(i))}`}>
-                      {dotState(i) === 'done' ? <CheckCircle2 size={11} /> : i + 1}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-micro font-semibold text-slate-600">{s.label}</span>
-                      <span className="block truncate text-[9px] text-slate-400">{stage === 'error' ? '—' : s.hint}</span>
-                    </span>
-                    {i < STAGES.length - 1 && (
-                      <span className={`h-px flex-1 ${dotState(i) === 'done' ? 'bg-emerald-400' : 'bg-slate-200'}`} />
-                    )}
-                  </div>
-                ))}
+              {/* 五阶段管道：公共 StagePipeline（detail 档）——判定收敛到 taskStage 一处 */}
+              <div className="mt-3">
+                <StagePipeline status={sel.status} gate={sel.gate} variant="detail" />
               </div>
               {/* 合约红线：审批必见 */}
               {(sel.result?.contractViolations?.length ?? 0) > 0 && (

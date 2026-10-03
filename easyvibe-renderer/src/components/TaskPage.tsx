@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
-import { ClipboardList, LayoutGrid, Rows3, Plus } from 'lucide-react'
+import { ClipboardList, LayoutGrid, Rows3, Plus, Table2 } from 'lucide-react'
 import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
 import { TaskBoardPage } from '@/components/TaskBoardPage'
+import { TaskGovernancePage } from '@/components/TaskGovernancePage'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
-// 任务页（v4 P1 施工）：「任务」唯一入口，页内视图切换——
-// 流水线（默认，单任务全生命周期）/ 看板（多任务并行全景）。治理视图 P2。
-// 旧「任务编排」「任务工作流」两个页签删除，组件整体迁入本页。
+// 任务页（v4 P1 施工 + P2 治理视图）：「任务」唯一入口，页内视图切换——
+// 看板（默认，并行全景）/ 流水线（单任务全程）/ 治理（历史/失败/返工链）。
+// 旧「任务编排」「任务工作流」两个页签删除，组件迁入本页。
 
-type View = 'pipeline' | 'board'
+type View = 'board' | 'pipeline' | 'governance'
 
 export function TaskPage({
   backendRepo,
@@ -62,9 +63,17 @@ export function TaskPage({
           >
             <Rows3 size={11} /> 流水线
           </button>
+          <button
+            onClick={() => setView('governance')}
+            className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
+              view === 'governance' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Table2 size={11} /> 治理
+          </button>
         </div>
         <p className="hidden text-[10px] text-slate-400 lg:block">
-          {view === 'board' ? '全部任务的并行全景，拖拽即处分，点卡看单个任务全程' : '一个任务走 harness 五阶段的全程'}
+          {view === 'board' ? '全部任务的并行全景，拖拽即处分，点卡看单个任务全程' : view === 'pipeline' ? '一个任务走 harness 五阶段的全程' : '全部任务的历史、失败与返工链'}
         </p>
         <button
           onClick={() => onCreateTask({ title: '', description: '', modules: [], acceptance: '', source: 'manual', context: {} })}
@@ -79,6 +88,9 @@ export function TaskPage({
       </div>
       <div className="min-h-0 flex-1" style={view === 'board' ? undefined : { display: 'none' }}>
         <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => setView('pipeline')} onSelectTask={openPipeline} onCreateTask={onCreateTask} />
+      </div>
+      <div className="min-h-0 flex-1" style={view === 'governance' ? undefined : { display: 'none' }}>
+        <TaskGovernancePage backendRepo={backendRepo} onOpenTask={openPipeline} onCreateTask={onCreateTask} />
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, AlertTriangle, Plus, CheckCircle2, GitBranch } from 'lucide-react'
+import { Loader2, AlertTriangle, Plus, GitBranch } from 'lucide-react'
 import { ChatPanel, type ConversationSummary } from '@/components/ChatPanel'
+import { StagePipeline } from '@/components/StagePipeline'
 import { onTaskEvent } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -20,12 +21,6 @@ interface TaskItem {
   modules: string[]
   updatedAt?: string
 }
-
-const GATE_STEPS = [
-  { key: 'plan', label: '计划审批' },
-  { key: 'diff', label: 'Diff 审批' },
-  { key: 'report', label: '审查报告' },
-]
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '排队中',
@@ -116,7 +111,7 @@ export function WorkbenchPage({
       .catch(() => toast('新建会话失败', 'error'))
   }
 
-  // 计划进度条：活跃任务（运行中/等待审批优先，否则最近一个）的三道关进度
+  // 活跃任务（运行中/等待审批优先，否则最近一个）——五阶段进度由 StagePipeline 自判定
   const activeTask = useMemo(
     () =>
       tasks.find((t) => t.status === 'awaiting_approval') ??
@@ -124,12 +119,6 @@ export function WorkbenchPage({
       tasks[0],
     [tasks],
   )
-  const gateIndex = useMemo(() => {
-    if (!activeTask) return -1
-    const i = GATE_STEPS.findIndex((g) => g.key === activeTask.gate)
-    if (activeTask.status === 'done') return GATE_STEPS.length
-    return i
-  }, [activeTask])
 
   // 影响面：解析 git diff --stat 文本，按模块 files glob 聚合
   const impact = useMemo(() => {
@@ -215,21 +204,9 @@ export function WorkbenchPage({
               <p className="truncate text-[12px] font-semibold text-slate-600">{activeTask.title}</p>
               <span className="shrink-0 text-micro text-slate-400">{STATUS_LABEL[activeTask.status] ?? activeTask.status}</span>
             </div>
-            {/* 计划进度条：三道关（gate 状态由任务系统真实驱动） */}
-            <div className="mt-1.5 flex items-center gap-1">
-              {GATE_STEPS.map((g, i) => (
-                <div key={g.key} className="flex flex-1 items-center gap-1">
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro font-bold ${
-                      i < gateIndex ? 'bg-emerald-500 text-white' : i === gateIndex ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'
-                    }`}
-                  >
-                    {i < gateIndex ? <CheckCircle2 size={10} /> : i + 1}
-                  </span>
-                  <span className={`text-micro ${i <= gateIndex ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>{g.label}</span>
-                  {i < GATE_STEPS.length - 1 && <span className={`h-px flex-1 ${i < gateIndex ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
-                </div>
-              ))}
+            {/* 计划进度条：harness 五阶段迷你管道（v4 P2 对齐——与任务页同构同判定，消除语言分裂） */}
+            <div className="mt-1.5">
+              <StagePipeline status={activeTask.status} gate={activeTask.gate} variant="compact" />
             </div>
           </div>
         )}
