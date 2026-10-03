@@ -13,7 +13,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -2075,7 +2075,21 @@ export default function App() {
           topBar={topBar}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
-            attention && page !== 'tasks' ? (
+            /* 重审 P2 首跑引导：在线但零仓库时，演示数据画布必须主动说明自己——
+               否则"地图能看但什么都不能做"会被读成"后端没启动"（用户实报困惑） */
+            backendOnline === true && repos.length === 0 ? (
+              <button
+                onClick={() => addRepo()}
+                className="flex shrink-0 items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
+              >
+                <FolderOpen size={12} className="shrink-0 text-blue-500" />
+                <span className="text-[11px] font-bold text-blue-800">尚未打开任何仓库——当前画布是演示数据</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-blue-600">
+                  归纳 / 巡检 / 任务 / 对话都需要一个本地代码仓库
+                </span>
+                <span className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 text-micro font-bold text-white">选择仓库 →</span>
+              </button>
+            ) : attention && page !== 'tasks' ? (
               <button
                 onClick={() => handlePageChange('tasks')}
                 className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-left transition-colors hover:bg-amber-100"
