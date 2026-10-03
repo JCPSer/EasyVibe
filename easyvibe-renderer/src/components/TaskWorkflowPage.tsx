@@ -814,6 +814,57 @@ export function TaskWorkflowPage({
                       )}
                     </div>
                     </div>
+                    {/* 2026-10-03 实弹 bug：Diff 关此前没有裁决按钮——任务卡死在代码审查关无法推进。
+                        通过 = 进审查报告关（终审），打回 = 终止返工（复制为新任务或修改复审） */}
+                    <div className="border-t border-slate-100 px-4 py-2.5">
+                      {rejecting ? (
+                        <div className="space-y-1.5">
+                          <textarea
+                            autoFocus
+                            value={rejectNote}
+                            onChange={(e) => setRejectNote(e.target.value)}
+                            rows={2}
+                            placeholder="打回意见（必填）——将作为新任务的上下文"
+                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => decide('rejected')}
+                              disabled={!!deciding || !rejectNote.trim()}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                            >
+                              确认打回
+                            </button>
+                            <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => decide('approved')}
+                            disabled={!!deciding}
+                            className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+                          >
+                            {deciding === 'approved' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} 通过 Diff 审批，进入审查报告
+                          </button>
+                          <button
+                            onClick={() => {
+                              setRejecting(true)
+                              setRejectNote('')
+                            }}
+                            disabled={!!deciding}
+                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                          >
+                            打回…
+                          </button>
+                          <span className="ml-auto text-[10px] text-slate-300">
+                            通过 Diff 后还需在审查报告关终审归档
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
