@@ -136,6 +136,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks/{tid}", axum::routing::delete(delete_task))
         .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
         .route("/repos/{id}/tasks/{tid}/retry", axum::routing::post(post_task_retry))
+        .route("/repos/{id}/tasks/{tid}/remediate", axum::routing::post(post_task_remediate))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/dev-docs", get(get_dev_docs))
@@ -787,6 +788,15 @@ async fn delete_task(State(st): State<AppState>, Path((id, tid)): Path<(String, 
 async fn post_task_retry(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.executor.retry(&tid).await?;
+    publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: task.status.clone(), gate: task.gate.clone() });
+    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+}
+
+/// 修改并复审：子 agent 审查打回（rejected）→ 注入审查意见 → 直达实施阶段重跑 →
+/// 完成后子 agent 自动复审（见 TaskExecutor::remediate 的语义注释）
+async fn post_task_remediate(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.executor.remediate(&tid).await?;
     publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: task.status.clone(), gate: task.gate.clone() });
     Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
 }
@@ -3165,6 +3175,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND, "穿越必须 404");
+    }
+
+    #[tokio::test]
+    async fn task_remediate_injects_feedback_and_respawns() {
+        // 修改并复审闭环：rejected（子 agent 审查打回）→ 注入审查意见 → 直达实施阶段重跑
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("task-remediate").await;
+        let app = build_router(state.clone());
+        let create = async {
+            let resp = app.clone().oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::json!({ "title": "被审查打回", "description": "实施后有越界", "trust": "manual" }).to_string()))
+                    .unwrap(),
+            ).await.unwrap();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string()
+        };
+        let tid = create.await;
+        // 计划关打回（留驳回意见——复审反馈的来源）
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/decide"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "decision": "rejected", "note": "根 .gitignore 越界改动须剥离", "gate": "plan" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        // 修改并复审
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/remediate")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "rejected 任务应可修改复审");
+        let t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        assert_eq!(t.status, "running", "复审直达实施阶段");
+        assert_eq!(t.gate.as_deref(), Some("p:implement"));
+        let ctx: serde_json::Value = serde_json::from_str(&t.context).unwrap();
+        assert_eq!(ctx["remediation"]["round"], 1, "复审轮次记录");
+        assert!(ctx["remediation"]["review_feedback"].as_str().unwrap().contains("越界"), "审查意见必须注入 context");
+        // 非 rejected 状态再审 → 409
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/remediate")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "running 任务不可再审");
+        // 复审执行（agent "true" 秒退）→ 走完实施链回到审批流
+        let mut t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        for _ in 0..40 {
+            if matches!(t.status.as_str(), "awaiting_approval" | "rejected" | "done" | "failed") && t.gate.as_deref() != Some("p:implement") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        }
+        assert_ne!(t.gate.as_deref(), Some("p:implement"), "复审应跑完实施阶段");
     }
 
     #[test]

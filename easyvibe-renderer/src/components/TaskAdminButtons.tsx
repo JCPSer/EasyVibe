@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Ban, RotateCcw, Trash2, X } from 'lucide-react'
+import { Ban, Hammer, RotateCcw, Trash2, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
-import { deleteTask, killTask, retryTask } from '@/lib/taskAdmin'
+import { deleteTask, killTask, remediateTask, retryTask } from '@/lib/taskAdmin'
 
-// 任务管理三按钮（2026-10-03 现状重审 P0）：按任务状态自动出现——
+// 任务管理按钮组（2026-10-03 现状重审 P0 + 复审闭环）：按任务状态自动出现——
 //   running              → 终止（两步确认；awaiting_approval 不在此列——它没在执行，
 //                          正确出路是审批/打回/删除，kill 对无会话或已终态会话只会报错）
+//   rejected             → 修改并复审（注入子 agent 审查意见直达实施重跑，完成自动复审）
 //   failed / interrupted → 重试（服务端状态机白名单兜底，无需确认）
 //   非 running            → 删除（两步确认；若真有活动会话后端会先杀后删）
 // 两步确认走行内态（与 ViewsPanel 删除同风格），不用 window.confirm。
@@ -30,14 +31,20 @@ export function TaskAdminButtons({
   const [confirming, setConfirming] = useState<ConfirmKind | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const run = async (kind: ConfirmKind | 'retry') => {
+  const run = async (kind: ConfirmKind | 'retry' | 'remediate') => {
     if (busy) return
     setBusy(true)
     try {
       if (kind === 'kill') await killTask(repo, taskId)
       else if (kind === 'retry') await retryTask(repo, taskId)
+      else if (kind === 'remediate') await remediateTask(repo, taskId)
       else await deleteTask(repo, taskId)
-      toast(kind === 'kill' ? '已终止执行' : kind === 'retry' ? '已重新入队' : '任务已删除')
+      toast(
+        kind === 'kill' ? '已终止执行'
+          : kind === 'retry' ? '已重新入队'
+          : kind === 'remediate' ? '已带审查意见进入修改复审——完成后自动复审'
+          : '任务已删除',
+      )
       setConfirming(null)
       if (kind === 'delete') onDeleted?.()
       onDone?.()
@@ -50,6 +57,8 @@ export function TaskAdminButtons({
 
   const stoppable = status === 'running'
   const retryable = status === 'failed' || status === 'interrupted'
+  // 2026-10-03 用户裁定：子 agent 审查打回（rejected）→ 修改并复审闭环
+  const remediable = status === 'rejected'
   const deletable = status !== 'running' // pending/终态/awaiting_approval 都可删（后端会处理活动会话）
 
   if (confirming) {
@@ -80,6 +89,16 @@ export function TaskAdminButtons({
           className="rounded p-0.5 text-slate-400 hover:bg-amber-50 hover:text-amber-600"
         >
           <Ban size={11} />
+        </button>
+      )}
+      {remediable && (
+        <button
+          onClick={() => void run('remediate')}
+          disabled={busy}
+          title="修改并复审：注入子 agent 审查意见，直达实施阶段重跑，完成后自动复审"
+          className="rounded p-0.5 text-slate-400 hover:bg-violet-50 hover:text-violet-600 disabled:opacity-40"
+        >
+          <Hammer size={11} />
         </button>
       )}
       {retryable && (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText, Hammer } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
@@ -930,7 +930,27 @@ export function TaskWorkflowPage({
                       </p>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {/* 管理三操作（重审 P0）：失败/中断就地重试 + 删除——重试也可点上方标题栏的循环箭头 */}
+                      {/* 修改并复审（用户裁定 2026-10-03）：子 agent 审查打回 → 带意见重跑实施，完成自动复审。
+                          比"复制为新任务"更优的路径——上下文/血缘不断裂 */}
+                      {sel.status === 'rejected' && (
+                        <button
+                          onClick={() => {
+                            fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(sel.id)}/remediate`, { method: 'POST' })
+                              .then(async (r) => {
+                                const d = await r.json().catch(() => null)
+                                if (!r.ok) throw new Error(d?.error ?? '操作失败')
+                                toast('已带审查意见进入修改复审——完成后子 agent 自动复审')
+                                load()
+                              })
+                              .catch((e) => toast(e instanceof Error ? e.message : '操作失败', 'error'))
+                          }}
+                          className="flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-micro font-bold text-white transition-colors hover:bg-violet-700"
+                          title="注入子 agent 审查意见，直达实施阶段重跑；矩阵/方案产物保留，完成后自动复审"
+                        >
+                          <Hammer size={11} /> 修改并复审
+                        </button>
+                      )}
+                      {/* 管理按钮组（重审 P0 + 复审闭环）：终止/重试/删除——重试也可点上方标题栏的循环箭头 */}
                       <TaskAdminButtons repo={backendRepo} taskId={sel.id} status={sel.status} onDone={load} onDeleted={() => { setSelected(null); load() }} />
                       <button
                         onClick={() =>

@@ -21,6 +21,11 @@ export function retryTask(repo: string, taskId: string): Promise<void> {
   return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}/retry`, 'POST')
 }
 
+/** 修改并复审：子 agent 审查打回的任务，注入审查意见直达实施阶段重跑（完成后自动复审） */
+export function remediateTask(repo: string, taskId: string): Promise<void> {
+  return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}/remediate`, 'POST')
+}
+
 export function deleteTask(repo: string, taskId: string): Promise<void> {
   return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}`, 'DELETE')
 }

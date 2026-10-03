@@ -204,6 +204,62 @@ impl TaskExecutor {
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
 
+    /// 修改并复审（2026-10-03 用户裁定：审查打回后要有"带意见修改→复审"闭环，
+    /// 此前唯一出路是复制为新任务——上下文/血缘断裂）：
+    /// rejected（子 agent 审查自动打回）→ 注入审查意见到 context.remediation →
+    /// 直达实施阶段重跑（phase 3）→ 完成后子 agent 自动复审（既有流程）→
+    /// 再不通过再次打回，可循环直至通过或用户改走复制新任务。
+    pub async fn remediate(self: &Arc<Self>, task_id: &str) -> Result<TaskRow, ApiError> {
+        use easyvibe_db::ApprovalRepository as _;
+        let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if task.status != "rejected" {
+            return Err(ApiError::Conflict(format!(
+                "任务当前状态 {} 不可修改复审（仅子 agent 审查打回的 rejected 任务可原地修改复审；用户打回请复制为新任务）",
+                task.status
+            )));
+        }
+        // 审查意见 = 最近一条 rejected 留痕（diff 关自动打回必留）
+        let note = self
+            .approval_repo
+            .list_by_task(task_id)
+            .await
+            .ok()
+            .map(|aps| {
+                aps.into_iter()
+                    .filter(|a| a.decision == "rejected" && a.note.as_deref().is_some_and(|n| !n.trim().is_empty()))
+                    .last()
+                    .and_then(|a| a.note)
+            })
+            .flatten()
+            .unwrap_or_else(|| "（无审查意见留痕——按 error 字段修复后重新提交）".into());
+        // 注入 remediation 反馈（保留既有 context 键）
+        let mut ctx: serde_json::Value = serde_json::from_str(&task.context).unwrap_or_else(|_| serde_json::json!({}));
+        let round = ctx["remediation"]["round"].as_u64().unwrap_or(0) + 1;
+        ctx["remediation"] = serde_json::json!({
+            "round": round,
+            "review_feedback": note.trim(),
+            "instruction": "上一轮实施经子 agent 审查未通过。先修复反馈问题，再做一轮完整自检；禁止无关改动（审查意见外的文件不要碰）。",
+        });
+        let n = self.task_repo.reset_for_remediate(task_id).await?;
+        if n == 0 {
+            return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
+        }
+        self.task_repo.set_context(task_id, &serde_json::to_string(&ctx).unwrap_or_else(|_| "{}".into())).await?;
+        self.publish_status(&task.repo, task_id, "running", Some("p:implement")).await;
+        info!("[task-exec] 任务 {} 进入修改并复审（第 {} 轮）: {}", task_id, round, note.trim());
+        // 直达实施阶段（复用分阶段 prompt 装配；矩阵/方案已在 context 与 dev-docs 中）。
+        // 异步 spawn——实施是几十分钟级长跑，HTTP 请求必须立即返回
+        let this = self.clone();
+        let tid = task_id.to_string();
+        tokio::spawn(async move {
+            match this.task_repo.get(&tid).await {
+                Ok(Some(fresh)) => this.spawn_and_watch(fresh, 3).await,
+                _ => warn!("[task-exec] 复审任务 {} 丢失，spawn 取消", tid),
+            }
+        });
+        self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
     /// 任务状态广播统一出口（执行引擎侧）——前端列表/徽标/注意力条的事件源。
     /// P0 教训（ui-test-2026-10-03）：只写库不广播 = 任务在前端"凭空消失"。
     async fn publish_status(&self, repo: &str, task_id: &str, status: &str, gate: Option<&str>) {

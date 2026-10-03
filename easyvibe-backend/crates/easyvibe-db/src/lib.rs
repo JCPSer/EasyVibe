@@ -525,6 +525,11 @@ pub trait TaskRepository: Send + Sync {
     /// 状态不在白名单内影响行数 0，调用方返回 409。同时清 error/gate/session 残留，
     /// 避免重试任务带着旧关卡/旧会话指针启动。
     fn reset_for_retry(&self, id: &str) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
+    /// 修改并复审（rejected → running 直达实施阶段）：原子条件 UPDATE——
+    /// 只认 rejected（用户打回走复制新任务，审查打回走本通道）。
+    fn reset_for_remediate(&self, id: &str) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
+    /// 修改并复审的上下文注入：写入 remediation 反馈（JSON 整体替换 context 列）
+    fn set_context(&self, id: &str, context: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
 }
 
 pub struct SqliteTaskRepository {
@@ -676,6 +681,24 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(id)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(res.rows_affected())
+    }
+
+    async fn reset_for_remediate(&self, id: &str) -> Result<u64, ApiError> {
+        let res = sqlx::query(
+            "UPDATE tasks SET status = 'running', error = NULL, gate = 'p:implement', session_id = NULL, updated_at = ? WHERE id = ? AND status = 'rejected'",
+        )
+        .bind(now_ms())
+        .bind(id)
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(res.rows_affected())
+    }
+
+    async fn set_context(&self, id: &str, context: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET context = ? WHERE id = ?")
+            .bind(context)
+            .bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
     }
 }
 
