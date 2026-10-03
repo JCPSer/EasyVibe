@@ -2,6 +2,8 @@
 # 工具链用 llvm-mingw（macOS 版，解压即用：https://github.com/mstorsjo/llvm-mingw）
 # 目标用 gnullvm——Rust 内置无 GCC 运行时目标，与 clang 工具链天生配对
 # （windows-gnu 目标硬编码 -lgcc，clang 系工具链没有 libgcc 会链接失败）
-# 用法：export PATH=<llvm-mingw>/bin:$PATH && cargo build --release --target x86_64-pc-windows-gnullvm -p easyvibe-app
+# 用法：export PATH=<llvm-mingw>/bin:$PATH && RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-gnullvm -p easyvibe-app
+# 注意：必须带 +crt-static 静态链接 CRT/libunwind，否则产物依赖 libunwind.dll，
+# 在干净 Windows 机器上直接报“找不到 libunwind.dll”无法启动（2026-10-04 已踩坑）
 [target.x86_64-pc-windows-gnullvm]
 linker = "/tmp/llvm-mingw-20260922-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang"
