@@ -79,6 +79,7 @@ export function GitPage({
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false) // 重审 P2：全部撤销两步确认
   const [message, setMessage] = useState('')
   const [footer, setFooter] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -275,9 +276,10 @@ export function GitPage({
       })
       const d = await r.json().catch(() => null)
       if (!r.ok) toast(d?.error ?? '撤销失败', 'error')
-      else toast(`已撤销 ${path}`)
+      else toast(path === '*' ? '已撤销全部未提交改动' : `已撤销 ${path}`)
     } finally {
       setConfirmDiscard(null)
+      setConfirmDiscardAll(false)
       load()
     }
   }
@@ -375,6 +377,28 @@ export function GitPage({
                   placeholder="过滤文件…"
                   className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-600 focus:border-blue-300 focus:outline-none"
                 />
+                {/* 重审 P2：全部撤销（此前误改一堆只能逐个点）——两步确认，红色警示语义 */}
+                {status && status.files.length > 0 &&
+                  (confirmDiscardAll ? (
+                    <span className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-red-500">撤销全部 {status.files.length} 个文件的改动？</span>
+                      <button
+                        onClick={() => void doDiscard('*')}
+                        onMouseLeave={() => setConfirmDiscardAll(false)}
+                        className="rounded bg-red-500 px-1.5 py-1 text-micro font-bold text-white hover:bg-red-600"
+                      >
+                        确认
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDiscardAll(true)}
+                      className="flex items-center gap-0.5 rounded-lg border border-red-200 px-2 py-1 text-cap font-semibold text-red-500 hover:bg-red-50"
+                      title="撤销全部未提交改动（含未跟踪文件，不可恢复）"
+                    >
+                      <Trash2 size={10} /> 全部撤销
+                    </button>
+                  ))}
                 <button
                   onClick={load}
                   className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600"

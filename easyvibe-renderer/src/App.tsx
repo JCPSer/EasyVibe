@@ -1376,6 +1376,10 @@ export default function App() {
   // 后端模式：探测 /api/health 成功且仓库列表非空则启用；失败降级静态 demo 数据
   const [backendRepo, setBackendRepo] = useState<string | null>(null)
   const [repos, setRepos] = useState<{ id: string; name: string }[]>([])
+  // 重审 P2 bug：后端离线与"在线但未选仓库"此前共用 backendRepo=null 一个状态——
+  // 离线时切换器显示"未选择仓库/尚未挂载"与画布上的演示数据自相矛盾（用户截图的困惑点）。
+  // 三态显式化：null=探测中 / true=在线 / false=离线（演示数据模式）
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
   // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
   // R3 #4：WS effect 不重跑，onopen 闭包读 state 永远是初值——版本比对存 ref
@@ -1533,9 +1537,12 @@ export default function App() {
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
         .then((d: { data?: { id: string; name: string }[] }) => {
           if (!d.data || d.data.length === 0) {
+            // 在线但零仓库：与离线显式区分（"尚未挂载"是真实状态，不是探测失败）
+            setBackendOnline(true)
             if (!cancelled) timer = window.setTimeout(probe, 5000)
             return
           }
+          setBackendOnline(true)
           setRepos(d.data)
           setBackendRepo((cur) => cur ?? d.data![0].id) // 保留当前选择（切换器驱动）
           // 版本感知（Y7）：仅取 version，不参与后端模式判定
@@ -1549,6 +1556,7 @@ export default function App() {
         .catch(() => {
           if (cancelled) return
           setBackendRepo(null)
+          setBackendOnline(false)
           timer = window.setTimeout(probe, 5000)
         })
     }
@@ -1797,18 +1805,47 @@ export default function App() {
     <div className="relative">
         <button
           onClick={() => setRepoPanelOpen((v) => !v)}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 hover:border-blue-300"
-          title="切换/管理仓库"
+          className={
+            backendOnline === false
+              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
+              : "flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 hover:border-blue-300"
+          }
+          title={backendOnline === false ? "后端不在线：当前为演示数据，点击看详情" : "切换/管理仓库"}
         >
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          {backendRepo ?? '未选择仓库'}
-          <span className="text-slate-300">▾</span>
+          {backendOnline === false ? (
+            <>
+              <WifiOff size={11} />
+              演示数据 · 后端离线
+              <span className="text-amber-400">▾</span>
+            </>
+          ) : (
+            <>
+              <span className={`h-2 w-2 rounded-full ${backendOnline === null ? 'animate-pulse bg-slate-300' : 'bg-emerald-500'}`} />
+              {backendOnline === null ? '连接后端中…' : backendRepo ?? '未选择仓库'}
+              <span className="text-slate-300">▾</span>
+            </>
+          )}
         </button>
         {repoPanelOpen && (
           <>
             {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
             <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
             <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 p-2 shadow-xl">
+            {backendOnline === false ? (
+              /* 重审 P2：离线态的真相面板——不装成"尚未挂载"（那是在线零仓库的状态） */
+              <div className="space-y-1.5 px-1.5 py-1.5">
+                <p className="flex items-center gap-1 text-[12px] font-bold text-amber-700">
+                  <WifiOff size={12} /> 后端不在线
+                </p>
+                <p className="text-[11px] leading-4 text-slate-500">
+                  当前画布是内置演示数据（hover-client）。归纳 / 巡检 / 任务 / 仓库管理都需要本地后端在线。
+                </p>
+                <p className="text-[10px] leading-4 text-slate-400">
+                  应用启动后后端在冷加载？每 5 秒自动重连，恢复后此面板自动可用。
+                </p>
+              </div>
+            ) : (
+              <>
             <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
@@ -1881,6 +1918,8 @@ export default function App() {
               <Plus size={11} />
               打开本地仓库…
             </button>
+              </>
+            )}
           </div>
           </>
         )}
@@ -1991,7 +2030,17 @@ export default function App() {
     // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
     todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
     review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
-    changes: <ChangesPage backendRepo={backendRepo} map={map} />,
+    changes: (
+      <ChangesPage
+        backendRepo={backendRepo}
+        map={map}
+        /* 重审 P2：变更页 → 任务页流水线（选中该任务）——导航闭环，不再靠用户记任务 ID */
+        onOpenTask={(id) => {
+          setTaskFocus({ id, nonce: Date.now() })
+          handlePageChange('tasks')
+        }}
+      />
+    ),
     drift: <DriftPage />,
     health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
     modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,

@@ -323,6 +323,13 @@ pub async fn discard(repo: &Path, path: &str) -> Result<(), ApiError> {
     }
 }
 
+/// 全部撤销（重审 P2）：tracked 恢复 + untracked 删除（含未跟踪目录）。
+/// 前端两步确认后经 discard 端点 path="*" 到达。
+pub async fn discard_all(repo: &Path) -> Result<(), ApiError> {
+    git(repo, &["checkout", "--", "."]).await?;
+    git(repo, &["clean", "-fd"]).await.map(|_| ())
+}
+
 /// 路径安全：仅相对路径、禁止 `..` 分量（写操作统一入口）
 fn validate_rel_path(path: &str) -> Result<(), ApiError> {
     let p = Path::new(path);
@@ -364,6 +371,12 @@ pub async fn post_git_discard(
 ) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let path = body["path"].as_str().ok_or_else(|| ApiError::BadRequest("缺少 path".into()))?;
+    // 重审 P2：全部撤销（path="*"）——tracked 恢复 + untracked 删除（含未跟踪目录）。
+    // 前端两步确认后调用；与逐文件撤销同一端点，语义由 path 值区分。
+    if path == "*" {
+        discard_all(&repo.root).await?;
+        return Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response());
+    }
     discard(&repo.root, path).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
 }
@@ -601,6 +614,32 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         assert!(status(&dir).await.is_err());
         assert!(log(&dir, 10).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn discard_all_restores_tracked_and_removes_untracked() {
+        // 重审 P2：全部撤销——tracked 恢复 + untracked（含目录）删除
+        let dir = std::env::temp_dir().join(format!("ev-discard-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]).await.unwrap();
+        std::fs::write(dir.join("tracked.txt"), "v1").unwrap();
+        git(&dir, &["add", "."]).await.unwrap();
+        git(&dir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]).await.unwrap();
+        // 造改动：改 tracked + 新增 untracked 文件与目录
+        std::fs::write(dir.join("tracked.txt"), "v2-changed").unwrap();
+        std::fs::create_dir_all(dir.join("untracked-dir")).unwrap();
+        std::fs::write(dir.join("untracked-dir/new.txt"), "new").unwrap();
+        std::fs::write(dir.join("untracked.txt"), "new").unwrap();
+
+        discard_all(&dir).await.unwrap();
+
+        assert_eq!(std::fs::read_to_string(dir.join("tracked.txt")).unwrap(), "v1", "tracked 必须恢复");
+        assert!(!dir.join("untracked.txt").exists(), "untracked 文件必须删除");
+        assert!(!dir.join("untracked-dir").exists(), "untracked 目录必须删除");
+        let st = status(&dir).await.unwrap();
+        assert!(st.files.is_empty(), "清理后工作树必须干净: {:?}", st.files);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

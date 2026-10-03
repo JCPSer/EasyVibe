@@ -87,7 +87,26 @@ export function TaskBoardPage({
   onCreateTask: (d: TaskDraft) => void
 }) {
   const [tasks, setTasks] = useState<BoardTask[] | null>(null)
-  const [order, setOrder] = useState<Record<string, number>>({}) // 列内排序（会话内）
+  // 列内排序（重审 P2：此前仅会话内有效，刷新无声丢失——现在按仓库持久化到 localStorage）
+  const [order, setOrder] = useState<Record<string, number>>({})
+  const [orderRepo, setOrderRepo] = useState(backendRepo)
+  const orderKey = `ev.boardOrder.${backendRepo ?? ''}`
+  if (orderRepo !== backendRepo) {
+    // 渲染期状态调整（React 官方 adjust-state-during-render 模式）：切换仓库重载该仓库的排序
+    setOrderRepo(backendRepo)
+    try {
+      setOrder(JSON.parse(localStorage.getItem(orderKey) ?? '{}') as Record<string, number>)
+    } catch {
+      setOrder({})
+    }
+  }
+  const persistOrder = (next: Record<string, number>) => {
+    try {
+      localStorage.setItem(orderKey, JSON.stringify(next))
+    } catch {
+      /* 隐私模式等写入失败：排序退回会话内，不影响主流程 */
+    }
+  }
   const [dragId, setDragId] = useState<string | null>(null)
   const [overCol, setOverCol] = useState<ColKey | null>(null)
   const [illegalCol, setIllegalCol] = useState<ColKey | null>(null)
@@ -200,8 +219,12 @@ export function TaskBoardPage({
           context: { origin_task_id: t.id },
         })
       } else {
-        // 列内排序：落点序号为新优先级（会话内）
-        setOrder((prev) => ({ ...prev, [t.id]: Date.now() % 100000 }))
+        // 列内排序：落点序号为新优先级（持久化——刷新/重开不丢）
+        setOrder((prev) => {
+          const next = { ...prev, [t.id]: Date.now() % 100000 }
+          persistOrder(next)
+          return next
+        })
       }
       return
     }

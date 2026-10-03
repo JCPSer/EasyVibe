@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, Coins, RefreshCw } from 'lucide-react'
 import { onFreshnessEvent } from '@/lib/growthBus'
 import { relTime } from '@/lib/diffStat'
@@ -56,6 +56,7 @@ export function DriftPage() {
   const [rows, setRows] = useState<RepoDrift[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const tableRef = useRef<HTMLDivElement | null>(null) // 重审 P2：横幅"查看详情"滚动到排名表
   const [now] = useState(() => Date.now()) // 渲染期纯度：漂移百分比以进入页面时刻为锚
 
   const load = useCallback(async () => {
@@ -180,7 +181,7 @@ export function DriftPage() {
       </div>
 
       {/* 仓库漂移排名 */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div ref={tableRef} className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-4 py-2.5">
           <span className="text-[13px] font-bold text-slate-700">仓库漂移排名</span>
         </div>
@@ -270,7 +271,13 @@ export function DriftPage() {
               {kpis.needReinduce} 个仓库与当前归纳状态存在显著差异，可能影响智能体的回答准确性与时效性。
             </p>
           </div>
-          <span className="shrink-0 text-[11px] font-semibold text-amber-500">查看详情 ↑</span>
+          {/* 重审 P2：横幅"查看详情"此前是 span 假链接（点了没反应）——真按钮，滚动到上方排名表 */}
+          <button
+            onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="shrink-0 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100"
+          >
+            查看详情 ↑
+          </button>
         </div>
       )}
     </div>

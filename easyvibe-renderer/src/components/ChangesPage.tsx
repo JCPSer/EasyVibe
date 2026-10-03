@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, FileDiff, History, ShieldCheck } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, ExternalLink, FileDiff, History, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/lib/diffStat'
 import type { CodeMap } from '@/types/map'
@@ -52,7 +52,7 @@ const STATUS_DOT: Record<string, string> = {
 }
 const GATE_LABEL: Record<string, string> = { plan: '计划审批', diff: 'Diff 审批', report: '审查报告' }
 
-export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; map: CodeMap | null }) {
+export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: string | null; map: CodeMap | null; onOpenTask?: (taskId: string) => void }) {
   const [tasks, setTasks] = useState<ChangeTask[] | null>(null)
   const [trustFilter, setTrustFilter] = useState<'all' | 'manual' | 'auto' | 'supervised'>('all')
   const [moduleFilter, setModuleFilter] = useState<string>('all')
@@ -258,8 +258,20 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                 <div className="border-b border-slate-100 px-4 py-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[13px] font-bold text-slate-700">变更详情</span>
-                    <span className="flex items-center gap-0.5 text-micro text-slate-300">
-                      <ShieldCheck size={10} /> 全程留痕
+                    <span className="flex items-center gap-1.5">
+                      {/* 重审 P2：变更页→流水线的导航闭环（此前看完变更无处去处理） */}
+                      {onOpenTask && (
+                        <button
+                          onClick={() => onOpenTask(sel.id)}
+                          className="flex items-center gap-0.5 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+                          title="跳到任务页流水线视图，看审批留痕/产物/diff 全程"
+                        >
+                          <ExternalLink size={10} /> 查看流水线
+                        </button>
+                      )}
+                      <span className="flex items-center gap-0.5 text-micro text-slate-300">
+                        <ShieldCheck size={10} /> 全程留痕
+                      </span>
                     </span>
                   </div>
                   {selStat && (
@@ -402,7 +414,19 @@ export function ChangesPage({ backendRepo, map }: { backendRepo: string | null; 
                           </div>
                         ))}
                         {diffFor.text.split('\n').length > 400 && (
-                          <div className="text-micro py-1 text-center text-slate-400">（仅显示前 400 行，完整内容在评审页查看）</div>
+                          /* 重审 P2：此前"完整内容在评审页查看"是无链接死文字——真按钮跳流水线 */
+                          <div className="py-1 text-center">
+                            {onOpenTask ? (
+                              <button
+                                onClick={() => onOpenTask(sel.id)}
+                                className="rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+                              >
+                                仅显示前 400 行——去流水线查看完整 diff →
+                              </button>
+                            ) : (
+                              <span className="text-micro text-slate-400">（仅显示前 400 行，完整内容在评审页查看）</span>
+                            )}
+                          </div>
                         )}
                       </pre>
                     ) : (
