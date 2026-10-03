@@ -13,7 +13,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -496,6 +496,7 @@ function Canvas({
   onViewRequestConsumed,
   guide,
   onTaskCreated,
+  agentReady,
 }: {
   map: CodeMap
   backendRepo: string | null
@@ -513,6 +514,8 @@ function Canvas({
   guide?: React.ReactNode
   /** 任务创建成功 → 壳层跳任务页（带新任务 id 选中） */
   onTaskCreated: (taskId: string) => void
+  /** M2 降级：agent 缺失（false）时任务表单禁止提交 */
+  agentReady: boolean
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
@@ -1197,6 +1200,7 @@ function Canvas({
           onClose={() => setTaskDraft(null)}
           onCreated={onTaskCreated}
           onLocateModule={focusModule}
+          agentReady={agentReady}
         />
       )}
     </div>
@@ -1293,7 +1297,7 @@ function notifySystem(title: string, body: string) {
 // · progress 显示归纳进行中 → 等待页（原行为）
 // · 加载出错（5xx/网络/后端离线） → 错误卡（重试 / 开始归纳）
 // · 从未生成且无归纳（progress 无文件） → 引导卡（开始归纳）
-function MapGate({ repo, error, onRetry }: { repo: string; error: string | null; onRetry: () => void }) {
+function MapGate({ repo, error, onRetry, agentReady }: { repo: string; error: string | null; onRetry: () => void; agentReady: boolean }) {
   const [inducing, setInducing] = useState<boolean | null>(null) // null=探测中
   const [starting, setStarting] = useState(false)
 
@@ -1360,7 +1364,8 @@ function MapGate({ repo, error, onRetry }: { repo: string; error: string | null;
         )}
         <button
           onClick={startInduce}
-          disabled={starting}
+          disabled={starting || !agentReady}
+          title={agentReady ? undefined : '未检测到执行 agent——先安装或在设置中配置'}
           className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
         >
           {starting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} 开始归纳
@@ -1380,6 +1385,54 @@ export default function App() {
   // 离线时切换器显示"未选择仓库/尚未挂载"与画布上的演示数据自相矛盾（用户截图的困惑点）。
   // 三态显式化：null=探测中 / true=在线 / false=离线（演示数据模式）
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+  // M2 引导与降级：执行 agent 状态（found=null 探测中/离线——按可用处理，只有显式 false 才拦截）
+  const [agentState, setAgentState] = useState<{
+    found: boolean | null
+    detected: { command: string; path: string; version: string | null }[]
+  }>({ found: null, detected: [] })
+  const loadAgentState = useCallback(() => {
+    fetch('/api/agent/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { effective?: { found: boolean }; detected?: { command: string; path: string; version: string | null }[] } } | null) => {
+        if (d?.data?.effective) {
+          setAgentState({ found: d.data.effective.found, detected: d.data.detected ?? [] })
+        }
+      })
+      .catch(() => {})
+  }, [])
+  // 后端在线后加载 agent 状态 + 30s 轮询（装好后自然恢复，无需手动刷新）
+  useEffect(() => {
+    if (backendOnline !== true) return
+    loadAgentState()
+    const t = window.setInterval(loadAgentState, 30000)
+    return () => window.clearInterval(t)
+  }, [backendOnline, loadAgentState])
+
+  // M2"采用"动作的端点序列（方案 §5.2）：settings/set → test → status；任一步失败保留横幅并报原因
+  const adoptAgent = async (command: string) => {
+    try {
+      const presetId = ['claude', 'codex', 'opencode'].includes(command) ? command : 'custom'
+      const put = (key: string, value: unknown) =>
+        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key, value }) })
+      const [r1, r2] = await Promise.all([put('agent.command', command), put('agent.preset', presetId)])
+      if (!r1.ok || !r2.ok) throw new Error('配置写入失败')
+      const r3 = await fetch('/api/agent/test', { method: 'POST' })
+      const d3 = await r3.json().catch(() => null)
+      toast(
+        d3?.data?.ok ? `已采用 ${command}，协议兼容（${d3.data.latencyMs}ms）` : `已采用 ${command}，但协议测试未通过：${d3?.data?.protocol ?? '未知'}`,
+        d3?.data?.ok ? 'info' : 'error',
+      )
+      loadAgentState()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '采用失败', 'error')
+    }
+  }
+
+  const CLAUDE_INSTALL_CMD = 'npm install -g @anthropic-ai/claude-code'
+  const copyInstallCmd = () => {
+    void navigator.clipboard?.writeText(CLAUDE_INSTALL_CMD)
+    toast('安装命令已复制——在终端粘贴执行，完成后回到这里点"重新探测"')
+  }
   const [reloadTick, setReloadTick] = useState(0)
   // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
   // R3 #4：WS effect 不重跑，onopen 闭包读 state 永远是初值——版本比对存 ref
@@ -1790,7 +1843,7 @@ export default function App() {
   // P0 审查前端#1：地图加载失败不再一律渲染"归纳中"——
   // MapGate 用 /progress 区分"真在归纳"（等待页）与"真出错"（错误卡：重试/开始归纳）
   if (backendRepo && (error || !map)) {
-    return <MapGate repo={backendRepo} error={error} onRetry={() => setReloadTick((t) => t + 1)} />
+    return <MapGate repo={backendRepo} error={error} onRetry={() => setReloadTick((t) => t + 1)} agentReady={agentState.found !== false} />
   }
   if (!map) {
     return (
@@ -1950,11 +2003,11 @@ export default function App() {
         {backendRepo && (
           <button
             onClick={startPatrol}
-            disabled={patrolling}
-            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-60 ${
+            disabled={patrolling || agentState.found === false}
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-40 ${
               patrolling ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
             }`}
-            title="巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史"
+            title={agentState.found === false ? '未检测到执行 agent——先安装或在设置中配置' : '巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史'}
           >
             <Activity size={12} className={patrolling ? 'animate-pulse' : ''} />
             {patrolling ? '巡检中…' : '巡检'}
@@ -1995,6 +2048,7 @@ export default function App() {
             onPanelWidthChange={handlePanelWidthChange}
             viewRequest={viewRequest}
             onViewRequestConsumed={() => setViewRequest(null)}
+            agentReady={agentState.found !== false}
             guide={
               guideDismissed ? undefined : (
                 <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
@@ -2075,8 +2129,7 @@ export default function App() {
           topBar={topBar}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
-            /* 重审 P2 首跑引导：在线但零仓库时，演示数据画布必须主动说明自己——
-               否则"地图能看但什么都不能做"会被读成"后端没启动"（用户实报困惑） */
+            /* 优先级：零仓库 > agent 缺失引导（M2）> 审批提醒 */
             backendOnline === true && repos.length === 0 ? (
               <button
                 onClick={() => addRepo()}
@@ -2089,6 +2142,40 @@ export default function App() {
                 </span>
                 <span className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 text-micro font-bold text-white">选择仓库 →</span>
               </button>
+            ) : backendOnline === true && agentState.found === false ? (
+              /* M2 首跑引导（R5）：检测到可采用的 → 一键采用；全未安装 → 安装指引+一键复制 */
+              agentState.detected.length > 0 ? (
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5">
+                  <Bot size={12} className="shrink-0 text-amber-500" />
+                  <span className="text-[11px] font-bold text-amber-800">
+                    检测到 {agentState.detected[0].command} 已安装
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">采用后即可开始归纳 / 任务</span>
+                  <button
+                    onClick={() => void adoptAgent(agentState.detected[0].command)}
+                    className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-amber-700"
+                  >
+                    采用 {agentState.detected[0].command} →
+                  </button>
+                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100">
+                    去设置
+                  </button>
+                </div>
+              ) : (
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5">
+                  <Bot size={12} className="shrink-0 text-amber-500" />
+                  <span className="text-[11px] font-bold text-amber-800">未检测到执行 agent</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">
+                    归纳 / 巡检 / 任务需要本地 CLI agent（支持 claude / codex / opencode）
+                  </span>
+                  <button onClick={copyInstallCmd} className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-amber-700">
+                    复制 claude 安装命令
+                  </button>
+                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100">
+                    了解更多
+                  </button>
+                </div>
+              )
             ) : attention && page !== 'tasks' ? (
               <button
                 onClick={() => handlePageChange('tasks')}
@@ -2164,6 +2251,7 @@ export default function App() {
             handlePageChange('tasks')
           }}
           onLocateModule={() => handlePageChange('map')}
+          agentReady={agentState.found !== false}
         />
       )}
       <ToastHost />

@@ -13,10 +13,12 @@ interface Props {
   onCreated?: (taskId: string) => void
   /** 试用反馈#3：影响模块与地图联动——点定位按钮画布飞过去看 */
   onLocateModule?: (id: string) => void
+  /** M2 降级：agent 缺失（false）时禁止提交——建议转任务/对话转任务都经此表单统一兜底 */
+  agentReady?: boolean
 }
 
 // 任务表单（任务表单原型.png 的实现）：三字段极简 + 上下文注入预览 + 审批两档
-export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onLocateModule }: Props) {
+export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onLocateModule, agentReady }: Props) {
   // 重审 P0：标题曾是隐藏兜底（全部任务都叫"修复任务"）——显式输入，draft 预填可改
   const [title, setTitle] = useState(draft.title || '')
   const [description, setDescription] = useState(draft.description)
@@ -206,14 +208,22 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             </button>
           </div>
         ) : (
-          <button
-            onClick={submit}
-            disabled={sending || !backendRepo || !description.trim()}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-            {sending ? '提交中…' : '提交任务'}
-          </button>
+          <>
+            {agentReady === false && (
+              /* M2 降级（R6）：agent 缺失时提交按钮禁用的原因必须可见 */
+              <p className="mb-2 flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-1.5 text-cap font-semibold text-amber-700">
+                未检测到执行 agent——任务需要本地 CLI agent。请先安装（顶部横幅有一键复制安装命令）或在设置中配置。
+              </p>
+            )}
+            <button
+              onClick={submit}
+              disabled={sending || !backendRepo || !description.trim() || agentReady === false}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              {sending ? '提交中…' : '提交任务'}
+            </button>
+          </>
         )}
         {!backendRepo && !created && <p className="mt-1.5 text-center text-cap text-slate-400">需要本地后端在线</p>}
       </div>
