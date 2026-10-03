@@ -375,7 +375,7 @@ export function TaskWorkflowPage({
       <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-3 py-2.5">
           <span className="text-[13px] font-bold text-slate-700">
-            任务工作流
+            任务列表
             {pendingCount > 0 && (
               <span className="tnum ml-1.5 rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{pendingCount}</span>
             )}
