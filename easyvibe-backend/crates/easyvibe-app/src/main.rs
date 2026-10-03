@@ -306,12 +306,20 @@ async fn remove_repo(
     } else {
         0
     };
+    // 先取根再注销（注销后 find_repo 即查不到）
+    let root = st.map_service.find_repo(&id).await.map(|r| r.root);
     if !st.map_service.remove_repo(&id).await {
         return Err(AppError(ApiError::NotFound(format!("仓库 {id} 未挂载"))));
     }
-    let remaining: Vec<_> = st.map_service.repos().await.into_iter().map(|r| r.root).collect();
-    write_desktop_repos(&remaining);
-    info!("[repo-remove] 注销 {}（数据清除 {} 行）", id, wiped);
+    // 重审 P2 实弹 bug：remaining 从"本进程已挂载"算——dev 后端（env 只有 FENJUE）
+    // 注销 FENJUE 会写出空文件，把 App 后端的 hover-client 行一并抹掉（桌面端"仓库消失"）
+    // 持久化文件是跨进程共享事实源，必须以文件为基准：读文件 → 删被注销的根 → 写回
+    let mut roots = read_desktop_repos();
+    if let Some(root) = root {
+        roots.retain(|p| p != &root);
+    }
+    write_desktop_repos(&roots);
+    info!("[repo-remove] 注销 {}（数据清除 {} 行，文件剩 {} 个仓库）", id, wiped, roots.len());
     Ok(Json(serde_json::json!({ "success": true, "data": { "wiped": wiped } })).into_response())
 }
 
@@ -1099,6 +1107,13 @@ async fn get_dev_doc(
 ) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let rel = q.get("path").cloned().unwrap_or_default();
+    // 2026-10-03 实弹 bug：dev-docs 返回的是仓库相对路径（.easyvibe/development_docs/…），
+    // 本端点期望 development_docs 相对路径——直接 join 会双前缀 404，评审卡全文永远空。
+    // 归一化：两种形态都收（前端无需关心口径差异）。
+    let rel = rel
+        .strip_prefix(".easyvibe/development_docs/")
+        .map(str::to_string)
+        .unwrap_or(rel);
     let docs_root = repo.root.join(".easyvibe/development_docs");
     let full = docs_root.join(&rel);
     let (Ok(canonical), Ok(docs_canon)) = (full.canonicalize(), docs_root.canonicalize()) else {
@@ -3020,6 +3035,12 @@ mod tests {
     async fn view_rename_prune_and_repo_wipe() {
         // 重审 P1：视图改名 / 巡检历史清理 / 注销仓库数据清除
         use easyvibe_db::{ConversationRepository as _, HealthRepository as _, TaskRepository as _};
+        // 隔离持久化文件：remove_repo 会重写 desktop-repos（data_dir 受 EASYVIBE_DATA_DIR 支配）。
+        // 指到真实 ~/.easyvibe 时，跑一遍测试 = 把开发者的仓库清单清空（2026-10-03 实弹踩坑）——
+        // 本测试进程内所有 data_dir 调用都落到临时目录（并行测试同进程共享，无副作用）。
+        let data_dir = std::env::temp_dir().join(format!("ev-test-data-{}", std::process::id()));
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::env::set_var("EASYVIBE_DATA_DIR", &data_dir);
         let (state, repo) = chat_state("p1-admin").await;
         let app = build_router(state.clone());
 
@@ -3098,6 +3119,48 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let repos = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"].clone();
         assert!(repos.as_array().unwrap().iter().all(|r| r["id"] != repo), "仓库必须注销");
+    }
+
+    #[tokio::test]
+    async fn dev_doc_accepts_repo_relative_path() {
+        // 2026-10-03 实弹 bug 回归：dev-docs 返回仓库相对路径，/dev-doc 此前只收
+        // development_docs 相对路径——双前缀 404，评审卡全文永远空白。两种形态都必须可读。
+        let (state, repo) = chat_state("dev-doc-path").await;
+        let dir = std::env::temp_dir().join("ev-chat-test-dev-doc-path/.easyvibe/development_docs/liyuhang/1_requirements_matrix");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("matrix.md"), "# 需求矩阵\n\nR1 xxx").unwrap();
+        let app = build_router(state);
+        for p in ["liyuhang/1_requirements_matrix/matrix.md", ".easyvibe/development_docs/liyuhang/1_requirements_matrix/matrix.md"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    axum::http::Request::get(format!(
+                        "/api/repos/{repo}/dev-doc?path={}",
+                        urlencoding_encode(p)
+                    ))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), axum::http::StatusCode::OK, "形态应可读: {p}");
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            let v = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+            assert!(v["data"]["content"].as_str().unwrap().contains("R1 xxx"), "内容必须完整: {p}");
+        }
+        // 穿越防线不动：目录外路径仍 404
+        let resp = app
+            .oneshot(
+                axum::http::Request::get(format!(
+                    "/api/repos/{repo}/dev-doc?path={}",
+                    urlencoding_encode("../../etc/passwd")
+                ))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND, "穿越必须 404");
     }
 
     #[test]

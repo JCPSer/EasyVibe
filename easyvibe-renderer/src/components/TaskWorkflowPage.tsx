@@ -36,6 +36,9 @@ function PhaseDocReview({
 }) {
   const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
   const [missing, setMissing] = useState(false)
+  // 2026-10-03 实弹 bug：全文加载失败此前静默渲染空白——显式错误态 + 重试
+  const [loadErr, setLoadErr] = useState(false)
+  const [retryTick, setRetryTick] = useState(0)
   const [rejecting, setRejecting] = useState(false)
   const [note, setNote] = useState('')
 
@@ -48,19 +51,31 @@ function PhaseDocReview({
           .filter((x) => x.path.includes(dirHint))
           .sort((a, b) => b.mtime - a.mtime)[0]
         if (!hit) {
-          if (!dead) setMissing(true)
+          if (!dead) {
+            setMissing(true)
+            setLoadErr(false)
+          }
           return
         }
-        const full = await fetch(
+        const resp = await fetch(
           `/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(hit.path)}`,
-        ).then((r) => (r.ok ? r.json() : null))
-        if (!dead) setDoc({ path: hit.path, content: full?.data?.content ?? '' })
+        )
+        const full = resp.ok ? await resp.json().catch(() => null) : null
+        if (dead) return
+        if (!full?.data) {
+          setLoadErr(true)
+          return
+        }
+        setLoadErr(false)
+        setDoc({ path: hit.path, content: full.data.content ?? '' })
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!dead) setLoadErr(true)
+      })
     return () => {
       dead = true
     }
-  }, [backendRepo, taskId, dirHint])
+  }, [backendRepo, taskId, dirHint, retryTick])
 
   return (
     <div className="m-4 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white">
@@ -81,6 +96,22 @@ function PhaseDocReview({
         {missing && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
             未找到本阶段产物文档（agent 未按规范路径产出）。你可以打回要求重做，或通过进入下一阶段（实施时将无矩阵/方案可依）。
+          </div>
+        )}
+        {loadErr && (
+          /* 2026-10-03 实弹 bug：全文 404 曾静默空白——失败必须显式可见 */
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] leading-5 text-red-600">
+            产物文档全文加载失败（后端响应异常）。可重试；持续失败请打回重做。
+            <button
+              onClick={() => {
+                setDoc(null)
+                setLoadErr(false)
+                setRetryTick((t) => t + 1)
+              }}
+              className="ml-2 rounded-md border border-red-200 bg-white px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
+            >
+              重试
+            </button>
           </div>
         )}
         {doc && (
