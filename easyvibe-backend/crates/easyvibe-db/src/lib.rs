@@ -594,7 +594,7 @@ impl TaskRepository for SqliteTaskRepository {
     async fn update_status(&self, id: &str, status: &str, error: Option<&str>) -> Result<(), ApiError> {
         sqlx::query("UPDATE tasks SET status = ?, error = ?, updated_at = ? WHERE id = ?")
             .bind(status).bind(error)
-            .bind(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string())
+            .bind(now_ms())
             .bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
@@ -654,7 +654,7 @@ impl TaskRepository for SqliteTaskRepository {
         let res = sqlx::query(
             "UPDATE tasks SET status = 'interrupted', error = '后端重启，agent 会话已终止（kill_on_drop）；请重新发起任务', updated_at = ? WHERE status = 'running'",
         )
-        .bind(now_secs())
+        .bind(now_ms())
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(res.rows_affected())
     }
@@ -672,7 +672,7 @@ impl TaskRepository for SqliteTaskRepository {
         let res = sqlx::query(
             "UPDATE tasks SET status = 'pending', error = NULL, gate = NULL, session_id = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'interrupted')",
         )
-        .bind(now_secs())
+        .bind(now_ms())
         .bind(id)
         .execute(&self.pool).await.map_err(db_err)?;
         Ok(res.rows_affected())
@@ -905,6 +905,13 @@ fn now_secs() -> String {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
 }
 
+/// tasks 表时间戳统一口径：epoch 毫秒（create_task/try_advance_gate 即毫秒——
+/// 2026-10-03 实弹 bug：update_status 等写秒，dev-docs 时间窗当毫秒解析导致产物全漏检）。
+/// 会话/事件等内部自洽的表仍用 now_secs，不混用。
+fn now_ms() -> String {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0).to_string()
+}
+
 /// 注销仓库的数据清除（2026-10-03 重审 P1）：抹掉该仓库在本地库的全部痕迹。
 /// 删序：子表先、父表后（schema 无外键级联，全手动序）；settings 按 scope = repo id 清除。
 /// 返回删除总行数（粗粒度观测值，日志用）。
@@ -1112,6 +1119,44 @@ mod tests {
         assert_eq!(list[0].status, "running");
         assert_eq!(list[0].source, "concern");
         assert!(repo.get("task-1").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn task_timestamps_uniform_epoch_ms() {
+        // 2026-10-03 实弹 bug 回归网：updated_at 曾写秒（create/try_advance_gate 写毫秒）——
+        // dev-docs 时间窗当毫秒解析，产物文档全漏检（评审卡空）。此处锁死：所有写路径
+        // 的 updated_at 必须是 13 位毫秒。
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteTaskRepository::new(db.pool().clone());
+        let mk = |id: &str, status: &str| TaskRow {
+            id: id.into(), repo: "demo".into(), title: "t".into(), description: "d".into(),
+            modules: "[]".into(), acceptance: String::new(), source: "manual".into(), context: "{}".into(),
+            status: status.into(), trust: "manual".into(), error: None, session_id: None, gate: None,
+            prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
+            created_at: "1791016035807".into(), updated_at: "1791016035807".into(), conversation_id: None,
+            origin_task_id: None, successor_task_id: None,
+        };
+        repo.create(&mk("task-ms", "pending")).await.unwrap();
+        repo.update_status("task-ms", "running", None).await.unwrap();
+        let n = repo.get("task-ms").await.unwrap().unwrap().updated_at;
+        assert_eq!(n.len(), 13, "update_status 必须写毫秒，实际: {n}");
+
+        repo.create(&mk("task-gate", "awaiting_approval")).await.unwrap();
+        repo.set_gate("task-gate", Some("plan")).await.unwrap();
+        repo.try_advance_gate("task-gate", Some("plan"), Some("p:analysis"), Some("running")).await.unwrap();
+        let g = repo.get("task-gate").await.unwrap().unwrap().updated_at;
+        assert_eq!(g.len(), 13, "try_advance_gate 必须写毫秒，实际: {g}");
+
+        repo.create(&mk("task-retry", "failed")).await.unwrap();
+        repo.reset_for_retry("task-retry").await.unwrap();
+        let r = repo.get("task-retry").await.unwrap().unwrap().updated_at;
+        assert_eq!(r.len(), 13, "reset_for_retry 必须写毫秒，实际: {r}");
+        // 数据修复迁移（0012）：秒值旧行升级毫秒——内存库跑同一迁移，直接验证幂等
+        sqlx::query("UPDATE tasks SET updated_at = '1791016109' WHERE id = 'task-ms'").execute(db.pool()).await.unwrap();
+        sqlx::query("UPDATE tasks SET updated_at = CAST(updated_at AS INTEGER) * 1000 WHERE length(updated_at) <= 10")
+            .execute(db.pool()).await.unwrap();
+        let fixed = repo.get("task-ms").await.unwrap().unwrap().updated_at;
+        assert_eq!(fixed, "1791016109000", "秒值旧行必须升级为毫秒");
     }
 
     #[tokio::test]
