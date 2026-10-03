@@ -1228,6 +1228,14 @@ pub async fn changed_files(repo_root: &std::path::Path, base: Option<&str>) -> V
 /// 启动基线快照：任务开始时工作区的全部脏文件（已跟踪改动 + 未跟踪）。
 /// 采集时从越界候选集中扣减——任务之前就在那儿的陈年脏文件不进冤案（R2 审查裂缝#1）。
 /// 存内存（spawn 与采集同进程；重启会把 running 任务标 interrupted，基线随之失效）。
+///
+/// 2026-10-03 实弹修订（hover-client 644 越界冤案）：基线的未跟踪部分必须**无视
+/// .gitignore**——上一轮回被打回的实施改了 .gitignore（把 docs/ 加了忽略），基线
+/// 快照时这批文件"被消失"，该轮 agent 恢复 .gitignore 后它们在采集时首次进入 git
+/// 视野，644 个文件全部误判为"任务新增越界"。修复 = 基线并集
+/// `git ls-files --others --ignored`（被忽略但存在的文件也是"早就有的"）。
+/// 上限 5 万条防巨型 ignored 目录（node_modules 类）内存爆炸——超限则放弃该部分
+/// （退回旧行为，宁可漏排不炸内存）。
 pub async fn dirty_files(repo_root: &std::path::Path) -> Vec<String> {
     let Ok(Ok(o)) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -1248,6 +1256,30 @@ pub async fn dirty_files(repo_root: &std::path::Path) -> Vec<String> {
         .collect();
     v.sort();
     v.dedup();
+    // 被忽略但存在的文件：gitignore 游戏免疫（见上方注释）
+    if let Ok(Ok(ig)) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::process::Command::new("git")
+            .args(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"])
+            .current_dir(repo_root)
+            .output(),
+    )
+    .await
+    {
+        if ig.status.success() {
+            let ignored: Vec<String> = String::from_utf8_lossy(&ig.stdout)
+                .split('\0')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            if ignored.len() <= 50_000 {
+                v.extend(ignored);
+                v.sort();
+                v.dedup();
+            }
+        }
+    }
     v
 }
 
@@ -1811,6 +1843,33 @@ mod tests {
         assert!(p1.contains("把双向依赖改为单向"), "任务书必须注入作对照基准");
         let p2 = assemble_phase_review_prompt(&t, 2, "liyuhang");
         assert!(p2.contains("2_requirements_solutions/"));
+    }
+
+    #[tokio::test]
+    async fn dirty_files_baseline_includes_gitignored_untracked() {
+        // 2026-10-03 实弹回归（hover-client 644 越界冤案）：上轮被打回的 agent 改 .gitignore
+        // 把 docs/ 变忽略 → 基线快照这批文件"被消失" → 本轮恢复 .gitignore 后它们首次进
+        // git 视野，全部被误判"任务新增越界"。基线必须收录"被忽略但存在"的文件。
+        let dir = std::env::temp_dir().join(format!("ev-dirty-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+        std::fs::write(dir.join(".gitignore"), "docs/\n").unwrap();
+        std::fs::write(dir.join("docs/asset.png"), "x").unwrap();
+        std::fs::write(dir.join("tracked.txt"), "t").unwrap();
+        for args in [
+            ["init", "-q"].as_slice(),
+            ["add", "."].as_slice(),
+            ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"].as_slice(),
+        ] {
+            std::process::Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        }
+        // 提交后制造"被忽略但未跟踪"与"普通未跟踪"
+        std::fs::write(dir.join("docs/asset.png"), "y").unwrap();
+        std::fs::write(dir.join("new.txt"), "n").unwrap();
+        let d = dirty_files(&dir).await;
+        assert!(d.iter().any(|p| p.contains("docs/asset.png")), "被忽略但存在的文件必须进基线: {:?}", d);
+        assert!(d.iter().any(|p| p.contains("new.txt")), "普通未跟踪文件必须在基线: {:?}", d);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
