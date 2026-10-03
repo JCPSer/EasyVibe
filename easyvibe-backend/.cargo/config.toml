@@ -1,0 +1,3 @@
+# Windows 交叉编译（x86_64-pc-windows-gnu）：用 rust-lld 链接，免装 mingw
+[target.x86_64-pc-windows-gnu]
+linker = "rust-lld"

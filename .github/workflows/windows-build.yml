@@ -1,0 +1,45 @@
+# Windows 版 EasyVibe 打包（Tauri v2）
+# 触发：推送 v* 标签 或 手动 dispatch。产物：NSIS 安装包 + 便携 zip。
+# 说明：Tauri 壳依赖 WebView2/Windows SDK，只能在 Windows 上构建——
+# 本工作流是唯一可靠的 Windows 版产出路径（macOS 本地交叉编译只能产出后端 .exe）。
+name: Windows Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: 前端构建
+        working-directory: easyvibe-renderer
+        run: |
+          npm ci
+          npm run build
+
+      - name: Tauri 打包
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 增量更新签名密钥——在仓库 Settings > Secrets 配置 TAURI_SIGNING_PRIVATE_KEY 后开启
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: easyvibe-desktop
+          # 首次打 tag 发布时取消注释下一行自动建 Release
+          # tagName: ${{ github.ref_name }}
+          # releaseName: 'EasyVibe ${{ github.ref_name }} (Windows)'
+          args: --verbose
