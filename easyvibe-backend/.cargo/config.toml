@@ -1,3 +1,7 @@
-# Windows 交叉编译（x86_64-pc-windows-gnu）：用 rust-lld 链接，免装 mingw
-[target.x86_64-pc-windows-gnu]
-linker = "rust-lld"
+# Windows 交叉编译（macOS → Windows 后端 .exe）：
+# 工具链用 llvm-mingw（macOS 版，解压即用：https://github.com/mstorsjo/llvm-mingw）
+# 目标用 gnullvm——Rust 内置无 GCC 运行时目标，与 clang 工具链天生配对
+# （windows-gnu 目标硬编码 -lgcc，clang 系工具链没有 libgcc 会链接失败）
+# 用法：export PATH=<llvm-mingw>/bin:$PATH && cargo build --release --target x86_64-pc-windows-gnullvm -p easyvibe-app
+[target.x86_64-pc-windows-gnullvm]
+linker = "/tmp/llvm-mingw-20260922-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang"
