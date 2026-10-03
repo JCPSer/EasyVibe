@@ -87,6 +87,9 @@ impl TaskExecutor {
                 "manual" => {
                     let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
                     let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
+                    // P0（ui-test-2026-10-03）：停审批关必须广播——前端列表/徽标/注意力条
+                    // 全靠 task.statusChanged 刷新；不发 = 任务在前端"凭空消失"，审批闭环断裂
+                    self.publish_status(&task.repo, &task.id, "awaiting_approval", Some("plan")).await;
                     info!("[task-exec] 任务 {} 等待计划审批（manual）", task.id);
                     return;
                 }
@@ -96,6 +99,7 @@ impl TaskExecutor {
                         let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
                         let _ = self.task_repo.set_gate(&task.id, Some("plan")).await;
                         self.record_approval(&task.id, "plan", "flagged", Some(&format!("监督模式风险预评估：{reason}——已停在计划审批关"))).await;
+                        self.publish_status(&task.repo, &task.id, "awaiting_approval", Some("plan")).await;
                         info!("[task-exec] 任务 {} 风险预评估高危，停计划关（supervised）", task.id);
                         return;
                     }
@@ -175,8 +179,20 @@ impl TaskExecutor {
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
 
-    async fn record_approval(&self, task_id: &str, gate: &str, decision: &str, note: Option<&str>) {
-        use easyvibe_db::ApprovalRepository as _;
+    /// 任务状态广播统一出口（执行引擎侧）——前端列表/徽标/注意力条的事件源。
+    /// P0 教训（ui-test-2026-10-03）：只写库不广播 = 任务在前端"凭空消失"。
+    async fn publish_status(&self, repo: &str, task_id: &str, status: &str, gate: Option<&str>) {
+        if let Some(tx) = &self.events {
+            crate::publish(tx, crate::BusEvent::TaskStatus {
+                repo: repo.into(),
+                task_id: task_id.into(),
+                status: status.into(),
+                gate: gate.map(Into::into),
+            });
+        }
+    }
+
+    async fn record_approval(&self, task_id: &str, gate: &str, decision: &str, note: Option<&str>) {        use easyvibe_db::ApprovalRepository as _;
         let id = format!("ap-{}-{}-{}", task_id, gate, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
         let _ = self
             .approval_repo

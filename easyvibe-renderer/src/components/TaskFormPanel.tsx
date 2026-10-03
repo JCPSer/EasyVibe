@@ -10,7 +10,7 @@ interface Props {
   map: { modules: Module[] }
   onClose: () => void
   /** S1-5：创建成功后的引导（默认前往任务页签） */
-  onCreated?: () => void
+  onCreated?: (taskId: string) => void
   /** 试用反馈#3：影响模块与地图联动——点定位按钮画布飞过去看 */
   onLocateModule?: (id: string) => void
 }
@@ -86,7 +86,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
                 模块 {selected.length} 个 · 职责/健康度/边界 · 相关违规边 {violationCount} 条
               </p>
               {violationCount > 0 && <p className="text-red-500">包含 direction_violation 证据，agent 修复后需消除</p>}
-              <p className="text-slate-400">grill-me 澄清将在执行前由 Supervisor 按需追问（M3-3）</p>
+              <p className="text-slate-400">执行前 agent 会就模糊点向你提问澄清，请留意任务页的通知</p>
             </div>
           )}
         </div>
@@ -141,7 +141,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">审批模式（改进#7 三档）</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500">审批模式</label>
           {/* 改进#7：监督档——计划时风险预评估，低危直通、高危才停审批关 */}
           <div className="flex rounded-lg border border-slate-200 p-0.5">
             {(['supervised', 'auto', 'manual'] as const).map((t) => (
@@ -157,6 +157,18 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
               </button>
             ))}
           </div>
+          {/* ui-test P1：监督档的自动通过语义必须在提交前告知，不能事后才在评审轮回里看到 */}
+          {trust === 'supervised' && (
+            <p className="mt-1 text-[10px] leading-4 text-slate-400">
+              提交后先做风险预评估：低危自动通过任务书并立即执行，完成后停在 Diff 关等你审；高危会停下来等你批准。
+            </p>
+          )}
+          {trust === 'auto' && (
+            <p className="mt-1 text-[10px] leading-4 text-slate-400">提交后立即执行，三道关全跳过，全程留痕可回溯。</p>
+          )}
+          {trust === 'manual' && (
+            <p className="mt-1 text-[10px] leading-4 text-slate-400">提交后停在任务书审批，批准后按 需求矩阵 → 方案设计 → 实施 逐阶段评审。</p>
+          )}
         </div>
       </div>
 
@@ -170,7 +182,8 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             <button
               onClick={() => {
                 onClose()
-                onCreated?.()
+                // ui-test P1：带上新任务 id 跳转——TaskPage 收到后切流水线并选中它
+                if (created) onCreated?.(created)
               }}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-[12px] font-bold text-white transition-colors hover:bg-blue-700"
             >

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ClipboardList, LayoutGrid, Rows3, Plus } from 'lucide-react'
 import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
 import { TaskBoardPage } from '@/components/TaskBoardPage'
@@ -15,10 +15,13 @@ export function TaskPage({
   backendRepo,
   map,
   onCreateTask,
+  externalFocus,
 }: {
   backendRepo: string | null
   map: CodeMap
   onCreateTask: (d: TaskDraft) => void
+  /** 表单"前往任务页签跟踪"传入：切流水线并选中该任务（nonce 区分多次） */
+  externalFocus?: { id: string; nonce: number } | null
 }) {
   // v4 修订（用户裁定）：默认看板（多任务全景是首页心智），点卡跳流水线看单任务全程
   const [view, setView] = useState<View>('board')
@@ -28,6 +31,12 @@ export function TaskPage({
     setFocusTask({ id: taskId, nonce: Date.now() })
     setView('pipeline')
   }
+
+  // 外部跳入（任务表单创建成功）：nonce 变化即生效
+  useEffect(() => {
+    if (externalFocus?.id) openPipeline(externalFocus.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalFocus])
 
   return (
     <div className="flex h-full flex-col">

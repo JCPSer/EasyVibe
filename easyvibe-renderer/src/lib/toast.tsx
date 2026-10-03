@@ -30,10 +30,20 @@ export function toast(
   listeners.forEach((l) => l(t))
 }
 
+/** 按 key 撤下（任务终态时撤掉它的 sticky 预警——任务已死不再"正在越界"） */
+export function dismissToast(key: string) {
+  listeners.forEach((l) => l({ id: -1, msg: '', kind: 'info', key, dismiss: true } as unknown as Toast))
+}
+
 export function ToastHost() {
   const [items, setItems] = useState<Toast[]>([])
   useEffect(() => {
     const l = (t: Toast) => {
+      // 撤销信令：同 key 删除
+      if ((t as unknown as { dismiss?: boolean }).dismiss) {
+        setItems((prev) => (t.key ? prev.filter((x) => x.key !== t.key) : prev))
+        return
+      }
       // 同 key 替换（保留原位置观感：先删旧再加新，尾部追加）；无 key 走原滑动窗口
       setItems((prev) => {
         const next = t.key ? prev.filter((x) => x.key !== t.key) : prev

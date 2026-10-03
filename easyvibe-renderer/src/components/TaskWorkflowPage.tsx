@@ -813,7 +813,7 @@ export function TaskWorkflowPage({
                 <aside className="flex w-64 shrink-0 flex-col border-l border-slate-100 bg-slate-50/40">
                   <p className="px-3 pt-3 text-micro font-bold uppercase tracking-wider text-slate-400">产物文档</p>
                   <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
-                    {docs.length === 0 && <p className="px-1 py-2 text-micro text-slate-400">本任务暂无产物文档（agent 未按规范路径产出）</p>}
+                    {docs.length === 0 && <p className="px-1 py-2 text-micro text-slate-400">本任务暂无产物文档</p>}
                     {docs.map((d) => (
                       <div key={d.path} className="rounded-lg border border-slate-200 bg-white p-2">
                         <p className="truncate text-[11px] font-semibold text-slate-700" title={d.name}>{d.name}</p>

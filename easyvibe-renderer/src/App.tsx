@@ -1,4 +1,4 @@
-import { ToastHost, toast } from '@/lib/toast'
+import { ToastHost, dismissToast, toast } from '@/lib/toast'
 import { Component, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
@@ -513,8 +513,8 @@ function Canvas({
   onViewRequestConsumed?: () => void
   /** M4-1 旧入口引导卡（渲染在右栏上方，可关闭） */
   guide?: React.ReactNode
-  /** 任务创建成功 → 壳层跳任务页 */
-  onTaskCreated: () => void
+  /** 任务创建成功 → 壳层跳任务页（带新任务 id 选中） */
+  onTaskCreated: (taskId: string) => void
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
@@ -1415,6 +1415,8 @@ export default function App() {
 
   // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
   const [page, setPage] = useState<PageId>('map')
+  // ui-test P1：表单创建成功 → 任务页流水线选中该任务（nonce 区分多次跳入）
+  const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
   const [repoPanelOpen, setRepoPanelOpen] = useState(false)
   const [guideDismissed, setGuideDismissed] = useState(
@@ -1609,17 +1611,18 @@ export default function App() {
           if (msg.name === 'task.contractAlert') {
             // L2 过程预警：任务执行中哨兵抓到的新增越界——比终态红线早 N 分钟到达
             // R3 D1：埋点（过程预警曝光）+ 操作按钮直达评审（此前裸 toast 无入口）；info 色与终态红区分
+            // ui-test-2026-10-03 P1：措辞去内部 task id（用户看不懂），任务终态即撤下（见 statusChanged）
             const d = msg.data
             if (d?.repo !== backendRepo) return
             track(d.repo, 'ui.contractAlert.shown', { taskId: d.taskId })
-            toast(`影响面预警：任务 ${d.taskId} 正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'info', {
-              label: '去评审',
+            toast(`影响面预警：有任务正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'info', {
+              label: '去处理',
               onClick: () => {
                 track(d.repo, 'ui.contractAlert.click', { taskId: d.taskId })
-                handlePageChange('review')
+                handlePageChange('tasks')
               },
             }, true, `contract:${d.taskId}`)
-            if (document.hidden) notifySystem('EasyVibe · 影响面预警', `任务 ${d.taskId} 正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
+            if (document.hidden) notifySystem('EasyVibe · 影响面预警', `有任务正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
           }
           if (msg.name === 'task.contractViolated') {
             // R2 裂缝#3：auto/supervised 任务无审批关——越界经 WS 主动送达（与审批通知同双通道）
@@ -1627,14 +1630,14 @@ export default function App() {
             const d = msg.data
             if (d?.repo !== backendRepo) return
             track(d.repo, 'ui.contractViolated.shown', { taskId: d.taskId })
-            toast(`影响面合约：任务 ${d.taskId} 越界改动 ${d.files?.length ?? 0} 个文件`, 'error', {
-              label: '去评审',
+            toast(`影响面合约：有任务越界改动 ${d.files?.length ?? 0} 个文件`, 'error', {
+              label: '去处理',
               onClick: () => {
                 track(d.repo, 'ui.contractViolated.click', { taskId: d.taskId })
-                handlePageChange('review')
+                handlePageChange('tasks')
               },
             }, true, `contract:${d.taskId}`)
-            if (document.hidden) notifySystem('EasyVibe · 影响面越界', `任务 ${d.taskId} 越界：${(d.files ?? []).slice(0, 3).join('、')}`)
+            if (document.hidden) notifySystem('EasyVibe · 影响面越界', `有任务越界 ${d.files?.length ?? 0} 个文件`)
           }
           if (msg.name === 'task.statusChanged') {
             const d = msg.data
@@ -1644,11 +1647,15 @@ export default function App() {
             // 系统通知（惰性申请权限）+ 页内 toast 双通道；仅窗口隐藏时弹系统通知防打扰
             if (d?.status === 'awaiting_approval') {
               toast('有任务等待你的审批', 'info')
-              if (document.hidden) notifySystem('EasyVibe · 待审批', `任务 ${d.taskId} 已到达审批关${d.gate ? `（${d.gate}）` : ''}`)
+              if (document.hidden) notifySystem('EasyVibe · 待审批', `有任务已到达审批关${d.gate ? `（${d.gate}）` : ''}`)
             }
             if (d?.status === 'failed') {
-              toast(`任务 ${d.taskId} 执行失败`, 'error')
-              if (document.hidden) notifySystem('EasyVibe · 任务失败', `任务 ${d.taskId} 执行失败，回应用查看详情`)
+              toast('有任务执行失败', 'error')
+              if (document.hidden) notifySystem('EasyVibe · 任务失败', '有任务执行失败，回应用查看详情')
+            }
+            // ui-test-2026-10-03：任务终态（含 kill）即撤下它的越界预警——已死任务不再"正在越界"
+            if (['failed', 'done', 'rejected', 'interrupted'].includes(d?.status)) {
+              dismissToast(`contract:${d.taskId}`)
             }
           }
         } catch {
@@ -1921,19 +1928,22 @@ export default function App() {
                 </div>
               )
             }
-            onTaskCreated={() => handlePageChange('tasks')}
+            onTaskCreated={(id) => {
+              setTaskFocus({ id, nonce: Date.now() })
+              handlePageChange('tasks')
+            }}
           />
         </ReactFlowProvider>
       </CanvasBoundary>
     ),
-    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
     workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onLocateModule={() => handlePageChange('map')} />,
     // v4 P1：任务编排/任务工作流两个旧页签删除，统一从「任务」页进入（视图切换）；
     // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
-    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
-    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
+    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
     changes: <ChangesPage backendRepo={backendRepo} map={map} />,
     drift: <DriftPage />,
     health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
@@ -2039,7 +2049,10 @@ export default function App() {
           draft={taskDraft}
           map={map}
           onClose={() => setTaskDraft(null)}
-          onCreated={() => handlePageChange('tasks')}
+          onCreated={(id) => {
+            setTaskFocus({ id, nonce: Date.now() })
+            handlePageChange('tasks')
+          }}
           onLocateModule={() => handlePageChange('map')}
         />
       )}
