@@ -761,12 +761,15 @@ export function TaskWorkflowPage({
                         变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件 · 完成于 {absTime(sel.updatedAt ?? '')}
                       </p>
                     ))}
-                    {/* TaskPanel 碎片②：归档路径（P1 留在 done 卡，P2 挪治理视图） */}
-                    {(sel as unknown as { result?: { archivedPath?: string | null } }).result?.archivedPath && (
-                      <p className="mono mt-1 truncate text-micro text-slate-400" title={(sel as unknown as { result?: { archivedPath?: string } }).result?.archivedPath}>
-                        已归档：{(sel as unknown as { result?: { archivedPath?: string } }).result?.archivedPath}
-                      </p>
-                    )}
+                    {/* TaskPanel 碎片②：归档路径（P1 留在 done 卡，P2 挪治理视图）——只显示仓库内相对路径，不暴露本机绝对路径 */}
+                    {(() => {
+                      const ap = (sel as unknown as { result?: { archivedPath?: string | null } }).result?.archivedPath
+                      if (!ap) return null
+                      const rel = ap.includes('/.easyvibe/') ? `.easyvibe/${ap.split('/.easyvibe/')[1]}` : ap.split('/').pop()
+                      return (
+                        <p className="mono mt-1 truncate text-micro text-slate-400" title={rel}>已归档:{rel}</p>
+                      )
+                    })()}
                     <p className="mt-1 text-micro text-slate-400">STAR 记忆与操作日志见右侧产物文档。</p>
                     {/* TaskPanel 碎片①：重新巡检验证改动效果（治理闭环入口不能丢） */}
                     <button

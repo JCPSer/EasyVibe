@@ -89,6 +89,7 @@ export function TaskBoardPage({
   const [order, setOrder] = useState<Record<string, number>>({}) // 列内排序（会话内）
   const [dragId, setDragId] = useState<string | null>(null)
   const [overCol, setOverCol] = useState<ColKey | null>(null)
+  const [illegalCol, setIllegalCol] = useState<ColKey | null>(null)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [deciding, setDeciding] = useState<string | null>(null)
@@ -212,6 +213,13 @@ export function TaskBoardPage({
       setRejectNote('')
       return
     }
+    // ui-test P2：落到非法列——落下瞬间也要给解释（拖拽中的红环提示可能被错过）
+    toast(
+      from === 'backlog'
+        ? '待启动的任务不能拖到其他列——等它跑起来再管理'
+        : '只有「待你评审」的任务可以拖拽处分（拖到「已完成」= 通过，「待启动」= 打回）',
+      'info',
+    )
   }
 
   const duration = (t: BoardTask) => {
@@ -321,7 +329,7 @@ export function TaskBoardPage({
       )}
       {failed && (
         <div className="mt-2 flex items-center gap-1 border-t border-red-100 pt-2 text-[10px] text-red-400">
-          <Copy size={9} /> 拖到下方主体区 = 复制为新任务
+          <Copy size={9} /> 拖到本列下方（待启动区）= 复制重提
         </div>
       )}
     </div>
@@ -348,25 +356,42 @@ export function TaskBoardPage({
             key={key}
             onDragOver={(e) => {
               const t = (tasks ?? []).find((x) => x.id === dragId)
-              if (t && canDrop(t, key)) {
-                e.preventDefault()
+              if (!t) return
+              // ui-test P2：非法目标也要 preventDefault——否则 drop 不触发，用户拖了没有任何解释
+              e.preventDefault()
+              if (canDrop(t, key)) {
                 e.dataTransfer.dropEffect = 'move'
                 setOverCol(key)
+                setIllegalCol(null)
               } else {
                 e.dataTransfer.dropEffect = 'none'
                 setOverCol(null)
+                setIllegalCol(key)
               }
             }}
-            onDragLeave={() => setOverCol((c) => (c === key ? null : c))}
+            onDragLeave={() => {
+              setOverCol((c) => (c === key ? null : c))
+              setIllegalCol((c) => (c === key ? null : c))
+            }}
             onDrop={onDrop(key)}
             className={`flex min-w-0 flex-1 flex-col rounded-xl p-2 transition-colors ${
-              overCol === key ? 'bg-blue-50 ring-2 ring-blue-200' : 'bg-slate-50'
+              overCol === key
+                ? 'bg-blue-50 ring-2 ring-blue-200'
+                : illegalCol === key
+                  ? 'bg-red-50/60 ring-2 ring-red-200'
+                  : 'bg-slate-50'
             }`}
           >
             <div className="flex items-center gap-1.5 px-1.5 py-1.5">
               <span className="text-[12px] font-bold text-slate-600">{label}</span>
               <span className="tnum rounded-full bg-slate-200/70 px-1.5 text-[10px] font-semibold text-slate-500">{counts[key]}</span>
               {key === 'running' && counts.running > 0 && <Loader2 size={10} className="animate-spin text-blue-500" />}
+              {/* 非法落点即时解释（拖拽中可见，比落下后 toast 更早一步） */}
+              {illegalCol === key && dragId && (
+                <span className="ml-auto rounded bg-red-100 px-1.5 py-px text-[9px] font-bold text-red-500">
+                  {(tasks ?? []).find((x) => x.id === dragId)?.status === 'awaiting_approval' ? '仅可拖到「已完成」= 通过' : '该列不可拖入'}
+                </span>
+              )}
             </div>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
               {key === 'backlog' && grouped.failedTop.length > 0 && (
@@ -377,8 +402,11 @@ export function TaskBoardPage({
                 </div>
               )}
               {grouped[key].map((t) => renderCard(t))}
-              {key === 'backlog' && counts.backlog === 0 && (
-                <p className="px-1 py-4 text-center text-[10px] text-slate-300">暂无任务——从地图/问题/建议发起</p>
+              {/* ui-test P2：空列给引导占位（密度与可发现性），不只 backlog 一列 */}
+              {grouped[key].length === 0 && !(key === 'backlog' && grouped.failedTop.length > 0) && (
+                <p className="rounded-lg border border-dashed border-slate-200 px-1 py-6 text-center text-[10px] text-slate-300">
+                  {key === 'backlog' ? '暂无任务——从地图/问题/建议发起' : '没有任务'}
+                </p>
               )}
             </div>
           </div>

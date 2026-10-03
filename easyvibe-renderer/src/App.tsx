@@ -2,8 +2,6 @@ import { ToastHost, dismissToast, toast } from '@/lib/toast'
 import { Component, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ReactFlow,
-  Background,
-  BackgroundVariant,
   Controls,
   MiniMap,
   Panel,
@@ -950,6 +948,17 @@ function Canvas({
     <div className="flex h-full w-full overflow-hidden bg-slate-50">
       {/* 中央画布 */}
       <div className="relative flex-1">
+        {/* ui-test P2：xyflow 的 <Background> 在 store transform 未就绪的更新周期里把
+            cx/cy/r/pattern x/y 算成 NaN（库内部行为，挂载时机绕不过）。
+            改用 CSS 径向渐变点阵：视觉等价、零 SVG、零 NaN。 */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px)',
+            backgroundSize: '28px 28px',
+          }}
+        />
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -963,7 +972,6 @@ function Canvas({
           nodesConnectable={false}
           deleteKeyCode={null}
         >
-          <Background variant={BackgroundVariant.Dots} gap={28} size={1.2} color="#cbd5e1" />
           <Controls showInteractive={false} position="bottom-left" />
           <MiniMap
             position="bottom-right"
@@ -978,7 +986,6 @@ function Canvas({
             maskColor="rgba(226,232,240,0.7)"
             style={{ width: 200, height: 130 }}
           />
-
           {/* 右上角：图例（M4-1.5 去挤：架构健康主视觉已入头部卡，原 ArchHealthCard 信息重复，撤下） */}
           <Panel position="top-right" className="flex flex-col gap-2">
             <Legend violations={violations} />

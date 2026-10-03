@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
-import { absTime } from '@/lib/diffStat'
+import { absTime, toMs } from '@/lib/diffStat'
 import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import { onPatrolFinished } from '@/lib/growthBus'
 
@@ -34,12 +34,13 @@ interface Dashboard {
   latestModules: LatestModule[]
 }
 
-/** 迷你圆环（KPI 与排行共用）：score 0-100 */
+/** 迷你圆环（KPI 与排行共用）：score 0-100；NaN 入参会污染全部 SVG 坐标（ui-test P2 控制台报错来源） */
 function Ring({ score, size = 44 }: { score: number; size?: number }) {
+  const safe = Number.isFinite(score) ? score : 0
   const r = (size - 6) / 2
   const c = 2 * Math.PI * r
-  const pct = Math.max(0, Math.min(100, score)) / 100
-  const color = healthColor(score)
+  const pct = Math.max(0, Math.min(100, safe)) / 100
+  const color = healthColor(safe)
   return (
     <svg width={size} height={size} className="-rotate-90">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={4} />
@@ -112,7 +113,8 @@ export function HealthPage({
   const moduleAvg = latest && latest.moduleCount > 0 ? latest.moduleAvg : null
   const mapModuleAvg = useMemo(() => {
     if (!map || map.modules.length === 0) return null
-    return Math.round(map.modules.reduce((s, m) => s + m.health.score, 0) / map.modules.length)
+    const avg = Math.round(map.modules.reduce((s, m) => s + (Number.isFinite(m.health.score) ? m.health.score : 0), 0) / map.modules.length)
+    return Number.isFinite(avg) ? avg : null
   }, [map])
   const reverseDeps = useMemo(() => map?.edges.filter((e) => e.direction_violation).length ?? null, [map])
   const coverage = map?.meta.stats?.coverage_ratio ?? null
@@ -322,6 +324,13 @@ export function HealthPage({
 }
 
 /** 趋势折线图：纯 SVG，x=巡检序、y=0-100 分，悬停显示单点明细 */
+function fmtDay(iso: string): string {
+  const t = toMs(iso)
+  if (t === null) return '—'
+  const d = new Date(t)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
 function TrendChart({
   runs,
   hover,
@@ -337,9 +346,17 @@ function TrendChart({
   const iw = W - PAD.l - PAD.r
   const ih = H - PAD.t - PAD.b
   const x = (i: number) => PAD.l + (runs.length === 1 ? iw / 2 : (i / (runs.length - 1)) * iw)
-  const y = (s: number) => PAD.t + (1 - Math.max(0, Math.min(100, s)) / 100) * ih
+  const y = (s: number) => PAD.t + (1 - Math.max(0, Math.min(100, Number.isFinite(s) ? s : 0)) / 100) * ih
   const line = (key: 'archScore' | 'moduleAvg') =>
-    runs.map((r, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(key === 'archScore' ? (r.archScore ?? 0) : r.moduleAvg).toFixed(1)}`).join(' ')
+    // 缺数据的点跳过（M/L 命令不带坐标），折线断开优于 NaN 坐标报错
+    runs
+      .map((r, i) => {
+        const v = key === 'archScore' ? r.archScore : r.moduleCount > 0 ? r.moduleAvg : null
+        if (v == null || !Number.isFinite(v)) return null
+        return `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`
+      })
+      .filter(Boolean)
+      .join(' ')
   const h = hover !== null ? runs[hover] : null
 
   return (
@@ -358,11 +375,13 @@ function TrendChart({
         {runs.map((r, i) => (
           <g key={r.id}>
             <rect x={x(i) - 14} y={0} width={28} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-            <circle cx={x(i)} cy={y(r.archScore ?? 0)} r={hover === i ? 4 : 2.5} fill="#fff" stroke="#3b82f6" strokeWidth={2} />
-            <circle cx={x(i)} cy={y(r.moduleAvg)} r={hover === i ? 3.5 : 2} fill="#fff" stroke="#cbd5e1" strokeWidth={2} />
+            {/* ui-test P2：archScore 可缺省/moduleAvg 可无数据——NaN 坐标是控制台 cx/cy NaN 报错的来源，缺数据不画点 */}
+            {r.archScore != null && <circle cx={x(i)} cy={y(r.archScore)} r={hover === i ? 4 : 2.5} fill="#fff" stroke="#3b82f6" strokeWidth={2} />}
+            {r.moduleCount > 0 && <circle cx={x(i)} cy={y(r.moduleAvg)} r={hover === i ? 3.5 : 2} fill="#fff" stroke="#cbd5e1" strokeWidth={2} />}
             {i % Math.ceil(runs.length / 8) === 0 && (
               <text x={x(i)} y={H - 6} textAnchor="middle" fontSize={8} fill="#cbd5e1">
-                {r.startedAt.slice(5, 10)}
+                {/* ui-test P2：startedAt 可能是 epoch 毫秒串——slice(5,10) 会切出乱码；统一走 toMs 格式化 */}
+                {fmtDay(r.startedAt)}
               </text>
             )}
           </g>
@@ -375,7 +394,7 @@ function TrendChart({
         >
           <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400">架构级</span></p>
           <p className="tnum text-slate-500">{h.moduleCount > 0 ? h.moduleAvg : '—'} <span className="font-normal text-slate-300">模块平均</span></p>
-          <p className="tnum text-slate-300">{h.startedAt.slice(0, 10)}</p>
+          <p className="tnum text-slate-300">{absTime(h.startedAt).slice(0, 10)}</p>
         </div>
       )}
     </div>
