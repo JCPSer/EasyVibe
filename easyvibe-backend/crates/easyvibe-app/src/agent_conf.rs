@@ -146,18 +146,31 @@ pub fn resolve_agent_command(cmd: &str) -> String {
     if as_path.components().count() > 1 && as_path.is_file() {
         return cmd.to_string();
     }
+    // Windows 可执行带 .exe/.cmd 后缀；PATH 分隔符平台相关（split_paths 自动处理 ':'/';'）
+    let names: Vec<String> = if cfg!(windows) {
+        vec![cmd.to_string(), format!("{cmd}.exe"), format!("{cmd}.cmd"), format!("{cmd}.bat")]
+    } else {
+        vec![cmd.to_string()]
+    };
     if let Some(p) = std::env::var("PATH").ok().as_deref().map(|dirs| {
-        dirs.split(':').map(str::trim).filter(|d| !d.is_empty()).map(|d| format!("{d}/{cmd}")).find(|p| std::path::Path::new(p).is_file())
+        std::env::split_paths(dirs)
+            .filter(|d| !d.as_os_str().is_empty())
+            .flat_map(|d| names.iter().map(move |n| format!("{}/{n}", d.display())))
+            .find(|p| std::path::Path::new(p).is_file())
     }).flatten() {
         return p;
     }
+    #[cfg(unix)]
     if let Ok(out) = std::process::Command::new("bash").args(["-lc", &format!("command -v {cmd}")]).output() {
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if out.status.success() && !p.is_empty() && std::path::Path::new(&p).is_file() {
             return p;
         }
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    // Windows 无登录 shell 概念；HOME 缺失时 USERPROFILE 兜底（GUI 启动两者皆薄）
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())
+        .or_else(|| std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()))
+        .unwrap_or_default();
     for cand in [
         format!("{home}/.claude/local/{cmd}"),
         format!("{home}/.local/bin/{cmd}"),

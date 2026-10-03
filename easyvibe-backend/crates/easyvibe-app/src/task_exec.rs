@@ -969,7 +969,10 @@ pub fn harness_dir() -> PathBuf {
     match std::env::var("EASYVIBE_HARNESS_DIR") {
         Ok(v) => PathBuf::from(v),
         Err(_) => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            // Windows 无 HOME——USERPROFILE 兜底，都缺时落当前目录（独立 exe 场景 = exe 旁）
+            let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())
+                .or_else(|| std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()))
+                .unwrap_or_else(|| ".".into());
             PathBuf::from(format!("{home}/.easyvibe/harness"))
         }
     }

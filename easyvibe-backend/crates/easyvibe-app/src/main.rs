@@ -17,6 +17,58 @@ use tracing::info;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// 出厂资产编译期内嵌——独立分发形态（双击 exe / 单文件拷到干净机器）下环境变量与旁路文件都不存在，
+/// 解析链兜底到这里。单一事实源仍是仓库根的这四个文件：改提示词后重编后端即更新内嵌快照。
+/// DIST 由 build.rs 决定内嵌真身还是占位页（渲染器未构建的 CI 场景），见 EMBEDDED_UI_REAL。
+mod assets {
+    pub const MAP_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-v2.2.md");
+    pub const PATROL_PROMPT: &str = include_str!("../../../../easyvibe-map-patrol-prompt.md");
+    pub const MAP_SCHEMA: &str = include_str!("../../../../easyvibe-map-schema-v1.json");
+    pub const SUBMAP_PROMPT: &str = include_str!("../../../../easyvibe-module-submap-prompt.md");
+    include!(concat!(env!("OUT_DIR"), "/embedded_dist.rs"));
+}
+
+/// 独立形态（内嵌 UI 可用且未指定外部静态目录）下为 true：启动后自动打开浏览器
+fn embedded_ui_available() -> bool {
+    assets::EMBEDDED_UI_REAL
+}
+
+/// 文本资产解析链：env 显式路径 → exe 旁路文件 → 当前目录 → 编译期内嵌。
+/// 内嵌命中且 persist 时落盘到数据目录 assets/（schema 需以真实路径交给外部 agent 读取）。
+/// 返回 (内容, 实际来源路径)。
+fn resolve_text_asset(env_var: &str, filename: &str, embedded: &str, persist: bool) -> (String, String) {
+    if let Ok(p) = std::env::var(env_var) {
+        if !p.is_empty() {
+            match std::fs::read_to_string(&p) {
+                Ok(s) => return (s, p),
+                Err(e) => eprintln!("[assets] {env_var}={p} 不可读（{e}），回落旁路/内嵌副本"),
+            }
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join(filename);
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                return (s, p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string(filename) {
+        return (s, filename.into());
+    }
+    if persist {
+        let dir = data_dir().join("assets");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let p = dir.join(filename);
+            if !p.exists() {
+                let _ = std::fs::write(&p, embedded);
+            }
+            return (embedded.to_string(), p.to_string_lossy().into_owned());
+        }
+    }
+    (embedded.to_string(), format!("<embedded:{filename}>"))
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub map_service: Arc<MapService>,
@@ -193,12 +245,52 @@ pub fn build_router(state: AppState) -> Router {
     // D5：桌面壳同源托管——EASYVIBE_STATIC_DIR 指向渲染器构建产物（dist）时，
     // / 与未命中路径回落到静态资源；前端 fetch('/api/...') 与 /ws 全部同源，
     // 桌面 WebView 直接加载 http://127.0.0.1:{port}，CORS/跨站问题整体消失。
+    // 独立分发形态（未指定静态目录）回落到编译期内嵌的 dist——后端自己同源托管 UI，
+    // 双击 exe 直接出界面（2026-10-04：此前裸 exe 只挂 API 无 UI，用户双击"没反应"）。
     match std::env::var("EASYVIBE_STATIC_DIR").ok().filter(|d| !d.is_empty()) {
         Some(dir) => {
             use tower_http::services::ServeDir;
             router.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true))
         }
+        None if embedded_ui_available() => router.fallback_service(get(embedded_static)),
         None => router,
+    }
+}
+
+/// 内嵌 dist 的静态回落（独立形态）：按路径精确查找，未命中回落 index.html（SPA 前端路由）
+async fn embedded_static(uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let file = assets::DIST
+        .get_file(path)
+        .or_else(|| assets::DIST.get_file("index.html"));
+    match file {
+        Some(f) => (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static(mime_by_ext(path)),
+            )],
+            f.contents(),
+        )
+            .into_response(),
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn mime_by_ext(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ico") => "image/x-icon",
+        Some("txt") | Some("md") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
     }
 }
 
@@ -227,7 +319,11 @@ async fn list_repos(State(st): State<AppState>) -> Json<ApiResponse<Vec<RepoInfo
 
 fn data_dir() -> std::path::PathBuf {
     std::env::var("EASYVIBE_DATA_DIR").map(Into::into).unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        // Windows 无 HOME（GUI 启动下 USERPROFILE 也偶有缺失）——逐级兜底，
+        // 都缺时落当前目录（独立 exe 场景 = exe 旁，至少可写不闪退）
+        let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())
+            .or_else(|| std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()))
+            .unwrap_or_else(|| ".".into());
         std::path::PathBuf::from(format!("{home}/.easyvibe"))
     })
 }
@@ -440,10 +536,12 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
     // 子图提示词每次请求重读（产品内置协议迭代快——避免"改了提示词要重启后端"的叠加
     // （本次实弹：路径修正后的提示词因后端未重启而仍用旧版，DeskWar 两次分析空跑）。
     // 读取失败回退启动时装载的副本，绝不阻断
-    let template = std::fs::read_to_string(
-        std::env::var("EASYVIBE_SUBMAP_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-module-submap-prompt.md".into()),
-    )
-    .unwrap_or_else(|_| st.submap_prompt.to_string());
+    let (template, _) = resolve_text_asset(
+        "EASYVIBE_SUBMAP_PROMPT_PATH",
+        "easyvibe-module-submap-prompt.md",
+        &st.submap_prompt,
+        false,
+    );
     ensure_agent_available(&st)?;
     let prompt = template
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
@@ -900,10 +998,7 @@ async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(St
 /// Y3：一键诊断导出——把"用户报障口头描述"变成"导出一个文件"
 /// 最近 200 行日志 + 后端版本 + 各表计数（settings 的加密值剔除）
 async fn export_diagnostics(State(st): State<AppState>) -> Result<Response, AppError> {
-    let dir = std::env::var("EASYVIBE_DATA_DIR").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        format!("{home}/.easyvibe")
-    });
+    let dir = data_dir().to_string_lossy().into_owned();
     let log_path = format!("{dir}/logs/easyvibe.log");
     let logs = std::fs::read_to_string(&log_path)
         .map(|t| t.lines().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
@@ -2051,10 +2146,7 @@ async fn spawn_repo_pipeline(
 async fn main() {
     // Y3 清债：日志落盘（排障不再只靠终端）——数据目录 logs/ 按天滚动，双写 stderr
     let _log_guard = {
-        let dir = std::env::var("EASYVIBE_DATA_DIR").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-            format!("{home}/.easyvibe")
-        });
+        let dir = data_dir().to_string_lossy().into_owned();
         let dir = format!("{dir}/logs");
         std::fs::create_dir_all(&dir).unwrap_or_else(|e| eprintln!("日志目录创建失败 {dir}: {e}"));
         let appender = tracing_appender::rolling::daily(&dir, "easyvibe.log");
@@ -2142,10 +2234,12 @@ async fn main() {
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let prompt_path = std::env::var("EASYVIBE_PROMPT_PATH")
-        .unwrap_or_else(|_| "easyvibe-map-prompt-v2.2.md".into());
-    let prompt_template = std::fs::read_to_string(&prompt_path)
-        .unwrap_or_else(|e| panic!("提示词模板不可读 {prompt_path}: {e}（用 EASYVIBE_PROMPT_PATH 指定）"));
+    let (prompt_template, prompt_path) = resolve_text_asset(
+        "EASYVIBE_PROMPT_PATH",
+        "easyvibe-map-prompt-v2.2.md",
+        assets::MAP_PROMPT,
+        true,
+    );
     info!("agent={} args={:?} prompt={}", agent_command, agent_args, prompt_path);
 
     // 每个仓库一个地图 watcher，变更翻译为总线事件
@@ -2163,10 +2257,8 @@ async fn main() {
     }
 
     // M2-4：域 2 SQLite + 巡检槽位
-    let data_dir = std::env::var("EASYVIBE_DATA_DIR").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        format!("{home}/.easyvibe")
-    });
+    let data_dir_path = data_dir();
+    let data_dir = data_dir_path.to_string_lossy().into_owned();
     std::fs::create_dir_all(&data_dir).unwrap_or_else(|e| panic!("数据目录不可写 {data_dir}: {e}"));
     let database = easyvibe_db::Database::connect_file(&format!("{data_dir}/easyvibe.db"))
         .await
@@ -2214,15 +2306,21 @@ async fn main() {
     } else {
         LlmMode::Anthropic
     };
-    let patrol_prompt = std::fs::read_to_string(
-        std::env::var("EASYVIBE_PATROL_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-map-patrol-prompt.md".into()),
-    )
-    .expect("巡检提示词模板不可读（用 EASYVIBE_PATROL_PROMPT_PATH 指定）");
-    let schema_path = std::env::var("EASYVIBE_SCHEMA_PATH").unwrap_or_else(|_| "easyvibe-map-schema-v1.json".into());
-    let submap_prompt = std::fs::read_to_string(
-        std::env::var("EASYVIBE_SUBMAP_PROMPT_PATH").unwrap_or_else(|_| "easyvibe-module-submap-prompt.md".into()),
-    )
-    .expect("子图分析提示词不可读（用 EASYVIBE_SUBMAP_PROMPT_PATH 指定）");
+    // 提示词/schema 统一走解析链（env → exe 旁 → cwd → 编译期内嵌落盘），不再因缺文件直接 panic——
+    // 独立分发形态（双击 exe）此前死在这里：窗口一闪而过，用户看到的就是"没反应"
+    let (patrol_prompt, _) = resolve_text_asset(
+        "EASYVIBE_PATROL_PROMPT_PATH",
+        "easyvibe-map-patrol-prompt.md",
+        assets::PATROL_PROMPT,
+        true,
+    );
+    let (_, schema_path) = resolve_text_asset("EASYVIBE_SCHEMA_PATH", "easyvibe-map-schema-v1.json", assets::MAP_SCHEMA, true);
+    let (submap_prompt, _) = resolve_text_asset(
+        "EASYVIBE_SUBMAP_PROMPT_PATH",
+        "easyvibe-module-submap-prompt.md",
+        assets::SUBMAP_PROMPT,
+        true,
+    );
 
     // M3-3/S1-3：harness 插槽内核装载（manifest 驱动 + 出厂底账补齐）+ 任务执行引擎 + pending 恢复
     let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
@@ -2363,8 +2461,24 @@ async fn main() {
     // D5：端口可由桌面壳覆盖（开发 7101 / 桌面壳 7151，避免双开冲突）
     let port: u16 = std::env::var("EASYVIBE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(7101);
     let addr = format!("127.0.0.1:{port}");
-    info!("EasyVibe backend listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap_or_else(|e| panic!("绑定 {addr} 失败: {e}"));
+    // 独立形态（无外部静态目录 + 内嵌 UI）：打印人类可读横幅并自动打开浏览器——
+    // 双击 exe 的完整体验是"弹窗出界面"，而不是一个看不懂的黑窗口（2026-10-04 修复）
+    let standalone = std::env::var("EASYVIBE_STATIC_DIR").ok().filter(|d| !d.is_empty()).is_none()
+        && embedded_ui_available();
+    if standalone {
+        let url = format!("http://{addr}");
+        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        eprintln!("  EasyVibe 已启动 → {url}");
+        eprintln!("  数据目录: {}", data_dir_path.display());
+        eprintln!("  关闭本窗口即退出服务");
+        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        #[cfg(target_os = "windows")]
+        std::process::Command::new("cmd").args(["/C", "start", &url]).spawn().ok();
+        #[cfg(target_os = "macos")]
+        std::process::Command::new("open").arg(&url).spawn().ok();
+    }
+    info!("EasyVibe backend listening on {addr}（standalone={standalone}）");
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -2392,6 +2506,43 @@ mod tests {
 
     async fn test_state() -> AppState {
         test_state_with(MapService::new(vec![])).await
+    }
+
+    /// 资产解析链兜底：env 未设 + exe 旁无 + cwd 无 → 内嵌副本（persist=false 不落盘）
+    #[test]
+    fn text_asset_chain_falls_back_to_embedded() {
+        let (s, p) = resolve_text_asset(
+            "EASYVIBE_TEST_DEFINITELY_UNSET_VAR",
+            "easyvibe-test-nonexistent-asset-6f2d.md",
+            "EMBEDDED_BODY",
+            false,
+        );
+        assert_eq!(s, "EMBEDDED_BODY");
+        assert!(p.contains("<embedded:"), "应标记为内嵌来源: {p}");
+    }
+
+    /// 资产解析链 env 优先：显式路径存在时直接用
+    #[test]
+    fn text_asset_chain_env_wins() {
+        let f = std::env::temp_dir().join("easyvibe-test-asset-env-wins.md");
+        std::fs::write(&f, "ENV_BODY").unwrap();
+        // 安全：测试进程独占临时文件读写，无并发 set_env 竞态
+        std::env::set_var("EASYVIBE_TEST_ASSET_VAR", &f);
+        let (s, p) = resolve_text_asset("EASYVIBE_TEST_ASSET_VAR", "whatever.md", "EMBEDDED", false);
+        std::env::remove_var("EASYVIBE_TEST_ASSET_VAR");
+        assert_eq!(s, "ENV_BODY");
+        assert_eq!(p, f.to_string_lossy().into_owned());
+        std::fs::remove_file(&f).ok();
+    }
+
+    #[test]
+    fn mime_by_ext_known_types() {
+        assert!(mime_by_ext("index.html").starts_with("text/html"));
+        assert!(mime_by_ext("app.js").contains("javascript"));
+        assert!(mime_by_ext("app.css").starts_with("text/css"));
+        assert_eq!(mime_by_ext("logo.png"), "image/png");
+        assert_eq!(mime_by_ext("font.woff2"), "font/woff2");
+        assert_eq!(mime_by_ext("data.bin"), "application/octet-stream");
     }
 
     async fn test_state_with(svc: std::sync::Arc<MapService>) -> AppState {
