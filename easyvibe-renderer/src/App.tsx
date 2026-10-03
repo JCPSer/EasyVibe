@@ -46,13 +46,6 @@ import { initUpdater } from '@/lib/updater'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
 
-// M4-1 全页面集合（ui.page 持久化校验用）
-const ALL_PAGES: Set<PageId> = new Set([
-  'map', 'modules', 'deps', 'drift', 'health',
-  'workbench', 'tasks', 'todo', 'review', 'changes',
-  'kb-docs', 'kb-decisions', 'kb-apis', 'settings', 'git',
-])
-
 interface Filters {
   violationsOnly: boolean
   issuesOnly: boolean
@@ -1530,17 +1523,18 @@ export default function App() {
     [saveUiPref],
   )
 
-  // 每项目记忆：最后所在页 / 右栏宽度 / 面板开合（M4-1 状态持久化，防刷新丢位置）
+  // 每项目记忆：右栏宽度 / 面板开合随项目持久化（M4-1 状态持久化，防刷新丢位置）。
+  // 页签不恢复（2026-10-03 用户裁定）：切换仓库固定落架构地图——上次在 A 仓库看任务，
+  // 切到 B 仓库还停在任务页是错位的；页签位置由"当前在看什么"决定，跨项目无意义。
   useEffect(() => {
     if (!backendRepo) return
+    setPage('map') // 切仓库先回架构地图，数据到达前不闪旧页
     let stale = false
     fetch(`/api/settings?scope=${encodeURIComponent(backendRepo)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { key: string; value: unknown }[] } | null) => {
         if (stale || !d?.data) return
         const get = (k: string) => d.data!.find((i) => i.key === k)?.value
-        const p = get('ui.page')
-        if (typeof p === 'string' && (ALL_PAGES as Set<string>).has(p)) setPage(p as PageId)
         const w = get('ui.panelWidth')
         if (typeof w === 'number' && Number.isFinite(w)) setPanelWidth(Math.min(560, Math.max(340, w)))
         const po = get('ui.panelOpen')

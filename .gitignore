@@ -12,3 +12,6 @@ reference/
 # EasyVibe 自身产物（自托管测试用）
 .easyvibe/
 .claude/
+
+# 桌面端 sidecar 二进制（跨平台编译产物，不入库）
+/easyvibe-desktop/binaries/
