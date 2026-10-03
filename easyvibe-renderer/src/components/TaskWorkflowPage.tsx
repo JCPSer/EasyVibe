@@ -7,6 +7,7 @@ import { terminalLines } from '@/lib/terminalBuffer'
 import { stageOf, gateLabel } from '@/lib/taskStage'
 import { StagePipeline } from '@/components/StagePipeline'
 import { TaskAdminButtons } from '@/components/TaskAdminButtons'
+import { MarkdownMessage } from '@/components/MarkdownMessage'
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/lib/taskContext'
 
@@ -115,7 +116,8 @@ function PhaseDocReview({
           </div>
         )}
         {doc && (
-          <pre className="whitespace-pre-wrap font-mono text-[11.5px] leading-5 text-slate-700">{doc.content}</pre>
+          /* Markdown 渲染（非裸文本——2026-10-03 用户反馈：矩阵/方案是 md，pre 纯文本看不清结构） */
+          <MarkdownMessage content={doc.content} />
         )}
       </div>
       <div className="border-t border-slate-100 p-3">
