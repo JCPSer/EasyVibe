@@ -51,6 +51,12 @@ pub struct AppState {
     pub event_bus: broadcast::Sender<BusEvent>,
     /// 库连接池直持（重审 P1：注销仓库 wipe_repo 跨表清除需要；repos 各自私有池不便借用）
     pub pool: easyvibe_db::sqlx::SqlitePool,
+    /// M1 配置体系：agent 探测结果（内存态，启动探测 + POST /api/agent/detect 重探）
+    pub agent_detected: Arc<tokio::sync::RwLock<Vec<agent_conf::DetectedAgent>>>,
+    /// M1：最近一条测试连接结果（GET /api/agent/status 的 protocolOk 数据源）
+    pub agent_test: Arc<tokio::sync::RwLock<Option<agent_conf::AgentTestResult>>>,
+    /// M1：测试连接串行化（连点/并发测试互相踩结果）
+    pub agent_test_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// LLM 客户端来源：stub（零成本验证）或 anthropic（真实 API）
@@ -146,6 +152,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .route("/harness", get(get_harness))
+        .route("/agent/status", get(agent_status))
+        .route("/agent/detect", axum::routing::post(agent_detect))
+        .route("/agent/test", axum::routing::post(agent_test))
         .route("/diagnostics", get(export_diagnostics))
         .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
@@ -440,9 +449,10 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
         .replace("<MODULE_ID>", &module_id)
         .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
     let session = st
         .session_manager
-        .start_induction(&repo.id, &repo.root, &prompt, &st.agent_command, &st.agent_args, None)
+        .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
         .await?;
     info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
@@ -456,9 +466,10 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
     // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
     // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
     let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
     let session = st
         .session_manager
-        .start_induction(&repo.id, &repo.root, &st.prompt_template, &st.agent_command, &st.agent_args, None)
+        .start_induction(&repo.id, &repo.root, &st.prompt_template, &resolved.command, &resolved.args, None)
         .await?;
 
     // 终态后产物核验
@@ -563,9 +574,10 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
         }
         LlmMode::Anthropic => {
             // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
+            let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
             let session = st
                 .session_manager
-                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &st.agent_command, &st.agent_args, None)
+                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &resolved.command, &resolved.args, None)
                 .await?;
             // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
             // run_id 用时间戳独立生成，不复用 session_id——会话计数器在后端重启后归零，
@@ -611,36 +623,9 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
 /// 裸命令名 spawn 直接 ENOENT——桌面壳实弹三任务全灭于此。三级查找：
 /// ① 自身含路径且存在 → 原样；② 当前进程 PATH；③ 登录 shell PATH（用户交互环境才是真相）；
 /// ④ 常见安装位兜底（含实测的 Kimi npm-global 位）。
+/// 命令绝对路径解析——实现已迁至 agent_conf（M1 配置体系，复用方包括探测层），此处保留薄封装
 fn resolve_agent_command(cmd: &str) -> String {
-    let as_path = std::path::Path::new(cmd);
-    if as_path.components().count() > 1 && as_path.is_file() {
-        return cmd.to_string();
-    }
-    if let Some(p) = std::env::var("PATH").ok().as_deref().map(|dirs| {
-        dirs.split(':').map(str::trim).filter(|d| !d.is_empty()).map(|d| format!("{d}/{cmd}")).find(|p| std::path::Path::new(p).is_file())
-    }).flatten() {
-        return p;
-    }
-    if let Ok(out) = std::process::Command::new("bash").args(["-lc", &format!("command -v {cmd}")]).output() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if out.status.success() && !p.is_empty() && std::path::Path::new(&p).is_file() {
-            return p;
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    for cand in [
-        format!("{home}/.claude/local/{cmd}"),
-        format!("{home}/.local/bin/{cmd}"),
-        format!("{home}/.npm-global/bin/{cmd}"),
-        format!("/opt/homebrew/bin/{cmd}"),
-        format!("/usr/local/bin/{cmd}"),
-        format!("{home}/Library/Application Support/kimi-desktop/daimon-share/daimon/npm-global/bin/{cmd}"),
-    ] {
-        if std::path::Path::new(&cand).is_file() {
-            return cand;
-        }
-    }
-    cmd.to_string()
+    agent_conf::resolve_agent_command(cmd)
 }
 
 /// CLI agent 可执行预检：spawn 路径的鉴权由 claude 自身配置（~/.claude/settings.json 的 env
@@ -1134,6 +1119,82 @@ async fn get_dev_doc(
     }
     let content = std::fs::read_to_string(&canonical).map_err(|e| ApiError::Internal(format!("文档读取失败: {e}")))?;
     Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel, "content": content } })).into_response())
+}
+
+/// M1 配置体系：agent 状态面（探测 + 生效配置 + 预设目录 + 最近测试结果）
+/// 预设目录由后端唯一提供——前端单选组不硬编码（初审修订点）
+async fn agent_status(State(st): State<AppState>) -> Result<Response, AppError> {
+    let detected = st.agent_detected.read().await.clone();
+    Ok(agent_status_json(&st, detected).await.into_response())
+}
+
+async fn agent_detect(State(st): State<AppState>) -> Result<Response, AppError> {
+    let detected = agent_conf::detect_agents().await;
+    *st.agent_detected.write().await = detected.clone();
+    info!("[agent] 手动重探完成：检测到 {} 个", detected.len());
+    Ok(agent_status_json(&st, detected).await.into_response())
+}
+
+async fn agent_test(State(st): State<AppState>) -> Result<Response, AppError> {
+    let _guard = st.agent_test_lock.lock().await;
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+    info!("[agent] 测试连接：{} {:?}", resolved.command, resolved.args);
+    let result = agent_conf::run_agent_test(&st.session_manager, &resolved).await;
+    *st.agent_test.write().await = Some(result.clone());
+    Ok(Json(serde_json::json!({ "success": true, "data": result })).into_response())
+}
+
+/// status/detect 共用的响应体（探测结果传入——detect 用新鲜值，status 用内存态）
+async fn agent_status_json(st: &AppState, detected: Vec<agent_conf::DetectedAgent>) -> axum::response::Response {
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+    let found = std::path::Path::new(&resolved.command).is_file();
+    let preset = cfg_get(st, "agent.preset").await.unwrap_or(serde_json::Value::String("claude".into()));
+    let configured_args = cfg_get(st, "agent.args.global").await
+        .and_then(|v| v.as_str().map(str::to_string))
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+    // 槽位参数（整体替换语义）——配置原样回显给设置面板
+    let args_task = cfg_get(st, "agent.args.task").await
+        .and_then(|v| v.as_str().map(str::to_string))
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+    let args_review = cfg_get(st, "agent.args.review").await
+        .and_then(|v| v.as_str().map(str::to_string))
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+    let test = st.agent_test.read().await.clone();
+    let protocol_ok = test.as_ref().map(|t| t.ok);
+    Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "detected": detected,
+            "configured": {
+                "command": cfg_get(st, "agent.command").await,
+                "args": configured_args,
+                "argsTask": args_task,
+                "argsReview": args_review,
+                "preset": preset,
+                "type": cfg_get(st, "agent.type").await,
+            },
+            "effective": {
+                "command": resolved.command,
+                "args": resolved.args,
+                "type": resolved.agent_type,
+                "source": resolved.source,
+                "found": found,
+            },
+            "presets": agent_conf::PRESETS.iter().map(|p| serde_json::json!({
+                "id": p.id, "label": p.label, "defaultArgs": p.default_args,
+                "type": p.agent_type, "stability": p.stability,
+            })).collect::<Vec<_>>(),
+            "protocolOk": protocol_ok,
+            "lastTest": test,
+        }
+    }))
+    .into_response()
+}
+
+/// 读取一条 agent 相关设置（响应体组装用）
+async fn cfg_get(st: &AppState, key: &str) -> Option<serde_json::Value> {
+    use easyvibe_db::SettingsRepository as _;
+    st.settings_repo.get("global", key).await.ok().flatten().map(|r| serde_json::Value::String(r.value))
 }
 
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
@@ -1920,6 +1981,7 @@ impl IntoResponse for AppError {
 mod task_exec;
 mod freshness;
 mod git;
+mod agent_conf;
 
 /// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
 /// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
@@ -2249,8 +2311,21 @@ async fn main() {
         schema_path: Arc::new(schema_path),
         event_bus,
         pool: database.pool().clone(),
+        agent_detected: Default::default(),
+        agent_test: Default::default(),
+        agent_test_lock: Default::default(),
     };
     let app = build_router(state.clone());
+    // M1 配置体系：启动即探测执行 agent（异步——探测失败只是 missing 态，不阻断启动；
+    // 用户装完后可 POST /api/agent/detect 重探）
+    {
+        let st_detect = state.clone();
+        tokio::spawn(async move {
+            let detected = agent_conf::detect_agents().await;
+            info!("[agent] 启动探测完成：检测到 {} 个", detected.len());
+            *st_detect.agent_detected.write().await = detected;
+        });
+    }
     // 定时巡检（默认关：adv.autoPatrolEnabled=true 开启，间隔 adv.autoPatrolHours 默认 24h）——
     // 健康保鲜不靠用户想起；成本可控（间隔可调/随时关），无活动会话才触发（写互斥天然排队）
     {
@@ -2376,6 +2451,9 @@ mod tests {
             schema_path: Arc::new("schema.json".into()),
             event_bus: bus,
             pool: db.pool().clone(),
+            agent_detected: Default::default(),
+            agent_test: Default::default(),
+            agent_test_lock: Default::default(),
         }
     }
 
@@ -3228,6 +3306,60 @@ mod tests {
             t = state.task_repo.get(&tid).await.unwrap().unwrap();
         }
         assert_ne!(t.gate.as_deref(), Some("p:implement"), "复审应跑完实施阶段");
+    }
+
+    #[tokio::test]
+    async fn agent_status_detect_test_endpoints() {
+        // M1 端点：status 形状 / test 协议判定（echo 兼容 / false 非 0 退出不兼容）
+        use easyvibe_db::SettingsRepository as _;
+        let (state, _repo) = chat_state("agent-endpoints").await;
+        let app = build_router(state.clone());
+        // status：预设目录由后端提供（前端不硬编码）
+        let resp = app.clone().oneshot(axum::http::Request::get("/api/agent/status").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        let presets = v["data"]["presets"].as_array().unwrap();
+        assert_eq!(presets.len(), 3, "本期预设三家");
+        assert!(presets.iter().any(|p| p["id"] == "claude" && p["stability"] == "stable"));
+        assert!(presets.iter().any(|p| p["id"] == "codex" && p["stability"] == "experimental"));
+        assert!(v["data"]["effective"]["found"].is_boolean());
+
+        // test：/bin/echo hello → 退出 0 有输出 → compatible
+        state.settings_repo.set(&easyvibe_db::SettingRow {
+            scope: "global".into(), key: "agent.command".into(), value: "/bin/echo".into(),
+            encrypted: false, updated_at: "t".into(),
+        }).await.unwrap();
+        state.settings_repo.set(&easyvibe_db::SettingRow {
+            scope: "global".into(), key: "agent.args.global".into(), value: r#"["hello"]"#.into(),
+            encrypted: false, updated_at: "t".into(),
+        }).await.unwrap();
+        let resp = app.clone().oneshot(axum::http::Request::post("/api/agent/test").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(v["data"]["protocol"], "compatible", "echo 应兼容: {:?}", v);
+        assert!(v["data"]["ok"].as_bool().unwrap());
+
+        // test：/bin/false → 非 0 退出 → incompatible（附退出码语义）
+        state.settings_repo.set(&easyvibe_db::SettingRow {
+            scope: "global".into(), key: "agent.command".into(), value: "/bin/false".into(),
+            encrypted: false, updated_at: "t".into(),
+        }).await.unwrap();
+        state.settings_repo.set(&easyvibe_db::SettingRow {
+            scope: "global".into(), key: "agent.args.global".into(), value: "[]".into(),
+            encrypted: false, updated_at: "t".into(),
+        }).await.unwrap();
+        let resp = app.clone().oneshot(axum::http::Request::post("/api/agent/test").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert!(!v["data"]["ok"].as_bool().unwrap());
+        assert!(v["data"]["protocol"].as_str().unwrap().starts_with("incompatible"), "false 应不兼容: {:?}", v);
+
+        // status 反映最近测试结果
+        let resp = app.oneshot(axum::http::Request::get("/api/agent/status").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(v["data"]["protocolOk"], false, "status 应带出最近测试结论");
     }
 
     #[test]

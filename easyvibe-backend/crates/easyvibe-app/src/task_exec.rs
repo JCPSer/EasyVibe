@@ -347,13 +347,13 @@ impl TaskExecutor {
                 assemble_task_prompt(&h.framework_transparent, &task)
             }
         };
-        // Y5 清债：任务槽位参数覆盖——settings `agent.args.task`（JSON 数组）优先于全局，
-        // 可把任务执行从 skip-permissions 收紧为带确认（归纳/巡检等透明槽位不受影响）
-        let args = slot_args(&self.settings_repo, "task", &self.agent_args).await;
+        // M1 配置体系：spawn 现读 settings 优先解析链（env 为 fallback）——
+        // 配置改动对下一次 spawn 生效，不缓存快照（与 resolve_llm 同一纪律）
+        let resolved = crate::agent_conf::resolve_agent(&self.settings_repo, Some("task"), &self.agent_command, &self.agent_args).await;
         match self
             .session_manager
             // N26：任务槽超时常态 90 分钟（自由 coding 40-60 分钟是常态，30 分钟一刀切会误杀）
-            .start_induction(&repo.id, &repo.root, &prompt, &self.agent_command, &args, Some(task_session_timeout()))
+            .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, Some(task_session_timeout()))
             .await
         {
             Ok(session) => {
@@ -381,8 +381,9 @@ impl TaskExecutor {
                     let _permit = permit; // 许可随看门任务生命周期，并发上限真实生效（审查 🔴4）
                     let review_after = review_after;
                     let phase = phase;
-                    // B 案：审查槽参数（settings `agent.args.review` 可换便宜模型/收紧权限）
-                    let review_args = slot_args(&this.settings_repo, "review", &this.agent_args).await;
+                    // B 案：审查槽（M1 起走完整解析链——review 槽参数整体替换，可换便宜模型/收紧权限）
+                    let review_resolved =
+                        crate::agent_conf::resolve_agent(&this.settings_repo, Some("review"), &this.agent_command, &this.agent_args).await;
                     // L2 哨兵状态：已上报越界集合 + 巡检节拍器
                     let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
                     let sentry_every = std::cmp::max(1, sentry_interval().as_secs() / 2) as u32;
@@ -458,8 +459,8 @@ impl TaskExecutor {
                                     let key = if phase == 1 { "analysis" } else { "solution" };
                                     match run_phase_doc_review(
                                         &this.session_manager,
-                                        &this.agent_command,
-                                        &review_args,
+                                        &review_resolved.command,
+                                        &review_resolved.args,
                                         &repo_name,
                                         &repo_root,
                                         &task_for_review,
@@ -481,8 +482,8 @@ impl TaskExecutor {
                                     // → 通过才回审批流（diff 关）；fail 自动打回（rejected，理由入留痕）
                                     let review_v = run_subagent_review(
                                         &this.session_manager,
-                                        &this.agent_command,
-                                        &review_args,
+                                        &review_resolved.command,
+                                        &review_resolved.args,
                                         &repo_name,
                                         &repo_root,
                                         &task_for_review,
@@ -1087,19 +1088,6 @@ fn neutralize_transparent(text: &str, patterns: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Y5：槽位级 agent 参数解析（settings `agent.args.<slot>` = JSON 字符串数组；
-/// 解析失败/未配置回退全局默认——失败不阻断）
-pub async fn slot_args(
-    settings: &easyvibe_db::SqliteSettingsRepository,
-    slot: &str,
-    default: &[String],
-) -> Vec<String> {
-    use easyvibe_db::SettingsRepository as _;
-    let v = settings.get("global", &format!("agent.args.{slot}")).await.ok().flatten()
-        .and_then(|r| serde_json::from_str::<Vec<String>>(&r.value).ok());
-    v.unwrap_or_else(|| default.to_vec())
 }
 
 /// 改进#7 supervised 风险预评估（v1 确定性规则——LLM 评估为记档增强）。
