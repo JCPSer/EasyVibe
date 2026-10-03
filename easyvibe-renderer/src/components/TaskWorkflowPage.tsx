@@ -25,6 +25,7 @@ function PhaseDocReview({
   dirHint,
   title,
   deciding,
+  review,
   onDecide,
 }: {
   backendRepo: string
@@ -33,6 +34,8 @@ function PhaseDocReview({
   dirHint: string
   title: string
   deciding: string | null
+  /** 子 agent 阶段初审结论（2026-10-03：到人工关前的预筛，fail 不自动打回——人终审） */
+  review?: { verdict: string; summary: string } | null
   onDecide: (d: 'approved' | 'rejected', note?: string) => void
 }) {
   const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
@@ -89,6 +92,24 @@ function PhaseDocReview({
         <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待你的评审</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {/* 子 agent 阶段初审横幅：与 diff 关"子agent初审"同款语义——
+            fail 只是预筛警报，最终裁决仍是下方的人工通过/打回 */}
+        {review && (
+          <div
+            className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
+              review.verdict === 'pass' ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+            }`}
+          >
+            <ShieldAlert size={11} className={review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
+            <div className="min-w-0">
+              <p className={`text-micro font-bold ${review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                子 agent 初审：{review.verdict === 'pass' ? '通过' : '未通过'}
+                {review.verdict !== 'pass' && <span className="ml-1 font-normal">（建议打回重做，最终由你裁决）</span>}
+              </p>
+              <p className="mt-0.5 text-micro leading-4 text-slate-600">{review.summary}</p>
+            </div>
+          </div>
+        )}
         {!doc && !missing && (
           <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400">
             <Loader2 size={13} className="animate-spin" /> 正在加载产物文档…
@@ -180,7 +201,14 @@ interface TaskItem {
   error?: string | null
   createdAt?: string
   updatedAt?: string
-  result?: { diffStat?: string; contractViolations?: string[]; warnings?: string[]; review?: { verdict: string; summary: string } } | null
+  result?: {
+    diffStat?: string
+    contractViolations?: string[]
+    warnings?: string[]
+    review?: { verdict: string; summary: string }
+    /** 阶段初审结论（2026-10-03）：key = analysis（需求矩阵）/ solution（方案设计） */
+    phaseReviews?: Record<string, { verdict: string; summary: string }>
+  } | null
 }
 
 interface Approval {
@@ -575,6 +603,7 @@ export function TaskWorkflowPage({
                     dirHint="1_requirements_matrix"
                     title="需求矩阵评审"
                     deciding={deciding}
+                    review={sel.result?.phaseReviews?.analysis ?? null}
                     onDecide={(d, note) => decide(d, note)}
                   />
                 )}
@@ -587,6 +616,7 @@ export function TaskWorkflowPage({
                     dirHint="2_requirements_solutions"
                     title="方案设计评审"
                     deciding={deciding}
+                    review={sel.result?.phaseReviews?.solution ?? null}
                     onDecide={(d, note) => decide(d, note)}
                   />
                 )}

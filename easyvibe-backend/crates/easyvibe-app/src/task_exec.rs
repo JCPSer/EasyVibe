@@ -395,16 +395,35 @@ impl TaskExecutor {
                                 }
                                 let (status, gate) = if failed {
                                     ("failed", None)
-                                } else if phase == 1 {
-                                    // 需求矩阵完成 → 停 analysis 关等用户评审（不采集 diff、不走审查 agent）
-                                    ("awaiting_approval", Some("analysis"))
-                                } else if phase == 2 {
-                                    // 方案设计完成 → 停 solution 关等用户评审
-                                    ("awaiting_approval", Some("solution"))
+                                } else if phase == 1 || phase == 2 {
+                                    // 阶段产物初审（2026-10-03 用户裁定）：需求矩阵/方案设计到人工关之前，
+                                    // 先派子 agent 预筛（fail 不自动打回——人是最终裁决，初审只是预筛）。
+                                    // 结论进 result.phaseReviews，评审卡横幅展示；初审不可用不阻断。
+                                    let key = if phase == 1 { "analysis" } else { "solution" };
+                                    match run_phase_doc_review(
+                                        &this.session_manager,
+                                        &this.agent_command,
+                                        &review_args,
+                                        &repo_name,
+                                        &repo_root,
+                                        &task_for_review,
+                                        phase,
+                                    )
+                                    .await
+                                    {
+                                        Some(v) => {
+                                            if v.verdict == "fail" {
+                                                warn!("[task-exec] 任务 {} {}初审未通过：{}", task_id, key, v.summary);
+                                            }
+                                            merge_phase_review(&this.task_repo, &task_id, key, &v).await;
+                                        }
+                                        None => info!("[task-exec] 任务 {} {}初审不可用，人工关照常", task_id, key),
+                                    }
+                                    ("awaiting_approval", Some(if phase == 1 { "analysis" } else { "solution" }))
                                 } else if review_after {
                                     // manual/supervised：执行成功 → 独立子agent审查（B案，harness 2.3.2）
                                     // → 通过才回审批流（diff 关）；fail 自动打回（rejected，理由入留痕）
-                                    match run_subagent_review(
+                                    let review_v = run_subagent_review(
                                         &this.session_manager,
                                         &this.agent_command,
                                         &review_args,
@@ -412,9 +431,9 @@ impl TaskExecutor {
                                         &repo_root,
                                         &task_for_review,
                                     )
-                                    .await
-                                    {
-                                        Some(v) if v.verdict == "fail" => {
+                                    .await;
+                                    match review_v
+                                    {Some(v) if v.verdict == "fail" => {
                                             let note = format!("子agent审查未通过：{}", v.summary);
                                             warn!("[task-exec] 任务 {} 审查打回：{}", task_id, v.summary);
                                             this.record_approval(&task_id, "diff", "rejected", Some(&note)).await;
@@ -625,10 +644,45 @@ async fn run_subagent_review(
         .ok()?;
     let sid = session.session_id.clone();
     info!("[task-exec] 任务 {} 审查会话 {} 已启动", task.id, sid);
-    // 等终态（2s 节拍；status_of_session None = 状态丢失 → 不可用）
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25 * 60);
+    await_review_verdict(session_manager, &sid, &task.id, std::time::Duration::from_secs(25 * 60)).await
+}
+
+/// 阶段产物初审（2026-10-03 用户裁定）：需求矩阵（phase 1）/方案设计（phase 2）
+/// 到人工关之前，先派子 agent 预筛一遍——完整性/可测性/一致性。
+/// 与实施后审查的关键差异：fail 不自动打回——人是最终裁决，初审只是给审批人
+/// 多一双眼睛（结论进 result.phaseReviews，评审卡横幅展示）。
+async fn run_phase_doc_review(
+    session_manager: &SessionManager,
+    agent_command: &str,
+    agent_args: &[String],
+    repo_id: &str,
+    repo_root: &std::path::Path,
+    task: &TaskRow,
+    phase: u8,
+) -> Option<ReviewVerdict> {
+    let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+    let prompt = assemble_phase_review_prompt(task, phase, &user);
+    // 初审是读文档+下结论，比实施审查轻——15 分钟上限足够
+    let session = session_manager
+        .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(15 * 60)))
+        .await
+        .ok()?;
+    let sid = session.session_id.clone();
+    info!("[task-exec] 任务 {} 阶段 {} 初审会话 {} 已启动", task.id, phase, sid);
+    await_review_verdict(session_manager, &sid, &task.id, std::time::Duration::from_secs(15 * 60)).await
+}
+
+/// 审查会话终态等待 + [EASYVIBE-REVIEW] 行解析（实施审查与阶段初审共用）。
+/// 会话异常终态/超时/结论非法 → None（不可用不阻断，人机审查兜底）。
+async fn await_review_verdict(
+    session_manager: &SessionManager,
+    session_id: &str,
+    task_id: &str,
+    timeout: std::time::Duration,
+) -> Option<ReviewVerdict> {
+    let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        match session_manager.status_of_session(&sid).await {
+        match session_manager.status_of_session(session_id).await {
             Some(s)
                 if matches!(
                     s.status,
@@ -636,32 +690,97 @@ async fn run_subagent_review(
                 ) =>
             {
                 if s.status != easyvibe_api_types::SessionStatus::Succeeded {
-                    warn!("[task-exec] 任务 {} 审查会话异常终态：{:?}", task.id, s.status);
+                    warn!("[task-exec] 任务 {} 审查会话异常终态：{:?}", task_id, s.status);
                     return None;
                 }
-                let out = session_manager.take_output(&sid).await.unwrap_or_default();
+                let out = session_manager.take_output(session_id).await.unwrap_or_default();
                 let line = out.lines().rev().find(|l| l.contains("[EASYVIBE-REVIEW]"))?;
                 let json_str = line.split("[EASYVIBE-REVIEW]").nth(1)?.trim();
                 let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
                 let verdict = v["verdict"].as_str().unwrap_or("").to_string();
                 if verdict != "pass" && verdict != "fail" {
-                    warn!("[task-exec] 任务 {} 审查结论 verdict 非法：{}", task.id, verdict);
+                    warn!("[task-exec] 任务 {} 审查结论 verdict 非法：{}", task_id, verdict);
                     return None;
                 }
                 let summary = v["summary"].as_str().unwrap_or("（无结论摘要）").to_string();
-                info!("[task-exec] 任务 {} 审查结论：{} — {}", task.id, verdict, summary);
+                info!("[task-exec] 任务 {} 审查结论：{} — {}", task_id, verdict, summary);
                 return Some(ReviewVerdict { verdict, summary });
             }
             None => return None,
             _ => {
                 if tokio::time::Instant::now() > deadline {
-                    warn!("[task-exec] 任务 {} 审查会话超时，按不可用处理", task.id);
-                    let _ = session_manager.kill(&sid).await;
+                    warn!("[task-exec] 任务 {} 审查会话超时，按不可用处理", task_id);
+                    let _ = session_manager.kill(session_id).await;
                     return None;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
+    }
+}
+
+/// 阶段初审 prompt：只审不改（禁止修改文件），按修改时间找最新产物文档通读，
+/// 对照任务书核质量，最后一行输出 [EASYVIBE-REVIEW] 结论。
+fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str) -> String {
+    let (name, dir, focus) = if phase == 1 {
+        (
+            "需求矩阵",
+            format!(".easyvibe/development_docs/{user}/1_requirements_matrix/"),
+            "- 覆盖度：任务描述里的每个诉求都有对应需求条目吗？有没有漏项？\n\
+             - 可测性：每条验收标准是否可判定（有明确的完成口径，而非'优化/提升'这类模糊词）？\n\
+             - 无歧义：需求条目之间是否自洽，有没有互相矛盾或重复？",
+        )
+    } else {
+        (
+            "方案设计",
+            format!(".easyvibe/development_docs/{user}/2_requirements_solutions/"),
+            "- 对齐性：方案是否逐条回应了需求矩阵（R 编号可回溯）？有没有矩阵里的需求被方案漏掉？\n\
+             - 可行性：改动路径与当前代码结构是否矛盾（是否引用了不存在的文件/接口）？\n\
+             - 风险：方案有没有明显的回归风险未给验证手段？",
+        )
+    };
+    format!(
+        r#"你是 EasyVibe 的阶段产物审查 agent。**只审不改：禁止创建/修改/删除任何文件**。
+
+## 任务书（审查的对照基准）
+- 需求描述：{description}
+- 验收标准：{acceptance}
+
+## 待审产物
+{name}，目录：{dir}（该目录下修改时间最新的 .md 文档——用 ls -t 找到它并完整读取）
+
+## 审查要点
+{focus}
+
+## 输出
+审查过程不需要长篇大论；最后一行必须严格是：
+[EASYVIBE-REVIEW] {{"verdict":"pass 或 fail","summary":"一句话结论（≤80 字：通过理由或关键问题）"}}"#,
+        description = task.description,
+        acceptance = if task.acceptance.is_empty() { "（未指定——按需求描述推断合理验收口径）".into() } else { task.acceptance.clone() },
+        name = name,
+        dir = dir,
+        focus = focus,
+    )
+}
+
+/// 初审结论并入 tasks.result.phaseReviews（key = analysis / solution）——
+/// result 可能尚不存在（阶段 1/2 不采集产物），此时新建 JSON 骨架。
+async fn merge_phase_review(
+    task_repo: &easyvibe_db::SqliteTaskRepository,
+    task_id: &str,
+    key: &str,
+    v: &ReviewVerdict,
+) {
+    use easyvibe_db::TaskRepository as _;
+    let Ok(Some(row)) = task_repo.get(task_id).await else { return };
+    let mut rv: serde_json::Value = row
+        .result
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    rv["phaseReviews"][key] = serde_json::json!({ "verdict": v.verdict, "summary": v.summary });
+    if let Ok(s) = serde_json::to_string(&rv) {
+        let _ = task_repo.set_result(task_id, &s).await;
     }
 }
 
@@ -1220,6 +1339,17 @@ pub async fn collect_task_result(
         "contractViolations": contract_violations,
         "archivedPath": serde_json::Value::Null,
     });
+    // 阶段初审结论（phaseReviews）在终态采集时保留——实施阶段的 set_result 是整体重写，
+    // 不携带会把矩阵/方案的初审记录冲掉（评审轮回缺一环）
+    if let Ok(Some(row)) = task_repo.get(task_id).await {
+        if let Some(res) = &row.result {
+            if let Ok(old) = serde_json::from_str::<serde_json::Value>(res) {
+                if let Some(pr) = old.get("phaseReviews") {
+                    archive["phaseReviews"] = pr.clone();
+                }
+            }
+        }
+    }
     let dir = repo_root.join(".easyvibe/development_docs");
     if tokio::fs::create_dir_all(&dir).await.is_ok() {
         let path = dir.join(format!("{task_id}.json"));
@@ -1604,6 +1734,39 @@ mod tests {
         // 驳回无理由仍被拒（既有纪律不回归）
         let err = executor.decide("task-guard-bad", "rejected", None, None).await;
         assert!(matches!(err, Err(ApiError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn phase_review_merges_into_result_without_clobbering() {
+        // 阶段初审结论入库语义：result 为 NULL 时新建骨架；二次合并不冲掉前一阶段结论
+        use easyvibe_db::{Database, SqliteTaskRepository, TaskRepository as _};
+        let db = Database::connect_memory().await.unwrap();
+        let task_repo = SqliteTaskRepository::new(db.pool().clone());
+        task_repo.create(&sample_task("awaiting_approval")).await.unwrap();
+
+        merge_phase_review(&task_repo, "task-t1", "analysis", &ReviewVerdict { verdict: "pass".into(), summary: "矩阵完整".into() }).await;
+        let r1: serde_json::Value =
+            serde_json::from_str(&task_repo.get("task-t1").await.unwrap().unwrap().result.unwrap()).unwrap();
+        assert_eq!(r1["phaseReviews"]["analysis"]["verdict"], "pass");
+
+        merge_phase_review(&task_repo, "task-t1", "solution", &ReviewVerdict { verdict: "fail".into(), summary: "方案漏 R3".into() }).await;
+        let r2: serde_json::Value =
+            serde_json::from_str(&task_repo.get("task-t1").await.unwrap().unwrap().result.unwrap()).unwrap();
+        assert_eq!(r2["phaseReviews"]["analysis"]["summary"], "矩阵完整", "analysis 结论必须保留");
+        assert_eq!(r2["phaseReviews"]["solution"]["verdict"], "fail");
+    }
+
+    #[test]
+    fn phase_review_prompt_targets_right_dir_and_readonly() {
+        // 初审 prompt：阶段 1/2 指向各自产物目录；只审不改纪律与结论协议行必备
+        let t = sample_task("running");
+        let p1 = assemble_phase_review_prompt(&t, 1, "liyuhang");
+        assert!(p1.contains("1_requirements_matrix/"));
+        assert!(p1.contains("只审不改"));
+        assert!(p1.contains("[EASYVIBE-REVIEW]"));
+        assert!(p1.contains("把双向依赖改为单向"), "任务书必须注入作对照基准");
+        let p2 = assemble_phase_review_prompt(&t, 2, "liyuhang");
+        assert!(p2.contains("2_requirements_solutions/"));
     }
 
     #[tokio::test]

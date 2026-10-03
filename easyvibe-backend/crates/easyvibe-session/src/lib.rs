@@ -173,7 +173,12 @@ impl SessionManager {
         }
         map.insert(s.repo.clone(), s.clone());
         drop(map);
-        let _ = self.events.send(s).await;
+        // 非阻塞送达：通道满（下游死亡/测试无消费者）时事件丢弃——
+        // 会话注册绝不能被监控通道背压卡死（2026-10-03 实弹：阶段初审让每任务
+        // 会话数 4→6，测试 channel(16) 被填满，第 16 个 send 永久阻塞注册，死锁）
+        if let Err(e) = self.events.try_send(s) {
+            tracing::warn!("[session] 状态事件通道已满，丢弃事件（下游可能已死亡）: {e}");
+        }
         Ok(())
     }
 
@@ -363,7 +368,10 @@ impl SessionManager {
             let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
             active.write().await.insert(repo.clone(), final_status.clone());
             by_id.write().await.insert(session_id_task.clone(), final_status.clone());
-            let _ = events.send(final_status).await;
+            // 非阻塞送达（背压卡死防线，同 try_register）
+            if let Err(e) = events.try_send(final_status) {
+                tracing::warn!("[session {session_id_task}] 终态事件通道已满，丢弃: {e}");
+            }
             info!("[session {session_id_task}] 终态: {:?}", status);
         });
 
@@ -382,7 +390,10 @@ impl SessionManager {
     async fn publish(&self, s: SessionStatusChanged) {
         self.active.write().await.insert(s.repo.clone(), s.clone());
         self.by_id.write().await.insert(s.session_id.clone(), s.clone());
-        let _ = self.events.send(s).await;
+        // 非阻塞送达（背压卡死防线，同 try_register）
+        if let Err(e) = self.events.try_send(s) {
+            tracing::warn!("[session] 状态事件通道已满，丢弃事件: {e}");
+        }
     }
 
     /// 按 session_id 查询状态（终态归属的唯一依据——避免按仓库轮询的归属竞态）
