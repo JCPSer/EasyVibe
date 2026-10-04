@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
 import { onQueueChanged, onSessionEvent } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
@@ -17,7 +17,6 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
   const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
   // 终态红态：failed → 记住 label，红态 5s 后消失
   const [failed, setFailed] = useState<{ label: string } | null>(null)
-  const [now, setNow] = useState(() => Date.now())
   const snapRef = useRef<SessionQueueSnapshot | null>(null)
   useEffect(() => {
     snapRef.current = snap
@@ -67,16 +66,22 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
   )
 
   const startedMs = snap?.active?.startedAt ? toMs(snap.active.startedAt) : null
-  // 1s 本地 ticker：只在需要展示时长（或红态倒计时观感）时跑
+  // 2026-10-04 实弹修复：此前 now 是 useState 快照 + 1s interval 推——定时器被 webview
+  // 节流/挂起时快照过期，elapsed 会从 0 附近重新计数（截图实证：启动 21:44 却显示已运行 0:17）。
+  // 改为 interval 只负责强制重渲染，每次渲染从 Date.now() 现取 wall clock——
+  // 即使渲染被冻结，停住的也是"正确值"，恢复后第一时间追上真实时长。
+  const [, forceRender] = useReducer((x: number) => x + 1, 0)
   const needTicker = startedMs !== null || !!failed
   useEffect(() => {
     if (!needTicker) return
-    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    const t = window.setInterval(forceRender, 1000)
     return () => window.clearInterval(t)
   }, [needTicker])
 
   if (!backendRepo || (isEmptyState(snap) && !failed)) return null
 
+  // 每次渲染现取 wall clock（非 hook，可在 early return 之后）——计时永不依赖可能过期的快照
+  const now = Date.now()
   const active = failed ? null : snap?.active
   const queued = snap?.queued ?? null
   const kind: SessionQueueKind = active
