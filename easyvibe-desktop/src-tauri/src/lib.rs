@@ -103,7 +103,7 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 let result = if ready {
-                    WebviewWindowBuilder::new(
+                    let builder = WebviewWindowBuilder::new(
                         &app_handle,
                         "main",
                         WebviewUrl::External(
@@ -119,8 +119,16 @@ pub fn run() {
                     // Overlay = 隐藏系统标题栏但保留原生交通灯悬浮于内容上方，
                     // 拖拽由前端透明热区负责（见 AppShell 的 startDragging）
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true)
-                    .build()
+                    .hidden_title(true);
+                    // 2026-10-05 红绿灯纵向居中：系统默认把灯居中在 28pt 幻影子标题栏里
+                    // （y≈14），我们的自绘 header 是 40px——灯悬在 header 上部，偏出居中。
+                    // wry 语义：title_bar_frame_height = 灯高(12) + y，灯在容器内垂直居中——
+                    // y=28 → 容器 40pt = header 同高，灯心落在 20pt 恰为 header 中线，
+                    // 与前端失焦仿灯（x=12/32/52、header 居中）完全同位，聚焦/失焦零跳变。
+                    #[cfg(target_os = "macos")]
+                    let builder =
+                        builder.traffic_light_position(tauri::LogicalPosition::new(12.0, 28.0));
+                    builder.build()
                 } else {
                     WebviewWindowBuilder::new(
                         &app_handle,
