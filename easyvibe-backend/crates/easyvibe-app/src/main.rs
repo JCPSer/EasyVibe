@@ -512,6 +512,23 @@ fn progress_done_ago_secs(repo_root: &std::path::Path) -> Option<u64> {
     Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
 }
 
+/// 2026-10-04 实弹修复：收尸的"进度 100%"必须出自本次会话——旧 progress.json
+/// （上一次归纳留下的 done + 旧 mtime）会让新会话秒被杀（用户点"立即归纳"3 秒复活）。
+/// 只有 mtime 晚于会话启动时间，才承认这个 done 是本会话产物。
+fn progress_done_ago_secs_since(repo_root: &std::path::Path, since: std::time::SystemTime) -> Option<u64> {
+    let path = repo_root.join(".easyvibe/map/progress.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if v["phase"].as_str() != Some("done") {
+        return None;
+    }
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    if modified < since {
+        return None;
+    }
+    Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
+}
+
 /// S2.5：归纳进度（progress.json 透传——首归纳等待页显示真实阶段/百分比，
 /// 不再只转圈；文件缺失（如巡检场景无 progress）返回 done 形状，前端不渲染进度）
 async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
@@ -581,6 +598,7 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
     let st2 = st.clone();
     let repo2 = repo.clone();
     let session_id = session.session_id.clone();
+    let started = std::time::SystemTime::now(); // 收尸防线的时间锚：只认本会话写出的 100%（2026-10-04 实弹）
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -605,7 +623,7 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
                 // 只能等自然退出或后端退出（kill_on_drop）才释放。
                 Some(s) => {
                     const GRACE_SECS: u64 = 90;
-                    if let Some(ago) = progress_done_ago_secs(&repo2.root) {
+                    if let Some(ago) = progress_done_ago_secs_since(&repo2.root, started) {
                         if ago > GRACE_SECS {
                             tracing::warn!(
                                 "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸并终止进程（agent 未自行退出，实弹#4 + 重审 P1）",
@@ -2983,6 +3001,24 @@ mod tests {
         // phase=done → Some（文件刚写，ago 很小）
         std::fs::write(dir.join(".easyvibe/map/progress.json"), r#"{"phase":"done"}"#).unwrap();
         let ago = progress_done_ago_secs(&dir).expect("done 应有秒数");
+        assert!(ago < 5, "刚落盘的文件 ago 应极小: {ago}");
+    }
+
+    /// 2026-10-04 实弹回归：收尸只认本会话写出的 100%——旧 progress.json
+    /// （上次归纳的 done）对新一轮会话必须返回 None，否则新会话秒被杀。
+    #[tokio::test]
+    async fn grace_ignores_stale_progress_done() {
+        let dir = std::env::temp_dir().join("ev-progress-stale-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".easyvibe/map")).unwrap();
+        std::fs::write(dir.join(".easyvibe/map/progress.json"), r#"{"phase":"done"}"#).unwrap();
+        // 会话在文件落盘之后启动 → 旧 done 不算数
+        let since_later = std::fs::metadata(dir.join(".easyvibe/map/progress.json")).unwrap().modified().unwrap()
+            + std::time::Duration::from_secs(1);
+        assert!(progress_done_ago_secs_since(&dir, since_later).is_none(), "旧 done 不得触发收尸");
+        // 会话先于文件落盘启动（模拟归纳进行中写出了 done）→ 才算本会话产物
+        let since_earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        let ago = progress_done_ago_secs_since(&dir, since_earlier).expect("新 done 应被承认");
         assert!(ago < 5, "刚落盘的文件 ago 应极小: {ago}");
     }
 
