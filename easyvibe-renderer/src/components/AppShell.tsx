@@ -11,6 +11,7 @@ import {
   MessagesSquare,
   ClipboardList,
   Activity,
+  Gauge,
   History,
   BookOpen,
   ScrollText,
@@ -31,6 +32,7 @@ export type PageId =
   | 'workbench'
   | 'tasks'
   | 'runs'
+  | 'usage'
   | 'todo'
   | 'review'
   | 'changes'
@@ -57,6 +59,7 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
       { id: 'workbench', label: '任务对话', icon: MessagesSquare },
       { id: 'tasks', label: '任务', icon: ClipboardList },
       { id: 'runs', label: '运行', icon: Activity },
+      { id: 'usage', label: '用量', icon: Gauge },
       { id: 'changes', label: '变更记录', icon: History },
       { id: 'git', label: 'Git', icon: GitBranch },
     ],

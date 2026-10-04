@@ -80,7 +80,12 @@ const TIERS: { id: Tier; label: string; icon: typeof Terminal }[] = [
   { id: 'terminal', label: '终端', icon: Terminal },
 ]
 
-export function RunsPage({ backendRepo }: { backendRepo: string | null }) {
+export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed }: {
+  backendRepo: string | null
+  /** 用量页明细表跳入：打开页面即选中该会话 */
+  initialSessionId?: string | null
+  onInitialConsumed?: () => void
+}) {
   const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
   // 各会话流水（内存态，M2 落盘前重启即失——诚实降级见历史区）
   const [streams, setStreams] = useState<Map<string, StreamLine[]>>(new Map())
@@ -106,6 +111,17 @@ export function RunsPage({ backendRepo }: { backendRepo: string | null }) {
       .then((d: { data?: SessionQueueSnapshot } | null) => setSnap(d?.data ?? null))
       .catch(() => {})
   }, [backendRepo])
+
+  // 用量页 deeplink：打开即选中对应会话（一次性消费；setTimeout 0 避开 effect 内同步 setState 级联渲染）
+  useEffect(() => {
+    if (!initialSessionId) return
+    const id = initialSessionId
+    const t = window.setTimeout(() => {
+      setSelectedId(id)
+      onInitialConsumed?.()
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [initialSessionId, onInitialConsumed])
 
   useEffect(() => {
     pull()

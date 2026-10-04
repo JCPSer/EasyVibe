@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare} from 'lucide-react'
+import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare, Gauge} from 'lucide-react'
 import { buildLayerTask, buildModuleTask, buildSubmoduleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
@@ -93,6 +93,78 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
         {delta}
       </span>
     </div>
+  )
+}
+
+// L1 治理账单：模块累计 agent 成本（用量页按模块归因的详情端落点）。
+// 数据：GET /usage?days=30 的 byModule + sessions 过滤本模块；修复成效取 health-history 首末分差。
+function GovernanceBill({ backendRepo, moduleId }: { backendRepo: string | null; moduleId: string }) {
+  const [bill, setBill] = useState<{ cost: number | null; sessions: number; failed: number; recent: { id: string; label?: string | null; kind: string; costUsd?: number | null; status: string; startedAt: string }[] } | null>(null)
+  const [scoreDelta, setScoreDelta] = useState<number | null>(null)
+  useEffect(() => {
+    if (!backendRepo) return
+    let stale = false
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/usage?days=30`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { byModule?: { name: string; sessions: number; cost?: number | null; failed?: number | null }[]; sessions?: { id: string; label?: string | null; kind: string; moduleId?: string | null; costUsd?: number | null; status: string; startedAt: string }[] } } | null) => {
+        if (stale || !d?.data) return
+        const row = d.data.byModule?.find((m) => m.name === moduleId)
+        const recent = (d.data.sessions ?? []).filter((s) => s.moduleId === moduleId).slice(0, 3)
+        setBill({ cost: row?.cost ?? null, sessions: row?.sessions ?? 0, failed: row?.failed ?? 0, recent })
+      })
+      .catch(() => {})
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/modules/${encodeURIComponent(moduleId)}/health-history`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { score: number }[] } | null) => {
+        if (stale) return
+        const rows = d?.data ?? []
+        if (rows.length >= 2) setScoreDelta(rows[rows.length - 1].score - rows[0].score)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [backendRepo, moduleId])
+
+  if (!backendRepo || !bill || (bill.sessions === 0 && bill.cost == null)) return null
+  const KIND_ZH: Record<string, string> = { task: '修复', submap: '子图分析', 'subagent-review': '初审', 'subagent-audit': '审查' }
+  return (
+    <Row icon={<Gauge size={12} />} label="治理账单">
+      <div className="space-y-1.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 p-2.5">
+        <div className="flex items-center gap-3 text-cap">
+          <span className="tnum font-bold text-slate-700 dark:text-slate-200">{bill.cost == null ? '—' : `$${bill.cost.toFixed(2)}`}</span>
+          <span className="text-slate-400 dark:text-slate-500">·</span>
+          <span className="tnum text-slate-500 dark:text-slate-400">{bill.sessions} 次治理</span>
+          {bill.failed > 0 && (
+            <>
+              <span className="text-slate-400 dark:text-slate-500">·</span>
+              <span className="tnum text-red-500">{bill.failed} 次失败白跑</span>
+            </>
+          )}
+          {scoreDelta !== null && (
+            <>
+              <span className="text-slate-400 dark:text-slate-500">·</span>
+              <span className={`tnum font-semibold ${scoreDelta >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                30 天分 {scoreDelta >= 0 ? '+' : ''}{scoreDelta}
+              </span>
+            </>
+          )}
+        </div>
+        {bill.recent.length > 0 && (
+          <div className="space-y-0.5">
+            {bill.recent.map((r) => (
+              <div key={r.id} className="flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
+                <span className={`h-1 w-1 rounded-full ${r.status === 'failed' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                <span className="text-slate-500 dark:text-slate-400">{KIND_ZH[r.kind] ?? r.label ?? r.kind}</span>
+                <span className="tnum">{r.costUsd == null ? '—' : `$${r.costUsd.toFixed(2)}`}</span>
+                <span className="ml-auto">{r.startedAt.slice(5, 16).replace('T', ' ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-micro leading-4 text-slate-400 dark:text-slate-500">近 30 天 · 口径见「用量」页</p>
+      </div>
+    </Row>
   )
 }
 
@@ -199,6 +271,8 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout, onOpenDe
           {dependents.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
+
+      <GovernanceBill backendRepo={backendRepo} moduleId={mod.id} />
 
       <Row icon={<Waypoints size={12} />} label="耦合概览">
         <div className="space-y-1.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 p-2.5">

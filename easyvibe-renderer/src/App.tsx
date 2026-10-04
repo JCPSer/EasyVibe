@@ -41,6 +41,7 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { SessionBubble } from '@/components/SessionBubble'
 import { DepsPage } from '@/components/DepsPage'
 import { RunsPage } from '@/components/RunsPage'
+import { UsagePage } from '@/components/UsagePage'
 import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -1755,6 +1756,8 @@ export default function App() {
   const [depsFocus, setDepsFocus] = useState<string | null>(null)
   /** 2026-10-05 依赖透镜：DepsPage「在画布上看」→ 画布选中并开 solo（filters 状态本体在 Canvas） */
   const [lensRequest, setLensRequest] = useState<string | null>(null)
+  /** 2026-10-05 用量页 → 运行页会话 deeplink */
+  const [runsFocus, setRunsFocus] = useState<string | null>(null)
   // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
   const [onboarding, setOnboarding] = useState(loadOnboarding)
   const [welcomeOpen, setWelcomeOpen] = useState(false)
@@ -2475,7 +2478,27 @@ export default function App() {
       </CanvasBoundary>
     ),
     tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
-    runs: <RunsPage backendRepo={backendRepo} />,
+    runs: (
+      <RunsPage
+        backendRepo={backendRepo}
+        initialSessionId={runsFocus}
+        onInitialConsumed={() => setRunsFocus(null)}
+      />
+    ),
+    usage: (
+      <UsagePage
+        backendRepo={backendRepo}
+        map={map}
+        onOpenModule={(id) => {
+          setViewRequest([id])
+          handlePageChange('map')
+        }}
+        onOpenSession={(sid) => {
+          setRunsFocus(sid)
+          handlePageChange('runs')
+        }}
+      />
+    ),
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // v0.2 P1：「任务对话」——对话孵化任务（会话=任务上位容器：计划进度条/内联审批/diff 影响面三栏）
     workbench: (
