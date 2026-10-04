@@ -1,6 +1,6 @@
 [package]
 name = "easyvibe-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "EasyVibe desktop shell（Tauri v2）：内嵌 easyvibe-backend sidecar，同源托管渲染器"
 authors = ["EasyVibe"]
 edition = "2021"

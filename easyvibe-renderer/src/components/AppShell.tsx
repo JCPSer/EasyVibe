@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { TrafficLightsSpacer } from '@/components/WindowControls'
+import { TrafficLightsSpacer, FakeTrafficLights } from '@/components/WindowControls'
 import { isTauriRuntime } from '@/lib/env'
 import {
   GitBranch,
@@ -119,6 +119,7 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, top
         }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          <FakeTrafficLights />
           <TrafficLightsSpacer />
           <span className="flex shrink-0 items-center gap-1.5 pr-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
