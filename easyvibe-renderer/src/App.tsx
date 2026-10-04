@@ -514,7 +514,6 @@ function Canvas({
   agentReady,
   onChatAbout,
   dark = false,
-  queueResyncKey = 0,
 }: {
   map: CodeMap
   backendRepo: string | null
@@ -539,8 +538,6 @@ function Canvas({
   onChatAbout?: (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => void
   /** 2026-10-04 暗黑模式：小地图底色/遮罩主题感知 */
   dark?: boolean
-  /** 运行会话气泡重拉信号：WS onopen（重连）时壳层递增（I5②） */
-  queueResyncKey?: number
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
@@ -1072,14 +1069,6 @@ function Canvas({
           <Panel position="top-right" className="flex flex-col gap-2">
             <Legend violations={violations} />
           </Panel>
-
-          {/* 运行会话气泡：画布右下、小地图上方常驻（2026-10-04 实弹改版：顶栏右区拥挤，
-              移出工具栏；排队条目收进同一胶囊，不再单独飘浮）。空态不渲染。 */}
-          {backendRepo && (
-            <Panel position="bottom-right" style={{ marginBottom: 146, marginRight: 6 }} className="!p-0">
-              <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncKey} />
-            </Panel>
-          )}
 
           {/* 顶部中央：选中模块的横向工具栏（F1a）；mt 让出头部卡片高度（展开简介时更高），窄屏不遮挡 */}
           {selModule && (
@@ -2244,6 +2233,12 @@ export default function App() {
   const topBar = (
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {topCenter}
+        {/* 运行会话指示器：顶栏正中央细条状态丸（2026-10-04 定稿；空态不渲染，不占位） */}
+        {backendRepo && (
+          <div className="mx-auto shrink-0">
+            <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} />
+          </div>
+        )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
@@ -2359,7 +2354,6 @@ export default function App() {
             }}
             onChatAbout={goChatAbout}
             dark={dark}
-            queueResyncKey={queueResyncTick}
           />
         </ReactFlowProvider>
       </CanvasBoundary>

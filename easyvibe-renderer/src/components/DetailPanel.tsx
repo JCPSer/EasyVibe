@@ -6,6 +6,7 @@ import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
+import { PanelChat } from '@/components/PanelChat'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
@@ -464,34 +465,17 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             scopeName={scopeModuleName}
           />
         )}
-        {/* v0.2：对话已迁至「任务对话」页（全应用唯一 ChatPanel 实例）。
-            占位保留一个版本期： muscle memory 的迁移提示长在原页签位置上（方案 3.3/评审🟡3） */}
+        {/* 2026-10-04 对话页签实体化：就地全功能对话（PanelChat——多会话/@模块上下文/附件，
+            与工作台共享会话库）；选中模块自动钉 @，不再是有去无回的迁移占位 */}
         {tab === 'chat' && (
-          <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
-            <MessagesSquare size={22} className="text-slate-300 dark:text-slate-600" />
-            <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">对话已迁至「任务对话」</p>
-            <p className="max-w-[240px] text-[11px] leading-4 text-slate-400 dark:text-slate-500">
-              当前选中{module ? '模块' : layer ? '架构层' : '对象'}的上下文会自动带过去
-            </p>
-            {onChatAbout && (module || layer || parent) && (
-              <button
-                onClick={() =>
-                  onChatAbout(
-                    module
-                      ? { refId: module.id, refName: module.name, kind: 'module' }
-                      : layer
-                        ? { refId: layer.id, refName: layer.name, kind: 'layer' }
-                        : { refId: parent!.id, refName: parent!.name, kind: 'module' },
-                  )
-                }
-                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-700"
-              >
-                <MessagesSquare size={12} /> 前往任务对话
-              </button>
-            )}
-            {!module && !layer && !parent && (
-              <p className="text-micro text-slate-300 dark:text-slate-600">在地图上选中模块或层后，可带上下文前往</p>
-            )}
+          <div className="-m-4 flex h-full min-h-0 flex-col">
+            <PanelChat
+              backendRepo={backendRepo}
+              map={map}
+              selection={selection}
+              onCreateTask={onCreateTask}
+              onLocateModule={onLocateModule}
+            />
           </div>
         )}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} onChatAbout={onChatAbout} />}

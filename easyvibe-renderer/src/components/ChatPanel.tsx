@@ -61,6 +61,10 @@ interface Props {
   /** v0.2 跨页预填：携带目标会话 + nonce，会话匹配且未消费时写入输入框/mentions。
    * 契约如此而非"挂载时写一次"的原因：本组件常驻挂载、切会话不重挂载（曾致跨会话串话） */
   pendingDraft?: { convId: string; text: string; mention?: { id: string; name: string }; nonce: number } | null
+  /** 2026-10-04 右栏就地对话：选中对象变化时父级投递 @提及（nonce 一次性消费，去重追加） */
+  pendingMention?: { id: string; name: string; nonce: number } | null
+  /** 2026-10-04 右栏就地对话：「新建会话」时的默认标题（如「模块 · 桌面端界面」）；null 走后端自动命名 */
+  defaultConvTitle?: string | null
 }
 
 interface ChatRestore {
@@ -75,7 +79,7 @@ interface ChatRestore {
 // 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
 // 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId, pendingDraft }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId, pendingDraft, pendingMention, defaultConvTitle }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -156,7 +160,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     fetch(`/api/repos/${backendRepo}/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      // 2026-10-04：右栏就地对话传入默认标题（如「模块 · 桌面端界面」）；未传走后端自动命名
+      body: JSON.stringify(defaultConvTitle ? { title: defaultConvTitle } : {}),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ConversationSummary }) => {
@@ -165,7 +170,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         loadConvs()
       })
       .catch(() => toast('新建会话失败', 'error'))
-  }, [backendRepo, loadConvs, setConvId])
+  }, [backendRepo, loadConvs, setConvId, defaultConvTitle])
 
   const switchConv = useCallback((id: string | null) => {
     setConvId(id)
@@ -191,6 +196,15 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     setMentions(pendingDraft.mention ? [pendingDraft.mention] : [])
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [pendingDraft, convId])
+
+  // 2026-10-04 右栏就地对话：@提及投递消费（nonce 一次性；同 id 去重追加不重复钉）
+  const consumedMentions = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    if (!pendingMention || consumedMentions.current.has(pendingMention.nonce)) return
+    consumedMentions.current.add(pendingMention.nonce)
+    setMentions((prev) => (prev.some((m) => m.id === pendingMention.id) ? prev : [...prev, { id: pendingMention.id, name: pendingMention.name }]))
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [pendingMention])
 
   const renameConv = useCallback(() => {
     if (!backendRepo || !convId || !renameVal.trim()) return

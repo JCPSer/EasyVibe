@@ -7,11 +7,11 @@ import { formatElapsed, isEmptyState, kindFromLabel, type SessionQueueKind, type
 
 const KIND_NAME: Record<SessionQueueKind, string> = { patrol: '巡检', reinduce: '归纳', submap: '深入分析' }
 
-// 运行会话气泡（docs/requirements-session-bubble-queue.md / ui-mockups/运行会话气泡设计-v1.png）：
-// 常驻「画布右下角、小地图上方」（2026-10-04 实弹改版——顶栏右区拥挤、排队卡单独飘浮难看）。
-// 单颗玻璃拟态胶囊：行 1 = 活动会话（进度环 + 类型图标 + 脉冲点 + label + 已运行时长）；
-// 行 2（仅存在排队时）= 排队任务（时钟 + label + 行内 × 取消），与主胶囊同体不飘浮。
-// 悬停在胶囊上 → 详情卡向上弹出（会话详情 + 取消按钮）。空态（无活动且无排队）不渲染。
+// 运行会话指示器（docs/requirements-session-bubble-queue.md / ui-mockups/顶部会话指示器设计-v1.png）：
+// 顶栏正中央细条状态丸（2026-10-04 二次改版——右下胶囊挪走后用户要求回顶部，但右侧按钮群拥挤，
+// 顶栏正中大片留白是天然位置）：26px 高单行信息——迷你转环+类型图标、脉冲点、label·进行中、
+// 已运行时长；排队时紧跟琥珀小 chip（行内 × 取消）。悬停向下弹详情卡（详情+取消）。
+// 空态（无活动且无排队）不渲染。
 
 export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: string | null; resyncKey?: number }) {
   const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
@@ -81,6 +81,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
   if (!backendRepo || (isEmptyState(snap) && !failed)) return null
 
   // 每次渲染现取 wall clock（非 hook，可在 early return 之后）——计时永不依赖可能过期的快照
+  // eslint-disable-next-line react-hooks/purity -- 时长必须在渲染时读真实时钟：定时器被 webview 节流时状态快照会过期导致"从0重计"（2026-10-04 实弹修复，见 git log）
   const now = Date.now()
   const active = failed ? null : snap?.active
   const queued = snap?.queued ?? null
@@ -124,78 +125,65 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
   }
 
   return (
-    <div className="group w-60 select-none" data-no-drag>
-      {/* 主胶囊：玻璃拟态圆角卡（行 1 活动会话 + 行 2 排队） */}
+    <div className="group relative select-none" data-no-drag>
+      {/* 顶部细条状态丸：26px 高单行——迷你转环 + 脉冲点 + label·进行中 + 已运行时长 */}
       <div
-        className={`glass elev-2 overflow-hidden rounded-2xl border ${
+        className={`glass elev-2 flex h-[26px] items-center gap-1.5 rounded-full border pl-1 pr-2.5 ${
           failed ? 'border-red-300 dark:border-red-800' : 'border-slate-200 dark:border-slate-700'
         }`}
       >
-        {/* 行 1：活动会话（或失败红态；无活动但有排队时的占位也走这行） */}
-        <div className="flex items-center gap-2 px-3 py-2">
-          <span className="relative flex h-7 w-7 shrink-0 items-center justify-center">
-            {active && (
-              <svg className="absolute inset-0 animate-spin" style={{ animationDuration: '2.4s' }} viewBox="0 0 28 28" aria-hidden>
-                <circle cx="14" cy="14" r="12" fill="none" stroke={failed ? '#fecaca' : '#e0e7ff'} strokeWidth="2.5" />
-                <circle
-                  cx="14"
-                  cy="14"
-                  r="12"
-                  fill="none"
-                  stroke={failed ? '#ef4444' : '#6366f1'}
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeDasharray="20 55.5"
-                />
-              </svg>
-            )}
-            {active ? (
-              <Icon size={13} className={failed ? 'text-red-500' : 'text-indigo-500'} />
-            ) : (
-              <Clock size={13} className="text-amber-500" />
-            )}
-          </span>
-          <span className="flex min-w-0 flex-1 flex-col leading-none">
-            <span className="flex items-center gap-1.5 whitespace-nowrap text-cap font-semibold text-slate-700 dark:text-slate-200">
-              <span
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                  failed ? 'bg-red-500' : active ? 'animate-pulse bg-indigo-500' : 'animate-pulse bg-amber-500'
-                }`}
+        <span className="relative flex h-[18px] w-[18px] shrink-0 items-center justify-center">
+          {active && (
+            <svg className="absolute inset-0 animate-spin" style={{ animationDuration: '2.4s' }} viewBox="0 0 18 18" aria-hidden>
+              <circle cx="9" cy="9" r="7.5" fill="none" stroke={failed ? '#fecaca' : '#e0e7ff'} strokeWidth="2" />
+              <circle
+                cx="9"
+                cy="9"
+                r="7.5"
+                fill="none"
+                stroke={failed ? '#ef4444' : '#6366f1'}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeDasharray="12 35"
               />
-              <span className="truncate">
-                {failed ? `${failed.label} · 失败` : active ? `${active.label} · 进行中` : `排队中：${queued?.label ?? ''}`}
-              </span>
-            </span>
-            <span className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">
-              {failed ? '会话已结束' : active ? (elapsed !== null ? `已运行 ${elapsed}` : '进行中…') : '当前会话结束后自动开始'}
-            </span>
-          </span>
-        </div>
-
-        {/* 行 2：排队任务——收进胶囊（分隔线区隔），不再单独飘浮；行内 × 随时可取消 */}
+            </svg>
+          )}
+          {active ? (
+            <Icon size={10} className={failed ? 'text-red-500' : 'text-indigo-500'} />
+          ) : (
+            <Clock size={10} className="text-amber-500" />
+          )}
+        </span>
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+            failed ? 'bg-red-500' : active ? 'animate-pulse bg-indigo-500' : 'animate-pulse bg-amber-500'
+          }`}
+        />
+        <span className="max-w-[200px] truncate whitespace-nowrap text-cap font-semibold leading-none text-slate-700 dark:text-slate-200">
+          {failed ? `${failed.label} · 失败` : active ? `${active.label} · 进行中` : `排队中：${queued?.label ?? ''}`}
+        </span>
+        <span className="tnum whitespace-nowrap text-micro leading-none text-slate-400 dark:text-slate-500">
+          {failed ? '会话已结束' : active ? (elapsed !== null ? `已运行 ${elapsed}` : '进行中…') : '结束后自动开始'}
+        </span>
+        {/* 排队 chip：琥珀小胶囊，行内 × 随时取消 */}
         {queued && (
-          <div className="flex items-center gap-2 border-t border-slate-200/70 px-3 py-1.5 dark:border-slate-700/70">
-            <Clock size={12} className="shrink-0 text-amber-500" />
-            <span className="min-w-0 flex-1 leading-none">
-              <span className="block truncate text-cap font-medium text-slate-600 dark:text-slate-300">
-                排队：{queued.label}
-              </span>
-              <span className="mt-0.5 block text-micro text-slate-400 dark:text-slate-500">结束后自动开始</span>
-            </span>
+          <span className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 py-0.5 pl-1.5 pr-0.5 text-micro font-medium leading-none text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300">
+            <Clock size={9} />
+            <span className="max-w-[110px] truncate">排队:{queued.label}</span>
             <button
               onClick={cancelQueue}
-              className="shrink-0 rounded-full p-1 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+              className="rounded-full p-0.5 text-amber-400 transition-colors hover:bg-amber-100 hover:text-amber-700 dark:text-amber-600 dark:hover:bg-amber-900/50 dark:hover:text-amber-300"
               title="取消排队"
             >
-              <X size={12} />
+              <X size={9} />
             </button>
-          </div>
+          </span>
         )}
       </div>
 
-      {/* 悬停详情卡：从胶囊向上弹出（活动会话时）；含会话详情 + 取消按钮 */}
+      {/* 悬停详情卡：从状态丸向下弹出（活动会话时）；含会话详情 + 取消 */}
       {active && !failed && (
-        <div className="glass elev-3 anim-scale-in pointer-events-none invisible absolute bottom-full right-0 mb-2 w-64 rounded-xl border border-slate-200 p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100 dark:border-slate-700">
+        <div className="glass elev-3 anim-scale-in pointer-events-none invisible absolute left-1/2 top-full z-50 mt-1.5 w-64 -translate-x-1/2 rounded-xl border border-slate-200 p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100 dark:border-slate-700">
           <p className="text-cap font-bold text-slate-700 dark:text-slate-200">{active.label}</p>
           <dl className="mt-1.5 space-y-0.5 text-micro text-slate-500 dark:text-slate-400">
             <div className="flex justify-between">
