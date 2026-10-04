@@ -40,9 +40,9 @@ function splitSections(content: string): Section[] | null {
 }
 
 const CARD_STYLE = [
-  { match: /依赖|dependenc|引用/i, icon: Waypoints, cls: 'border-blue-200 bg-blue-50/50', iconCls: 'text-blue-500' },
-  { match: /架构|architecture|体检|违规|分层/i, icon: ShieldCheck, cls: 'border-emerald-200 bg-emerald-50/50', iconCls: 'text-emerald-600' },
-  { match: /建议|recommend|优化|修复/i, icon: Lightbulb, cls: 'border-amber-200 bg-amber-50/50', iconCls: 'text-amber-500' },
+  { match: /依赖|dependenc|引用/i, icon: Waypoints, cls: 'border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/40', iconCls: 'text-blue-500' },
+  { match: /架构|architecture|体检|违规|分层/i, icon: ShieldCheck, cls: 'border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/40', iconCls: 'text-emerald-600' },
+  { match: /建议|recommend|优化|修复/i, icon: Lightbulb, cls: 'border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/40', iconCls: 'text-amber-500' },
 ]
 
 export function AnswerCards({ content }: { content: string }) {

@@ -352,13 +352,13 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   return (
     <div className={`${embedded ? 'h-full w-full' : 'anim-drawer-in fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900`}>
       {/* 分区导航（macOS 系统设置式左栏） */}
-      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 p-3">
+      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-3">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => setSection(s.id)}
             className={`flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-              section === s.id ? 'bg-white dark:bg-slate-900 elev-1 text-blue-600' : 'text-slate-500 dark:text-slate-400 hover:bg-white/70 dark:bg-slate-900/70'
+              section === s.id ? 'bg-white dark:bg-slate-900 elev-1 text-blue-600' : 'text-slate-500 dark:text-slate-400 hover:bg-white/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <s.icon size={14} className="mt-0.5 shrink-0" />

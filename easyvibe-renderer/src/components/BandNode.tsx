@@ -27,7 +27,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
       {/* 层标签列：可交互 */}
       <button
         onClick={() => onSelect(layer.id)}
-        className="flex h-full flex-col rounded-lg border bg-white/95 dark:bg-slate-900/95 text-left shadow-sm transition-colors hover:border-blue-300"
+        className="flex h-full flex-col rounded-lg border bg-white/95 dark:bg-slate-900/60 text-left shadow-sm transition-colors hover:border-blue-300"
         style={{
           width: 190,
           marginTop: 10,

@@ -248,3 +248,9 @@ input, textarea {
 .dark .react-flow__edge-textbg {
   fill: rgb(15 23 42);
 }
+
+/* 暗色下 glass 的 inset 顶部白色高光（亮色模式存在的 1px 线）必须熄灭——
+   这就是用户截图"最顶端白色细线"的来源 */
+.dark .glass {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}

@@ -34,7 +34,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
 
   return (
     <div
-      className="h-full w-full rounded-xl border-2 border-dashed bg-white/60"
+      className="h-full w-full rounded-xl border-2 border-dashed bg-white/60 dark:bg-slate-900/60 dark:border-slate-700"
       style={{ borderColor: `${color}88` }}
     >
       {/* 模块级连线 handle：顶/底均匀分布 */}
