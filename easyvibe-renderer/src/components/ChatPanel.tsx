@@ -6,7 +6,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy, MoreHorizontal, MessagesSquare} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy, MessagesSquare} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -53,9 +53,6 @@ interface Props {
   onCreateTask: (draft: TaskDraft) => void
   /** M4-2 工作台嵌入模式：隐藏会话切换器（左侧栏自带）与部分头部按钮 */
   embedded?: boolean
-  /** 2026-10-04 右栏窄面板模式：头部压缩为一行（幽灵切换器 + 图标按钮 + 「…」收纳次要操作），
-      隐藏 token 统计与文字按钮组——宽栏全功能版见工作台 */
-  compact?: boolean
   /** M4-2：当前会话变化通知（工作台据此加载该会话的任务/影响面） */
   onConvChange?: (id: string | null) => void
   /** R3 B1：受控会话 id——传入后组件进入受控模式（工作台左栏驱动中栏联动），
@@ -82,7 +79,7 @@ interface ChatRestore {
 // 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
 // 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, compact = false, onConvChange, activeConvId, pendingDraft, pendingMention, defaultConvTitle }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId, pendingDraft, pendingMention, defaultConvTitle }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -122,8 +119,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     [activeConvId, onConvChange],
   )
   const [convMenuOpen, setConvMenuOpen] = useState(false)
-  // compact 模式的「…」收纳菜单
-  const [moreOpen, setMoreOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([])
@@ -619,17 +614,12 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
 
   return (
     <div className="flex h-full flex-col">
-      {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担；
-          compact 模式幽灵化——去边框盒，hover 底色；且与操作图标合并为一行（设计师评审#1/#4）） */}
+      {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担） */}
       {!embedded && (
-        <div className={`relative ${compact ? 'mb-1.5 flex items-center gap-0.5' : 'mb-2'}`}>
+        <div className="relative mb-2">
           <button
             onClick={() => setConvMenuOpen((v) => !v)}
-            className={
-              compact
-                ? 'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70'
-                : 'flex w-full items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-left hover:border-blue-300'
-            }
+            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-left hover:border-blue-300"
           >
             {currentConv?.runtime.state === 'running' ? (
               <Loader2 size={12} className="shrink-0 animate-spin text-amber-500" />
@@ -646,75 +636,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             )}
             <ChevronDown size={12} className="shrink-0 text-slate-400 dark:text-slate-500" />
           </button>
-          {/* compact 单行头部：切换器 + 新会话 + 「…」（设计师评审#1/#4/#5——
-              分组=价值操作/管理/危险，token 统计带标签作信息头） */}
-          {compact && (
-            <>
-              <button
-                onClick={createConv}
-                disabled={!backendRepo || sending}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300 disabled:opacity-40"
-                title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
-              >
-                <RotateCcw size={12} />
-              </button>
-              <div className="relative">
-                <button
-                  onClick={() => setMoreOpen((v) => !v)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
-                  title="更多操作"
-                >
-                  <MoreHorizontal size={13} />
-                </button>
-                {moreOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
-                    <div className="glass anim-scale-in absolute right-0 top-full z-40 mt-1 w-48 rounded-xl border border-slate-200 dark:border-slate-700 p-1 shadow-xl">
-                      {/* 信息头：带标签的 token 统计（裸"9,026 / 864"格式退役） */}
-                      <p className="tnum flex items-baseline justify-between px-2 pb-1 pt-1.5 text-micro text-slate-400 dark:text-slate-500">
-                        <span>输入 {usage.promptTokens.toLocaleString()}</span>
-                        <span>输出 {usage.completionTokens.toLocaleString()}</span>
-                      </p>
-                      <button
-                        onClick={() => { setMoreOpen(false); upgradeToTask() }}
-                        disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                      >
-                        <Wrench size={11} /> 转为任务
-                      </button>
-                      <div className="mx-2 my-0.5 border-t border-slate-100 dark:border-slate-800" />
-                      <button
-                        onClick={() => { setMoreOpen(false); exportAndClear() }}
-                        disabled={!backendRepo || messages.length === 0}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                      >
-                        <Download size={11} /> 导出/清空
-                      </button>
-                      <button
-                        onClick={() => { setMoreOpen(false); compressCtx() }}
-                        disabled={!backendRepo || compacting}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                      >
-                        <Shrink size={11} /> {compacting ? '压缩中…' : '压缩上下文'}
-                      </button>
-                      {convId && (
-                        <>
-                          <div className="mx-2 my-0.5 border-t border-slate-100 dark:border-slate-800" />
-                          <button
-                            onClick={() => { setMoreOpen(false); deleteConv() }}
-                            disabled={!backendRepo}
-                            className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
-                          >
-                            <XIcon size={11} /> 删除会话
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </>
-          )}
           {convMenuOpen && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setConvMenuOpen(false)} />

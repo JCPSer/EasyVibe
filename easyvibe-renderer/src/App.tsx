@@ -513,6 +513,7 @@ function Canvas({
   onTaskCreated,
   agentReady,
   onChatAbout,
+  onGoWorkbench,
   dark = false,
 }: {
   map: CodeMap
@@ -536,6 +537,8 @@ function Canvas({
   /** v0.2：「就此对话」入口上抛（详情视图/模块工具栏/对话占位页签共用）——
    * 壳层转为跨页携带上下文跳「任务对话」 */
   onChatAbout?: (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => void
+  /** 2026-10-05 Redesign-A：右栏审批出口——QuickAsk 的审批角标/审批卡跳工作台裁决 */
+  onGoWorkbench?: () => void
   /** 2026-10-04 暗黑模式：小地图底色/遮罩主题感知 */
   dark?: boolean
 }) {
@@ -1275,6 +1278,7 @@ function Canvas({
               onLocateModule={focusModule}
               onOpenView={openView}
               onChatAbout={onChatAbout}
+              onGoWorkbench={onGoWorkbench}
               onClose={() => onPanelOpenChange(false)}
               width={panelWidth}
             />
@@ -2361,6 +2365,7 @@ export default function App() {
               handlePageChange('tasks')
             }}
             onChatAbout={goChatAbout}
+            onGoWorkbench={() => handlePageChange('workbench')}
             dark={dark}
           />
         </ReactFlowProvider>

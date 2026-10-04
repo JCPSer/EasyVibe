@@ -30,6 +30,8 @@ interface Props {
   onOpenView?: (ids: string[]) => void
   /** v0.2：对话页签占位与详情视图的「就此对话」入口（携带当前选中对象） */
   onChatAbout?: (target: ChatAboutTarget) => void
+  /** 2026-10-05 Redesign-A：右栏审批出口——跳工作台「任务对话」页裁决 */
+  onGoWorkbench?: () => void
   onClose: () => void
   /** 改进#4：右栏可调宽（测试员 IA 反馈的非破坏性验证——宽度够不够先看数据） */
   width?: number
@@ -411,7 +413,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onChatAbout, onClose, width }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onChatAbout, onGoWorkbench, onClose, width }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -454,6 +456,20 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
         </button>
       </div>
       {/* key={tab}：切页签重触发 150ms 淡入（评审 R3——此前内容瞬换无过渡） */}
+      {tab === 'chat' ? (
+        /* 2026-10-05 Redesign-A：对话页签独立容器——QuickAsk（检查器文档流）自管
+           ContextBar/文档流/输入坞的纵向滚动，不再套 p-4 滚动层（双滚动条/贴边观感硬伤之源） */
+        <div key={tab} className="anim-fade-in-fast flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+          <PanelChat
+            backendRepo={backendRepo}
+            map={map}
+            selection={selection}
+            onCreateTask={onCreateTask}
+            onLocateModule={onLocateModule}
+            onGoWorkbench={onGoWorkbench}
+          />
+        </div>
+      ) : (
       <div key={tab} className="anim-fade-in-fast flex-1 space-y-5 overflow-y-auto p-4">
         {tab === 'issues' && (
           <IssuesList
@@ -464,20 +480,6 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             scopeId={selection?.kind === 'module' ? selection.id : selection?.kind === 'submodule' ? selection.parentId : undefined}
             scopeName={scopeModuleName}
           />
-        )}
-        {/* 2026-10-04 对话页签实体化：就地全功能对话（PanelChat——多会话/@模块上下文/附件，
-            与工作台共享会话库）；选中模块自动钉 @，不再是有去无回的迁移占位。
-            内边距与兄弟页签统一（p-4），不再用 -m-4 越狱——贴边/切页签跳动两个观感硬伤之源 */}
-        {tab === 'chat' && (
-          <div className="flex h-full min-h-0 flex-col">
-            <PanelChat
-              backendRepo={backendRepo}
-              map={map}
-              selection={selection}
-              onCreateTask={onCreateTask}
-              onLocateModule={onLocateModule}
-            />
-          </div>
         )}
         {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} onChatAbout={onChatAbout} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} onChatAbout={onChatAbout} />}
@@ -517,6 +519,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           </div>
         )}
       </div>
+      )}
     </aside>
   )
 }
