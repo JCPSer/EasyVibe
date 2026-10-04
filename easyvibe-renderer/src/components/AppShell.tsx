@@ -10,6 +10,7 @@ import {
   HeartPulse,
   MessagesSquare,
   ClipboardList,
+  Activity,
   History,
   BookOpen,
   ScrollText,
@@ -29,6 +30,7 @@ export type PageId =
   | 'health'
   | 'workbench'
   | 'tasks'
+  | 'runs'
   | 'todo'
   | 'review'
   | 'changes'
@@ -54,6 +56,7 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
     items: [
       { id: 'workbench', label: '任务对话', icon: MessagesSquare },
       { id: 'tasks', label: '任务', icon: ClipboardList },
+      { id: 'runs', label: '运行', icon: Activity },
       { id: 'changes', label: '变更记录', icon: History },
       { id: 'git', label: 'Git', icon: GitBranch },
     ],

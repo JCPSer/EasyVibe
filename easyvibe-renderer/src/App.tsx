@@ -40,6 +40,7 @@ import { TaskFormPanel } from '@/components/TaskFormPanel'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { SessionBubble } from '@/components/SessionBubble'
 import { DepsPage } from '@/components/DepsPage'
+import { RunsPage } from '@/components/RunsPage'
 import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -2474,6 +2475,7 @@ export default function App() {
       </CanvasBoundary>
     ),
     tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
+    runs: <RunsPage backendRepo={backendRepo} />,
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
     // v0.2 P1：「任务对话」——对话孵化任务（会话=任务上位容器：计划进度条/内联审批/diff 影响面三栏）
     workbench: (
@@ -2557,7 +2559,7 @@ export default function App() {
           page={page}
           onPageChange={handlePageChange}
           topBar={topBar}
-          topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} /> : undefined}
+          topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} onOpenRuns={() => handlePageChange('runs')} /> : undefined}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
             /* 优先级：零仓库 > agent 缺失引导（M2）> 审批提醒 */

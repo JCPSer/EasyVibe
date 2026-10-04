@@ -13,7 +13,7 @@ const KIND_NAME: Record<SessionQueueKind, string> = { patrol: '巡检', reinduce
 // 已运行时长；排队时紧跟琥珀小 chip（行内 × 取消）。悬停向下弹详情卡（详情+取消）。
 // 空态（无活动且无排队）不渲染。
 
-export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: string | null; resyncKey?: number }) {
+export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: () => void }) {
   const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
   // 终态红态：failed → 记住 label，红态 5s 后消失
   const [failed, setFailed] = useState<{ label: string } | null>(null)
@@ -126,9 +126,13 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
 
   return (
     <div className="group relative select-none" data-no-drag>
-      {/* 顶部细条状态丸：26px 高单行——迷你转环 + 脉冲点 + label·进行中 + 已运行时长 */}
+      {/* 顶部细条状态丸：26px 高单行——迷你转环 + 脉冲点 + label·进行中 + 已运行时长。
+          点击整丸直达「运行」页看完整流水（2026-10-05 M4 入口汇入） */}
       <div
-        className={`glass elev-2 flex h-[26px] items-center gap-1.5 rounded-full border pl-1 pr-2.5 ${
+        onClick={onOpenRuns}
+        role={onOpenRuns ? 'button' : undefined}
+        title={onOpenRuns ? '查看 agent 流水' : undefined}
+        className={`glass elev-2 flex h-[26px] items-center gap-1.5 rounded-full border pl-1 pr-2.5 ${onOpenRuns ? 'cursor-pointer' : ''} ${
           failed ? 'border-red-300 dark:border-red-800' : 'border-slate-200 dark:border-slate-700'
         }`}
       >
