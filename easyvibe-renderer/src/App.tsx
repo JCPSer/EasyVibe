@@ -2262,7 +2262,17 @@ export default function App() {
     ),
     drift: <DriftPage />,
     health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
-    modules: <ModulesPage map={map} onOpenMap={() => handlePageChange('map')} />,
+    modules: (
+      <ModulesPage
+        map={map}
+        onOpenMap={() => handlePageChange('map')}
+        onCreateTask={openTaskDraft}
+        onLocateModule={(id) => {
+          setViewRequest([id])
+          handlePageChange('map')
+        }}
+      />
+    ),
     deps: (
       <PlaceholderPage
         title="依赖关系"

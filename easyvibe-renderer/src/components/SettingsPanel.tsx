@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Terminal, Trash2, X,
+  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 
@@ -282,6 +282,13 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   }
 
   const removeService = async (id: string) => {
+    // 审计 P2：槽位占用防护——被绑定的服务禁止删除（否则槽位指向死服务，运行时静默回退 env）
+    const bound = Object.entries(slots).filter(([, v]) => v === id).map(([k]) => SLOTS.find(([s]) => s === k)?.[1] ?? k)
+    if (bound.length > 0) {
+      toast(`该服务被槽位绑定（${bound.join('、')}）——请先在下方槽位绑定中改用其他服务`, 'error')
+      setConfirmDelete(null)
+      return
+    }
     setServices((p) => {
       const rest = { ...p }
       delete rest[id]
@@ -292,6 +299,33 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       fetch(`/api/settings/global/${encodeURIComponent(`llm.service.${id}.apiKey`)}`, { method: 'DELETE' }),
     ])
     toast('服务已删除')
+  }
+
+  // 审计 P2：测试连接——用当前表单值（未保存也能测）ping 服务端点，结果落 toast
+  const [testingSvc, setTestingSvc] = useState<string | null>(null)
+  const testService = async (id: string) => {
+    const s = services[id]
+    if (!s) return
+    setTestingSvc(id)
+    try {
+      const r = await fetch('/api/llm/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: id, base_url: s.baseUrl, model: s.model, api_key: s.apiKey }),
+      })
+      const d: { data?: { ok: boolean; latencyMs: number; protocol: string; error?: string } } = r.ok ? await r.json() : null
+      if (!d?.data) {
+        toast('测试失败（后端响应异常）', 'error')
+      } else if (d.data.ok) {
+        toast(`连接正常 · ${d.data.latencyMs}ms（${d.data.protocol}）`, 'info')
+      } else {
+        toast(`连接失败：${d.data.error?.slice(0, 120) ?? d.data.protocol}`, 'error')
+      }
+    } catch {
+      toast('测试失败（需要后端在线）', 'error')
+    } finally {
+      setTestingSvc(null)
+    }
   }
 
   const updService = (id: string, patch: Partial<Service>) =>
@@ -522,13 +556,24 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                           确认删除
                         </button>
                       ) : (
-                        <button
-                          onClick={() => setConfirmDelete(s.id)}
-                          className="mt-5 shrink-0 rounded-md p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
-                          title="删除服务"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <span className="mt-5 flex shrink-0 items-center gap-0.5">
+                          {/* 审计 P2：测试连接（现填值即可测，无需先保存） */}
+                          <button
+                            onClick={() => void testService(s.id)}
+                            disabled={testingSvc === s.id}
+                            className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-blue-50 hover:text-blue-500 disabled:opacity-40"
+                            title="测试连接：用当前表单值 ping 服务端点（max_tokens=1）"
+                          >
+                            {testingSvc === s.id ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(s.id)}
+                            className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                            title={Object.values(slots).includes(s.id) ? '该服务被槽位绑定，不可删除' : '删除服务'}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </span>
                       )}
                     </div>
                     <Field label="Base URL" error={errors[`baseUrl:${s.id}`]} hint="Anthropic 兼容端点，如 http://127.0.0.1:8787">

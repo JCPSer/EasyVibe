@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText, Hammer } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText, Hammer, ChevronRight } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
@@ -17,6 +17,42 @@ import type { TaskDraft } from '@/lib/taskContext'
 //   analysis·solution（文档待评审，走全文评审卡——通过才进下一阶段）。
 // 实时终端（模块级环形缓冲，切页不丢；断线无回放显灰条不造假）。
 // 阶段判定走 lib/taskStage 的 status 优先映射（failed 残留 gate 不制造假阶段）。
+
+/** 产物文档卡（审计 P2：此前纯只读死胡同）——点击标题展开全文（拉 /dev-doc），
+ *  再点收起；展开态本地缓存避免重复请求 */
+function DocCard({ backendRepo, doc }: { backendRepo: string; doc: { path: string; name: string; excerpt?: string } }) {
+  const [open, setOpen] = useState(false)
+  const [full, setFull] = useState<string | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    if (!open || full !== null || err) return
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(doc.path)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { content?: string } }) => setFull(d?.data?.content ?? ''))
+      .catch(() => setErr(true))
+  }, [open, full, err, backendRepo, doc.path])
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 text-left"
+        title={open ? '收起全文' : '打开全文'}
+      >
+        <ChevronRight size={10} className={`shrink-0 text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">{doc.name}</span>
+      </button>
+      <p className="mono mt-0.5 truncate text-[9px] text-slate-400" title={doc.path}>{doc.path}</p>
+      {!open && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{doc.excerpt || '（空文档）'}</p>}
+      {open && (
+        <div className="mt-1.5 max-h-64 overflow-y-auto rounded-md bg-slate-50 p-2">
+          {full === null && !err && <p className="text-[10px] text-slate-400"><Loader2 size={10} className="mr-1 inline animate-spin" />加载全文…</p>}
+          {err && <p className="text-[10px] text-red-500">全文加载失败</p>}
+          {full !== null && <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-slate-600">{full || '（空文档）'}</pre>}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
  *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮 */
@@ -963,7 +999,22 @@ export function TaskWorkflowPage({
                       if (!ap) return null
                       const rel = ap.includes('/.easyvibe/') ? `.easyvibe/${ap.split('/.easyvibe/')[1]}` : ap.split('/').pop()
                       return (
-                        <p className="mono mt-1 truncate text-micro text-slate-400" title={rel}>已归档:{rel}</p>
+                        <p className="mono mt-1 flex items-center gap-1 text-micro text-slate-400">
+                          <span className="truncate" title={rel}>已归档:{rel}</span>
+                          {/* 审计 P2：归档路径可复制（此前只能眼看） */}
+                          <button
+                            onClick={() => {
+                              void navigator.clipboard?.writeText(rel ?? '').then(
+                                () => toast('归档路径已复制', 'info'),
+                                () => toast('复制失败（剪贴板不可用）', 'error'),
+                              )
+                            }}
+                            className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+                            title="复制归档路径"
+                          >
+                            <Copy size={9} />
+                          </button>
+                        </p>
                       )
                     })()}
                     <p className="mt-1 text-micro text-slate-400">STAR 记忆与操作日志见右侧产物文档。</p>
@@ -1044,11 +1095,7 @@ export function TaskWorkflowPage({
                   <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
                     {docs.length === 0 && <p className="px-1 py-2 text-micro text-slate-400">本任务暂无产物文档</p>}
                     {docs.map((d) => (
-                      <div key={d.path} className="rounded-lg border border-slate-200 bg-white p-2">
-                        <p className="truncate text-[11px] font-semibold text-slate-700" title={d.name}>{d.name}</p>
-                        <p className="mono mt-0.5 truncate text-[9px] text-slate-400" title={d.path}>{d.path}</p>
-                        <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{d.excerpt || '（空文档）'}</p>
-                      </div>
+                      <DocCard key={d.path} backendRepo={backendRepo} doc={d} />
                     ))}
                   </div>
                   <p className="px-3 pb-2.5 text-[9px] text-slate-300">路径规范：.easyvibe/development_docs/</p>

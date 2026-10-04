@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
+import { ArrowDown, ArrowUp, Crosshair, Wrench } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
+import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 
 // M4-1.5 模块目录页（从占位转正）：以模块为行的表格视图——一览全部模块的职责、
 // 健康与文件归属；兼任画布的无障碍列表模式（画布是图形，目录是语义等价物）。
 // 列可排序；全部数据来自主地图，零额外请求。
+// 2026-10-04 审计 P2：行级操作出口——定位地图 / 发起修复（此前纯只读死胡同）
 type SortKey = 'score' | 'name' | 'coupling' | 'files'
 
 const COUPLING_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
@@ -22,7 +24,7 @@ const FLAG_LABEL: Record<string, string> = {
   doc_drift: '文档漂移',
 }
 
-export function ModulesPage({ map, onOpenMap }: { map: CodeMap; onOpenMap: () => void }) {
+export function ModulesPage({ map, onOpenMap, onCreateTask, onLocateModule }: { map: CodeMap; onOpenMap: () => void; onCreateTask?: (d: TaskDraft) => void; onLocateModule?: (id: string) => void }) {
   const [sortKey, setSortKey] = useState<SortKey>('score')
   const [asc, setAsc] = useState(true)
 
@@ -84,6 +86,7 @@ export function ModulesPage({ map, onOpenMap }: { map: CodeMap; onOpenMap: () =>
               <th className="px-3 py-2 text-[11px] font-semibold">腐化标记</th>
               <th className="px-3 py-2"><Th k="files">文件</Th></th>
               <th className="px-3 py-2 text-[11px] font-semibold">职责</th>
+              <th className="px-3 py-2 text-right text-[11px] font-semibold">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -111,6 +114,28 @@ export function ModulesPage({ map, onOpenMap }: { map: CodeMap; onOpenMap: () =>
                 </td>
                 <td className="px-3 py-2"><span className="tnum text-[12px] text-slate-500">{m.files.length}</span></td>
                 <td className="max-w-[280px] px-3 py-2 text-[11px] leading-4 text-slate-500">{m.responsibility}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center justify-end gap-1">
+                    {onLocateModule && (
+                      <button
+                        onClick={() => onLocateModule(m.id)}
+                        className="rounded-md border border-slate-200 p-1 text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                        title="在架构地图中定位该模块"
+                      >
+                        <Crosshair size={11} />
+                      </button>
+                    )}
+                    {onCreateTask && (
+                      <button
+                        onClick={() => onCreateTask(buildModuleTask(map, m.id))}
+                        className="rounded-md border border-slate-200 p-1 text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                        title="指哪打哪：以本模块为上下文发起修复任务"
+                      >
+                        <Wrench size={11} />
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

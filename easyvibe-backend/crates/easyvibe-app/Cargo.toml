@@ -25,5 +25,7 @@ tower.workspace = true
 tower-http.workspace = true
 futures-util = "0.3"
 getrandom.workspace = true
+# 模型服务"测试连接"端点直连 ping（max_tokens=1）
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # 独立分发形态：编译期内嵌提示词/前端 dist，exe 单文件可双击运行
 include_dir = "0.7"

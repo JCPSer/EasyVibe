@@ -6,7 +6,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -811,7 +811,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-micro text-slate-400">{m.content}</span>
             </div>
           ) : (
-            <div key={i} className={`anim-msg-in flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`anim-msg-in group/msg flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
@@ -838,6 +838,22 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 ) : (
                   <MarkdownMessage content={m.content} />
                 )}
+                {/* 审计 P2：消息单条复制（此前只能导出全文或手选）——悬停浮现，组内免打扰 */}
+                <span className="mt-1 flex justify-end opacity-0 transition-opacity group-hover/msg:opacity-100">
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(m.content).then(
+                        () => toast('已复制该条消息', 'info'),
+                        () => toast('复制失败（剪贴板不可用）', 'error'),
+                      )
+                    }}
+                    className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                      m.role === 'user' ? 'text-white/70 hover:text-white' : 'text-slate-300 hover:text-slate-500'
+                    }`}
+                  >
+                    <Copy size={9} /> 复制
+                  </button>
+                </span>
                 {(m.role === 'assistant' || m.role === 'user') && (m.refs.length > 0 || /```mermaid/.test(m.content)) && (
                   <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-slate-200 pt-2">
                     {m.refs.map((id) => (

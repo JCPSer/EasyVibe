@@ -207,6 +207,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agent/status", get(agent_status))
         .route("/agent/detect", axum::routing::post(agent_detect))
         .route("/agent/test", axum::routing::post(agent_test))
+        .route("/llm/test", axum::routing::post(llm_test))
         .route("/diagnostics", get(export_diagnostics))
         .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
@@ -1237,6 +1238,77 @@ async fn agent_test(State(st): State<AppState>) -> Result<Response, AppError> {
     let result = agent_conf::run_agent_test(&st.session_manager, &resolved).await;
     *st.agent_test.write().await = Some(result.clone());
     Ok(Json(serde_json::json!({ "success": true, "data": result })).into_response())
+}
+
+/// 模型服务连通性测试（设置面板"测试连接"按钮，2026-10-04 审计 P2 补口）：
+/// 优先用请求体现填值（未保存也能测），缺省回落全局已存配置；max_tokens=1 的 ping，代价可忽略。
+/// 认证头双发（与 AnthropicClient 同一纪律：x-api-key + Bearer 并存）。
+#[derive(serde::Deserialize)]
+struct LlmTestBody {
+    service_id: String,
+    base_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+}
+
+async fn llm_test_inner(st: &AppState, body: LlmTestBody) -> Result<serde_json::Value, ApiError> {
+    let base = st.settings_repo.get("global", &format!("llm.service.{}", body.service_id)).await.ok().flatten()
+        .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.value).ok());
+    let stored_key = st.settings_repo.get("global", &format!("llm.service.{}.apiKey", body.service_id)).await.ok().flatten()
+        .and_then(|r| if r.encrypted { st.cipher.decrypt(&r.value).ok() } else { Some(r.value) })
+        .and_then(|v| serde_json::from_str::<String>(&v).ok());
+    if base.is_none() && body.base_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
+        return Err(ApiError::NotFound(format!("服务 {} 不存在（或未填 Base URL）", body.service_id)));
+    }
+    let obj = base.unwrap_or_default();
+    let base_url = body.base_url.filter(|s| !s.trim().is_empty())
+        .or_else(|| obj.get("baseUrl").and_then(|v| v.as_str()).map(Into::into))
+        .unwrap_or_else(|| "https://api.anthropic.com".into());
+    let model = body.model.filter(|s| !s.trim().is_empty())
+        .or_else(|| obj.get("model").and_then(|v| v.as_str()).map(Into::into))
+        .unwrap_or_else(|| "claude-sonnet-4-5".into());
+    let api_key = body.api_key.filter(|s| !s.trim().is_empty()).or(stored_key).unwrap_or_default();
+    let started = std::time::Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| ApiError::Internal(format!("HTTP client 构建失败: {e}")))?;
+    let mut req = client
+        .post(format!("{}/v1/messages", base_url.trim_end_matches('/')))
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01");
+    if !api_key.is_empty() {
+        req = req.header("authorization", format!("Bearer {}", api_key));
+    }
+    let resp = req
+        .json(&serde_json::json!({
+            "model": model,
+            "max_tokens": 1,
+            "messages": [{ "role": "user", "content": "ping" }],
+        }))
+        .send()
+        .await;
+    let latency = started.elapsed().as_millis() as u64;
+    match resp {
+        Ok(r) if r.status().is_success() => Ok(serde_json::json!({
+            "ok": true, "latencyMs": latency, "protocol": format!("{} · {}", model, base_url),
+        })),
+        Ok(r) => {
+            let status = r.status().as_u16();
+            let snippet: String = r.text().await.unwrap_or_default().chars().take(200).collect();
+            Ok(serde_json::json!({
+                "ok": false, "latencyMs": latency, "protocol": format!("HTTP {status}"), "error": snippet,
+            }))
+        }
+        Err(e) => Ok(serde_json::json!({
+            "ok": false, "latencyMs": latency, "protocol": "网络层", "error": e.to_string(),
+        })),
+    }
+}
+
+async fn llm_test(State(st): State<AppState>, Json(body): Json<LlmTestBody>) -> Result<Response, AppError> {
+    Ok(Json(serde_json::json!({ "success": true, "data": llm_test_inner(&st, body).await? })).into_response())
 }
 
 /// status/detect 共用的响应体（探测结果传入——detect 用新鲜值，status 用内存态）
@@ -2486,6 +2558,17 @@ async fn main() {
 mod tests {
     use super::*;
     use tower::ServiceExt;
+
+    /// llm_test：不存在且未填 Base URL 的服务必须直接报错（不发 HTTP、不 panic）
+    #[tokio::test]
+    async fn llm_test_rejects_unknown_service() {
+        let st = test_state().await;
+        let err = llm_test_inner(&st, LlmTestBody {
+            service_id: "no-such-service".into(),
+            base_url: None, model: None, api_key: None,
+        }).await;
+        assert!(err.is_err(), "未知服务必须报错: {:?}", err.ok());
+    }
 
     /// 样例地图（与 ai-agent 测试同构：validate_minimum 可通过，stub 问答可命中）
     const SAMPLE_MAP: &str = r#"{
