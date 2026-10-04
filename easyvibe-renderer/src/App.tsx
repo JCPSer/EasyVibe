@@ -1746,12 +1746,14 @@ export default function App() {
     const url = backendRepo ? `/api/repos/${backendRepo}/map` : '/data/map.json'
     fetch(url)
       .then((r) => {
+        // 404 = 仓库尚未归纳——合法状态，走 MapGate 的"尚未生成"引导（开始归纳），不是错误
+        if (r.status === 404 && backendRepo) return null
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json() as Promise<CodeMap>
       })
       .then((m) => {
         setError(null) // 实弹#4 前端根因：成功后必须清错误态，否则 (error && backendRepo) 恒真永远白屏等待
-        setMap(m)
+        if (m) setMap(m)
       })
       .catch((e) => setError(String(e)))
   }, [backendRepo, reloadTick])
