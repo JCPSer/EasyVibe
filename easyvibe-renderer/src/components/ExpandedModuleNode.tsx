@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { ChevronDown, Loader2, RotateCcw, UnfoldVertical, AlertTriangle, Search} from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, RotateCcw, UnfoldVertical, AlertTriangle, Search} from 'lucide-react'
 import type { Module } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 
@@ -18,6 +18,8 @@ export type ExpandedModuleNodeType = Node<
     agentLines?: string[]
     /** M4-1 诚实三态：失败原因（启动失败/会话失败/超时），必须说人话 */
     analyzeError?: string
+    /** 点击头部折叠收起（2026-10-04 实弹：点头部也应能收起，不只工具栏入口） */
+    onCollapse?: () => void
   },
   'moduleExpanded'
 >
@@ -57,8 +59,16 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
         />
       ))}
 
-      {/* 头部：模块名 + 展开中状态 */}
-      <div className="flex h-12 items-center gap-2 border-b border-slate-200/70 px-4">
+      {/* 头部：模块名 + 展开中状态——整块可点收起（实弹反馈：用户天然会点头部折叠） */}
+      <div
+        className={`flex h-12 items-center gap-2 border-b border-slate-200/70 px-4 ${data.onCollapse ? 'cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40' : ''}`}
+        title={data.onCollapse ? '点击折叠收起内部结构' : undefined}
+        onClick={(e) => {
+          if (!data.onCollapse) return
+          e.stopPropagation() // 不触发节点选中/详情面板——用户意图是折叠
+          data.onCollapse()
+        }}
+      >
         <UnfoldVertical size={14} className="text-blue-500" />
         <span className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{mod.name}</span>
         <span className="text-micro text-slate-400 dark:text-slate-500">内部结构</span>
@@ -66,6 +76,11 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
         <span className="text-cap font-semibold" style={{ color }}>
           {mod.health.score}
         </span>
+        {data.onCollapse && (
+          <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full text-slate-300 transition-colors hover:bg-slate-200/60 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-slate-700/60 dark:hover:text-slate-300" title="收起">
+            <ChevronUp size={12} />
+          </span>
+        )}
         {data.loading ? (
           <span className="ml-auto flex items-center gap-1.5 text-cap text-slate-400 dark:text-slate-500">
             <Loader2 size={12} className="animate-spin" /> 归纳子模块中…（约 1-3 分钟）
@@ -107,7 +122,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
           </span>
         ) : (
           <span className="ml-auto flex items-center gap-1 text-cap text-slate-400 dark:text-slate-500">
-            <ChevronDown size={11} /> {data.subCount} 个子模块 · 点工具栏可收起
+            <ChevronDown size={11} /> {data.subCount} 个子模块 · 点头部或工具栏可收起
           </span>
         )}
       </div>

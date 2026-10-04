@@ -79,6 +79,7 @@ function buildFlow(
   analyzeSubmap?: (id: string) => void,
   agentLinesFor?: (id: string) => string[] | undefined,
   analyzeErrorFor?: (id: string) => string | undefined,
+  onCollapse?: (id: string) => void,
 ) {
   // 展开元信息：加载中给 4 个骨架位；错误态不再给骨架（M4-1 诚实三态——此前 error 也渲染"分析中…"骨架，
   // 造成"头部报错 + 身体永远转圈"的撕裂画面）
@@ -162,6 +163,7 @@ function buildFlow(
             onAnalyze: analyzeSubmap ? () => analyzeSubmap(mod.id) : undefined,
             agentLines: agentLinesFor?.(mod.id),
             analyzeError: analyzeErrorFor?.(mod.id),
+            onCollapse: onCollapse ? () => onCollapse(mod.id) : undefined,
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,
@@ -944,8 +946,8 @@ function Canvas({
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id]),
-    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions, submapErrors],
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id], toggleExpand),
+    [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions, submapErrors, toggleExpand],
   )
 
   // S1-1 画布定位收口：pan/zoom 到目标模块 + 选中高亮。
