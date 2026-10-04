@@ -554,8 +554,30 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         ],
       }),
     })
-      .then((r) => {
-        if (!r.ok) throw new Error(String(r.status))
+      .then(async (r) => {
+        if (r.status === 409) {
+          // 审计 P1：同名冲突改为用户裁决——确认后带 force 覆盖（此前后端静默另存后缀，数据去向不明）
+          if (window.confirm(`已存在同名视图「${name}」。覆盖它？（取消则放弃保存）`)) {
+            const again = await fetch(`/api/repos/${backendRepo}/views?force=true`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name,
+                nodes: m.refs.map((id) => `module:${id}`),
+                edges: [],
+                annotations: [
+                  { ref: 'conversation', note: q },
+                  ...(m.content.match(/```mermaid[\s\S]*?```/g) ?? []).map((content) => ({ type: 'mermaid', content, note: q })),
+                ],
+              }),
+            })
+            if (!again.ok) throw new Error(String(again.status))
+          } else {
+            return
+          }
+        } else if (!r.ok) {
+          throw new Error(String(r.status))
+        }
         setSavedIdx(idx)
         setNamingIdx(null)
         setTimeout(() => setSavedIdx(null), 2500)
@@ -813,7 +835,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           ) : (
             <div key={i} className={`anim-msg-in group/msg flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`anim-msg-in max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
+                className={`max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >

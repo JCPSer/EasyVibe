@@ -146,6 +146,20 @@
 .anim-scale-in { animation: ev-scale-in 150ms ease-out both; }
 .anim-fade-in-fast { animation: ev-fade-in 150ms ease-out both; }
 
+/* UI 打磨批（2026-10-04 子 agent 评审 R1）：全局尊重系统"减弱动态效果"——
+   一条媒体查询覆盖全部存量与未来动效（苹果式底线，成本一次付清） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 评审 R4：画布聚焦/退出的"暗场打光"——节点与边 opacity 突变 → 250ms 过渡 */
+.react-flow__node { transition: opacity 250ms ease; }
+.react-flow__edge-path { transition: opacity 250ms ease; }
+
 /* hover 微浮起：可点击性的即时确认（卡片/主按钮） */
 .lift { transition: transform 150ms ease, box-shadow 150ms ease; }
 .lift:hover {

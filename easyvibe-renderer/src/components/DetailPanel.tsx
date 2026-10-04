@@ -452,7 +452,8 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           <X size={16} />
         </button>
       </div>
-      <div className="flex-1 space-y-5 overflow-y-auto p-4">
+      {/* key={tab}：切页签重触发 150ms 淡入（评审 R3——此前内容瞬换无过渡） */}
+      <div key={tab} className="anim-fade-in-fast flex-1 space-y-5 overflow-y-auto p-4">
         {tab === 'issues' && (
           <IssuesList
             map={map}

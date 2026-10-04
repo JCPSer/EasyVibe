@@ -198,12 +198,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/dev-docs", get(get_dev_docs))
-        .route("/repos/{id}/dev-doc", get(get_dev_doc))
+        .route("/repos/{id}/dev-doc", get(get_dev_doc).delete(delete_dev_doc))
         .route("/repos/{id}/suggest", axum::routing::post(suggest))
         .route("/settings", get(list_settings))
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .route("/harness", get(get_harness))
+        .route("/harness/backups", get(list_harness_backups))
+        .route("/harness/restore", axum::routing::post(restore_harness))
         .route("/agent/status", get(agent_status))
         .route("/agent/detect", axum::routing::post(agent_detect))
         .route("/agent/test", axum::routing::post(agent_test))
@@ -1073,6 +1075,53 @@ async fn reset_harness(State(st): State<AppState>) -> Result<Response, AppError>
     Ok(Json(serde_json::json!({ "success": true, "data": { "version": version } })).into_response())
 }
 
+/// 备份列表（2026-10-04 审计 P1：reset 有备份无恢复入口的另一半）：
+/// harness 目录的兄弟目录中凡是 harness.backup-* 的都算备份，按名倒序（新在前）。
+async fn list_harness_backups() -> Result<Response, AppError> {
+    let dir = task_exec::harness_dir();
+    let Some(parent) = dir.parent() else { return Ok(Json(serde_json::json!({ "success": true, "data": { "backups": [] } })).into_response()) };
+    let mut backups: Vec<serde_json::Value> = vec![];
+    if let Ok(rd) = std::fs::read_dir(parent) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("harness.backup-") || !e.path().is_dir() { continue }
+            let mtime = std::fs::metadata(e.path()).ok().and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis()).unwrap_or(0);
+            backups.push(serde_json::json!({ "name": name, "mtimeMs": mtime }));
+        }
+    }
+    backups.sort_by(|a, b| b["mtimeMs"].as_u64().cmp(&a["mtimeMs"].as_u64()));
+    Ok(Json(serde_json::json!({ "success": true, "data": { "backups": backups } })).into_response())
+}
+
+/// 从备份恢复：当前层改名留档（pre-restore-*，防"恢复错了想反悔"无解），指定备份转正，热换。
+async fn restore_harness(
+    State(st): State<AppState>,
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let name = body.get("backup").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    // 名字防线：只允许 harness.backup-*（拒绝 ../ 等路径游戏）
+    if !name.starts_with("harness.backup-") || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(AppError(ApiError::BadRequest("非法备份名".into())));
+    }
+    let dir = task_exec::harness_dir();
+    let backup = dir.with_file_name(&name);
+    if !backup.is_dir() {
+        return Err(AppError(ApiError::NotFound(format!("备份 {name} 不存在"))));
+    }
+    if dir.exists() {
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let stash = dir.with_file_name(format!("harness.pre-restore-{ts}"));
+        std::fs::rename(&dir, &stash).map_err(|e| ApiError::Internal(format!("当前层留档失败: {e}")))?;
+    }
+    std::fs::rename(&backup, &dir).map_err(|e| ApiError::Internal(format!("恢复失败: {e}")))?;
+    let fresh = task_exec::load_harness()?;
+    let version = fresh.manifest.version.clone();
+    *st.harness.write().await = fresh;
+    info!("[harness] 已从备份 {} 恢复（v{}）", name, version);
+    Ok(Json(serde_json::json!({ "success": true, "data": { "version": version, "restoredFrom": name } })).into_response())
+}
+
 // ---------- M3-2：指哪打哪——任务创建（上下文已组织好随表单提交；执行引擎 M3-3 接入） ----------
 
 /// 审批决策（M3-4）：approved/rejected 按当前关卡推进或终止；发射 task.statusChanged
@@ -1215,6 +1264,32 @@ async fn get_dev_doc(
     }
     let content = std::fs::read_to_string(&canonical).map_err(|e| ApiError::Internal(format!("文档读取失败: {e}")))?;
     Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel, "content": content } })).into_response())
+}
+
+/// 删除单份归档文档（2026-10-04 审计 P1：development_docs 只进不出）。
+/// 防线与 get_dev_doc 同口径（canonicalize + development_docs 前缀越界拒绝），
+/// 且拒绝删除"正在运行任务"的产物目录文档由前端两步确认把关——后端不做任务态耦合。
+async fn delete_dev_doc(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let rel = body.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let rel = rel
+        .strip_prefix(".easyvibe/development_docs/")
+        .map(str::to_string)
+        .unwrap_or(rel);
+    let docs_root = repo.root.join(".easyvibe/development_docs");
+    let full = docs_root.join(&rel);
+    let (Ok(canonical), Ok(docs_canon)) = (full.canonicalize(), docs_root.canonicalize()) else {
+        return Err(AppError(ApiError::NotFound("文档不存在".into())));
+    };
+    if !canonical.starts_with(&docs_canon) || !canonical.is_file() {
+        return Err(AppError(ApiError::NotFound("文档不存在（路径越界或非文件）".into())));
+    }
+    std::fs::remove_file(&canonical).map_err(|e| ApiError::Internal(format!("文档删除失败: {e}")))?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel } })).into_response())
 }
 
 /// M1 配置体系：agent 状态面（探测 + 生效配置 + 预设目录 + 最近测试结果）
@@ -2017,7 +2092,14 @@ async fn rename_view(State(st): State<AppState>, Path((id, slug)): Path<(String,
 }
 
 /// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）
-async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body): Json<SaveViewRequest>) -> Result<Response, AppError> {
+/// 2026-10-04 审计 P1：同名冲突从"静默另存后缀"改为 409——前端弹覆盖确认（?force=true 覆盖），
+/// 数据去向由用户裁决，不再悄悄换名。
+async fn save_view(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+    Json(body): Json<SaveViewRequest>,
+) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let slug: String = body
         .name
@@ -2033,14 +2115,11 @@ async fn save_view(State(st): State<AppState>, Path(id): Path<String>, Json(body
     } else {
         slug
     };
-    // 试用深挖#D：同名视图静默覆盖旧图（数据丢失）——冲突时追加短后缀
     let view_path = repo.root.join(".easyvibe/views").join(format!("{slug}.json"));
-    let slug = if view_path.exists() {
-        let suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() % 100000).unwrap_or(0);
-        format!("{slug}-{suffix}")
-    } else {
-        slug
-    };
+    let force = q.get("force").map(|v| v == "true").unwrap_or(false);
+    if view_path.exists() && !force {
+        return Err(AppError(ApiError::Conflict(format!("已存在同名视图 {slug}"))));
+    }
     let view = serde_json::json!({
         "version": "1.0",
         "name": body.name,
@@ -2568,6 +2647,70 @@ mod tests {
             base_url: None, model: None, api_key: None,
         }).await;
         assert!(err.is_err(), "未知服务必须报错: {:?}", err.ok());
+    }
+
+    /// 2026-10-04 打磨批三新行为回归：视图冲突 409+force 覆盖 / dev-doc 删除与越界防线 /
+    /// harness restore 非法备份名拒绝（不触文件系统）
+    #[tokio::test]
+    async fn audit_batch_view_conflict_devdoc_delete_harness_guard() {
+        let (state, repo) = chat_state("audit-batch").await;
+        let root = std::env::temp_dir().join("ev-chat-test-audit-batch");
+        let app = build_router(state);
+        let post = |app: axum::Router, url: String, body: String| {
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(url)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        // 1) 视图：首次 201，同名再存 409，force 覆盖 201
+        let view_body = r#"{"name":"冲突视图","nodes":["module:exam-core"],"edges":[],"annotations":[]}"#.to_string();
+        let r1 = post(app.clone(), format!("/api/repos/{repo}/views"), view_body.clone()).await;
+        assert_eq!(r1.status(), axum::http::StatusCode::CREATED);
+        let r2 = post(app.clone(), format!("/api/repos/{repo}/views"), view_body.clone()).await;
+        assert_eq!(r2.status(), axum::http::StatusCode::CONFLICT, "同名冲突必须 409（不再静默另存后缀）");
+        let r3 = post(app.clone(), format!("/api/repos/{repo}/views?force=true"), view_body).await;
+        assert_eq!(r3.status(), axum::http::StatusCode::CREATED, "force 覆盖应成功");
+        let views = std::fs::read_dir(root.join(".easyvibe/views")).unwrap().count();
+        assert_eq!(views, 1, "覆盖后仍只有一个同名视图文件");
+
+        // 2) dev-doc：正常删除成功 + 路径越界被拒
+        let doc_dir = root.join(".easyvibe/development_docs/u/1_requirements_matrix");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        std::fs::write(doc_dir.join("a.md"), "hello").unwrap();
+        let del = |app: axum::Router, body: String| {
+            let repo = repo.clone();
+            async move {
+                app.oneshot(
+                    axum::http::Request::delete(format!("/api/repos/{repo}/dev-doc"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let d1 = del(app.clone(), r#"{"path":"../map/map.json"}"#.to_string()).await;
+        assert_eq!(d1.status(), axum::http::StatusCode::NOT_FOUND, "越界路径必须拒绝（保护地图文件）");
+        assert!(root.join(".easyvibe/map/map.json").exists(), "地图文件不得被越界删除");
+        let d2 = del(app.clone(), r#"{"path":"u/1_requirements_matrix/a.md"}"#.to_string()).await;
+        assert_eq!(d2.status(), axum::http::StatusCode::OK);
+        assert!(!doc_dir.join("a.md").exists(), "正常删除应落盘");
+
+        // 3) harness restore：非法备份名在触文件系统前被拒
+        let h = post(
+            app,
+            "/api/harness/restore".to_string(),
+            r#"{"backup":"../../etc/passwd"}"#.to_string(),
+        )
+        .await;
+        assert_eq!(h.status(), axum::http::StatusCode::BAD_REQUEST, "路径游戏必须 400");
     }
 
     /// 样例地图（与 ai-agent 测试同构：validate_minimum 可通过，stub 问答可命中）

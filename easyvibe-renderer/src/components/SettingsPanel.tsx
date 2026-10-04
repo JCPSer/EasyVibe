@@ -28,6 +28,7 @@ const SLOTS: [string, string, string][] = [
 const SECTIONS = [
   { id: 'agent', label: '执行 agent', icon: Terminal, hint: 'CLI agent 命令与参数' },
   { id: 'services', label: '模型服务', icon: Bot, hint: 'LLM 服务与槽位绑定' },
+  { id: 'harness', label: 'Harness', icon: ShieldCheck, hint: '工作流护栏：恢复默认与备份' },
   { id: 'advanced', label: '高级参数', icon: SlidersHorizontal, hint: '上下文预算与自动巡检' },
   { id: 'about', label: '关于', icon: Info, hint: '版本与运行环境' },
 ] as const
@@ -633,6 +634,8 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                 </div>
               </div>
             </div>
+          ) : section === 'harness' ? (
+            <HarnessSection about={about} onVersionChange={(v) => setAbout((p) => (p ? { ...p, harness: v } : p))} />
           ) : section === 'advanced' ? (
             <div className="space-y-4">
               <div className="rounded-md border border-slate-200 bg-white p-4">
@@ -729,9 +732,118 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   )
 }
 
-/** 开关组件（替代裸 checkbox：企业级表单控件最低要求） */
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+/// Harness 分区（2026-10-04 审计 P1 收口）：恢复默认（此前孤儿接口无入口）+
+/// 备份列表与恢复（此前 reset 有备份无恢复）。当前层恢复前自动留档 pre-restore-*，可反悔。
+function HarnessSection({ about, onVersionChange }: { about: { backend: string; harness: string } | null; onVersionChange: (v: string) => void }) {
+  const [backups, setBackups] = useState<{ name: string; mtimeMs: number }[] | null>(null)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmRestore, setConfirmRestore] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => {
+    fetch('/api/harness/backups')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { backups?: { name: string; mtimeMs: number }[] } } | null) => setBackups(d?.data?.backups ?? []))
+      .catch(() => setBackups([]))
+  }, [])
+  useEffect(load, [load])
+  const reset = () => {
+    setBusy(true)
+    fetch('/api/harness/reset', { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { version?: string } }) => {
+        toast(`已恢复出厂 harness（v${d?.data?.version ?? '?'}），旧版本已备份`, 'info')
+        if (d?.data?.version) onVersionChange(d.data.version)
+        setConfirmReset(false)
+        load()
+      })
+      .catch(() => toast('恢复默认失败', 'error'))
+      .finally(() => setBusy(false))
+  }
+  const restore = (name: string) => {
+    setBusy(true)
+    fetch('/api/harness/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backup: name }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { version?: string } }) => {
+        toast(`已从备份恢复 harness（v${d?.data?.version ?? '?'}）`, 'info')
+        if (d?.data?.version) onVersionChange(d.data.version)
+        setConfirmRestore(null)
+        load()
+      })
+      .catch(() => toast('恢复失败（备份不存在或已被使用）', 'error'))
+      .finally(() => setBusy(false))
+  }
   return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-slate-200 bg-white p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-bold text-slate-700">恢复出厂 Harness</div>
+            <p className="text-cap mt-0.5 text-slate-400">
+              当前的自定义规则整体备份为 harness.backup-*，出厂底账全量重铺——可随时从下方备份恢复
+            </p>
+          </div>
+          {confirmReset ? (
+            <button
+              onClick={reset}
+              disabled={busy}
+              className="shrink-0 rounded-md bg-red-500 px-3 py-1.5 text-micro font-bold text-white hover:bg-red-600 disabled:opacity-40"
+            >
+              {busy ? '恢复中…' : '确认恢复'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setConfirmReset(true)}
+              onMouseLeave={() => setConfirmReset(false)}
+              className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-3 py-1.5 text-micro font-semibold text-slate-500 hover:border-red-300 hover:text-red-500"
+            >
+              <RotateCcw size={11} /> 恢复默认
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 bg-white p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[13px] font-bold text-slate-700">历史备份</div>
+          <span className="text-micro text-slate-300">当前 v{about?.harness ?? '…'}</span>
+        </div>
+        {backups === null && <p className="text-cap py-2 text-slate-400">加载中…</p>}
+        {backups?.length === 0 && <p className="text-cap py-2 text-slate-400">暂无备份（恢复默认后此处出现旧版本）</p>}
+        {backups?.map((b) => (
+          <div key={b.name} className="flex items-center gap-2 border-t border-slate-50 py-2 first:border-0">
+            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-500" title={b.name}>{b.name}</span>
+            <span className="tnum shrink-0 text-micro text-slate-300">{new Date(b.mtimeMs).toLocaleString()}</span>
+            {confirmRestore === b.name ? (
+              <button
+                onClick={() => restore(b.name)}
+                disabled={busy}
+                className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white disabled:opacity-40"
+              >
+                {busy ? '…' : '确认恢复'}
+              </button>
+            ) : (
+              <button
+                onClick={() => setConfirmRestore(b.name)}
+                onMouseLeave={() => setConfirmRestore(null)}
+                className="shrink-0 rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+              >
+                恢复此版本
+              </button>
+            )}
+          </div>
+        ))}
+        <p className="text-micro mt-2 leading-4 text-slate-300">恢复前当前层会自动留档为 harness.pre-restore-*，操作可反悔。</p>
+      </div>
+    </div>
+  )
+}
+
+/** 开关组件（替代裸 checkbox：企业级表单控件最低要求） */
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {  return (
     <button
       role="switch"
       aria-checked={checked}

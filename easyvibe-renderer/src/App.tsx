@@ -1094,7 +1094,12 @@ function Canvas({
                   </span>
                   <span className="flex flex-col items-start leading-none">
                     <span className="text-micro font-semibold text-slate-400">架构健康</span>
-                    {map.health.score < 75 && <span className="mt-0.5 text-micro font-semibold text-red-500">有问题 · 查看 →</span>}
+                    {/* 评审 Y7：阈值与 healthColor/Legend 对齐——<60 红（Error）、60-74 amber（Warning），此前 70 分吃红色误报 */}
+                    {map.health.score < 60 ? (
+                      <span className="mt-0.5 text-micro font-semibold text-red-500">有问题 · 查看 →</span>
+                    ) : map.health.score < 75 ? (
+                      <span className="mt-0.5 text-micro font-semibold text-amber-500">有改进空间 · 查看 →</span>
+                    ) : null}
                   </span>
                 </button>
               </div>
@@ -1297,7 +1302,7 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
       </span>
       {prog && (
         <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
-          <div className="h-full rounded-full bg-blue-500 transition-all duration-700" style={{ width: `${prog.percent}%` }} />
+          <div className="h-full rounded-full bg-blue-500 transition-[width] duration-500" style={{ width: `${prog.percent}%` }} />
         </div>
       )}
       <span className="max-w-[420px] text-center text-[11px] leading-4 text-slate-400">
@@ -1307,8 +1312,9 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
         ，完成后地图会自动出现
       </span>
 
-      {/* 第 2 层：概念卡片轮播（每张 ~20s 自动翻，可手动点） */}
+      {/* 第 2 层：概念卡片轮播（每张 ~20s 自动翻，可手动点；key 驱动翻页淡入——评审 G7） */}
       <div className="w-full max-w-md rounded-xl border border-slate-100 bg-white/90 px-4 py-3 shadow-sm">
+        <div key={cardIdx} className="anim-fade-in-fast">
         <div className="flex items-center justify-between">
           <p className="text-[12px] font-bold text-slate-700">{concept.title}</p>
           <div className="flex gap-1">
@@ -1323,6 +1329,7 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
           </div>
         </div>
         <p className="mt-1.5 text-[11.5px] leading-5 text-slate-500">{concept.body}</p>
+        </div>
       </div>
 
       {/* 第 3 层：提前参与——任务想法预填（归纳完成后带入任务对话） */}
@@ -2371,7 +2378,12 @@ export default function App() {
           <div className="h-full" style={page === 'map' ? undefined : { display: 'none' }}>
             {PAGES.map}
           </div>
-          {page !== 'map' && PAGES[page]}
+          {/* 非地图页淡入（key 驱动重触发；地图页常驻 keep-alive 不参与） */}
+          {page !== 'map' && (
+            <div key={page} className="anim-fade-in-fast h-full">
+              {PAGES[page]}
+            </div>
+          )}
         </AppShell>
       </CanvasBoundary>
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}

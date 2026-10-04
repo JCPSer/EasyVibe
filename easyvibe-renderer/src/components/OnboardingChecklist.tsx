@@ -39,7 +39,7 @@ export function OnboardingChecklist({
       </button>
       {/* 进度条：完成度可视（Linear 式"还差几步"张力） */}
       <div className="h-0.5 bg-slate-100">
-        <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(done / total) * 100}%` }} />
+        <div className="h-full bg-blue-500 transition-[width] duration-500" style={{ width: `${(done / total) * 100}%` }} />
       </div>
       {!collapsed && (
         <ul className="space-y-0.5 p-1.5">
