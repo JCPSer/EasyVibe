@@ -80,11 +80,14 @@ export function HealthPage({
   backendRepo,
   map,
   onCreateTask,
+  onOpenDeps,
 }: {
   backendRepo: string | null
   map: CodeMap | null
   /** 把关台范式：排行行内直接派单修复（TaskDraft → 全局任务表单） */
   onCreateTask: (d: TaskDraft) => void
+  /** 2026-10-05 评审 S3：逆向依赖 KPI 转链依赖体检页（带筛选），消除双地讲一个数 */
+  onOpenDeps?: () => void
 }) {
   const [data, setData] = useState<Dashboard | null>(null)
   const [loading, setLoading] = useState(false)
@@ -235,11 +238,16 @@ export function HealthPage({
             {(moduleAvg ?? mapModuleAvg) !== null && <Ring score={(moduleAvg ?? mapModuleAvg)!} />}
           </div>
         </div>
-        <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+        <button
+          onClick={onOpenDeps}
+          disabled={!onOpenDeps}
+          className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-left disabled:cursor-default hover:border-red-300 dark:hover:border-red-800"
+          title="去依赖体检页看全部违规与修法"
+        >
           <p className="text-cap text-slate-400 dark:text-slate-500">逆向依赖</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-red-500">{reverseDeps ?? '—'}</p>
-          <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">当前地图口径</p>
-        </div>
+          <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">当前地图口径 · 去依赖体检 →</p>
+        </button>
         <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
           <p className="text-cap text-slate-400 dark:text-slate-500">覆盖率</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-emerald-500">

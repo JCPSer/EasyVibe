@@ -13,7 +13,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug, MessagesSquare, CircleHelp} from 'lucide-react'
+import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, BookOpen, ScrollText, Plug, MessagesSquare, CircleHelp} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -39,6 +39,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { SessionBubble } from '@/components/SessionBubble'
+import { DepsPage } from '@/components/DepsPage'
 import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -49,6 +50,7 @@ import { pushTerminalLine } from '@/lib/terminalBuffer'
 import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
 import { downloadHealthReport } from '@/lib/healthReport'
+import { couplingAnalysis } from '@/lib/depsAnalysis'
 import { initUpdater } from '@/lib/updater'
 
 const nodeTypes = { module: ModuleNode, moduleExpanded: ExpandedModuleNode, submodule: SubmoduleNode, band: BandNode }
@@ -233,12 +235,40 @@ function buildFlow(
   const visibleEdges = growth
     ? map.edges.filter((e) => growth.modules.has(e.from) && growth.modules.has(e.to))
     : map.edges
+  // v2 依赖透镜：solo 聚焦态下邻域边按「相对层序方向」着色（口径单一来源 depsAnalysis；
+  // 通道裁决 2026-10-05 评审 S1——色相=方向，strength 只留线宽差）
+  const lens = filters.solo && selModuleId ? couplingAnalysis(map) : null
   const edges: Edge[] = visibleEdges.map((e, i) => {
     const violation = e.direction_violation === true
     const si = Math.min(outIdx.get(e.from) ?? 0, 17) // 与节点 MAX_HANDLES=18 对齐，超出复用最后一个 handle
     outIdx.set(e.from, (outIdx.get(e.from) ?? 0) + 1)
     const ti = Math.min(inIdx.get(e.to) ?? 0, 17)
     inIdx.set(e.to, (inIdx.get(e.to) ?? 0) + 1)
+    const touches = e.from === selModuleId || e.to === selModuleId
+    if (lens && selModuleId && touches) {
+      const fo = lens.orderOf(e.from)
+      const toOrder = lens.orderOf(e.to)
+      // 违规红 > 环成员琥珀 > 同层蓝 > 顺层灰
+      const stroke = violation ? '#ef4444' : lens.cycleModuleIds.has(e.from) && lens.cycleModuleIds.has(e.to) ? '#d97706' : fo === toOrder ? '#3b82f6' : '#64748b'
+      const width = e.strength === 'strong' ? 2.5 : e.strength === 'normal' ? 1.8 : 1.2
+      return {
+        id: `e-${e.id ?? i}`,
+        source: e.from,
+        target: e.to,
+        sourceHandle: `s${si}`,
+        targetHandle: `t${ti}`,
+        type: 'default',
+        style: violation
+          ? { strokeWidth: width, stroke, strokeDasharray: '6 4', opacity: 0.95 }
+          : { strokeWidth: width, stroke, opacity: 0.9 },
+        animated: violation,
+        label: violation ? '⚠' : undefined,
+        labelStyle: { fill: '#ef4444', fontSize: 13, fontWeight: 700 },
+        labelBgStyle: { fill: 'rgba(255,255,255,0.9)', fillOpacity: 0.9 },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: stroke },
+        interactionWidth: 20,
+      } satisfies Edge
+    }
     const strengthStyle =
       e.strength === 'strong'
         ? { strokeWidth: 2.1, stroke: '#64748b', opacity: 0.85 }
@@ -261,6 +291,7 @@ function buildFlow(
       labelStyle: { fill: '#ef4444', fontSize: 13, fontWeight: 700 },
       labelBgStyle: { fill: 'rgba(255,255,255,0.9)', fillOpacity: 0.9 },
       markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: violation ? '#ef4444' : '#94a3b8' },
+      interactionWidth: 20,
     } satisfies Edge
   })
 
@@ -514,6 +545,10 @@ function Canvas({
   agentReady,
   onChatAbout,
   onGoWorkbench,
+  onInspectEdge,
+  onOpenDeps,
+  lensRequest,
+  onLensRequestConsumed,
   dark = false,
 }: {
   map: CodeMap
@@ -539,6 +574,13 @@ function Canvas({
   onChatAbout?: (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => void
   /** 2026-10-05 Redesign-A：右栏审批出口——QuickAsk 的审批角标/审批卡跳工作台裁决 */
   onGoWorkbench?: () => void
+  /** 2026-10-05 依赖透镜：边浮卡 [详情] → 跳依赖体检页并聚焦对应卡片 */
+  onInspectEdge?: (cardId: string) => void
+  /** 2026-10-05 右栏「耦合概览」入口（DetailPanel 上抛） */
+  onOpenDeps?: () => void
+  /** 2026-10-05 依赖透镜跳入：选中模块 + 打开 solo 聚焦 */
+  lensRequest?: string | null
+  onLensRequestConsumed?: () => void
   /** 2026-10-04 暗黑模式：小地图底色/遮罩主题感知 */
   dark?: boolean
 }) {
@@ -998,6 +1040,16 @@ function Canvas({
     }
   }, [viewRequest, openView, onViewRequestConsumed])
 
+  // 2026-10-05 依赖透镜跳入：选中 + solo 聚焦（DepsPage「在画布上看」/ 右栏「看全部」）
+  useEffect(() => {
+    if (!lensRequest) return
+    if (mergedMap.modules.some((m) => m.id === lensRequest)) {
+      focusModule(lensRequest)
+      setFilters((f) => ({ ...f, solo: true }))
+    }
+    onLensRequestConsumed?.()
+  }, [lensRequest, mergedMap, focusModule, onLensRequestConsumed])
+
   useEffect(() => {
     const t = setTimeout(() => {
       // M4-1.5 叙事重排（陪审团）：进图先给诊断——存在显著风险时聚焦最红的模块，
@@ -1041,6 +1093,10 @@ function Canvas({
 
   const toggleFilter = (key: keyof Filters) => setFilters((f) => ({ ...f, [key]: !f[key] }))
 
+  // 2026-10-05 依赖透镜：边浮卡——fixed 定位跟随鼠标；命中区由 ReactFlow interactionWidth 加宽（评审 D6：裸边 1-2px 命中率极差）
+  const [edgeTip, setEdgeTip] = useState<{ edgeId: string; x: number; y: number } | null>(null)
+  const tipEdge = edgeTip ? mergedMap.edges.find((e) => `e-${e.id}` === edgeTip.edgeId) : undefined
+
   const violations = mergedMap.edges.filter((e) => e.direction_violation).length
   // 工具栏对模块选中与其子模块选中都生效（收起/展开操作的是父模块）
   const toolbarModuleId = selection?.kind === 'module' ? selection.id : selection?.kind === 'submodule' ? selection.parentId : null
@@ -1067,6 +1123,11 @@ function Canvas({
           proOptions={{ hideAttribution: true }}
           nodesConnectable={false}
           deleteKeyCode={null}
+          onEdgeMouseEnter={(ev, edge) => setEdgeTip({ edgeId: edge.id, x: ev.clientX, y: ev.clientY })}
+          onEdgeMouseMove={(ev, edge) =>
+            setEdgeTip((t) => (t && t.edgeId === edge.id ? { ...t, x: ev.clientX, y: ev.clientY } : t))
+          }
+          onEdgeMouseLeave={() => setEdgeTip(null)}
         >
           <Controls showInteractive={false} position="bottom-left" />
           <MiniMap
@@ -1150,6 +1211,35 @@ function Canvas({
             )}
           </Panel>
         </ReactFlow>
+
+        {/* 依赖透镜：边浮卡（hover 主图边 → 一行结论 + [详情] 跳体检页） */}
+        {tipEdge && edgeTip && (
+          <div
+            className="glass fixed z-50 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-3 shadow-lg"
+            style={{ left: edgeTip.x + 14, top: edgeTip.y + 14 }}
+          >
+            <p className="text-[12px] font-bold text-slate-800 dark:text-slate-100">
+              {mergedMap.modules.find((m) => m.id === tipEdge.from)?.name ?? tipEdge.from}
+              <span className="mx-1 text-slate-300 dark:text-slate-600">→</span>
+              {mergedMap.modules.find((m) => m.id === tipEdge.to)?.name ?? tipEdge.to}
+            </p>
+            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">
+              {tipEdge.type} · {tipEdge.label ?? '1 处引用'}
+              {tipEdge.direction_violation && <span className="text-red-500"> · ⚠ 逆向</span>}
+            </p>
+            {tipEdge.direction_violation && onInspectEdge && (
+              <button
+                onClick={() => {
+                  onInspectEdge(`vio-${tipEdge.id}`)
+                  setEdgeTip(null)
+                }}
+                className="mt-2 rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-1 text-micro font-bold text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+              >
+                详情 →
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 头部信息条（M4-1：全局组件已移至应用壳顶栏，此处仅保留地图本地信息） */}
         <div className="pointer-events-none absolute left-0 top-0 z-10 w-full">
@@ -1279,6 +1369,7 @@ function Canvas({
               onOpenView={openView}
               onChatAbout={onChatAbout}
               onGoWorkbench={onGoWorkbench}
+              onOpenDeps={onOpenDeps}
               onClose={() => onPanelOpenChange(false)}
               width={panelWidth}
             />
@@ -1659,6 +1750,10 @@ export default function App() {
   }, [dark])
   // v0.2：地图页「就此对话」跨页上下文（消费即清；后写覆盖先写，竞态语义自然）
   const [pendingChatContext, setPendingChatContext] = useState<{ refId: string; refName: string; kind: 'module' | 'layer' } | null>(null)
+  /** 2026-10-05 依赖体检：画布边浮卡跳入时的聚焦卡片 id */
+  const [depsFocus, setDepsFocus] = useState<string | null>(null)
+  /** 2026-10-05 依赖透镜：DepsPage「在画布上看」→ 画布选中并开 solo（filters 状态本体在 Canvas） */
+  const [lensRequest, setLensRequest] = useState<string | null>(null)
   // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
   const [onboarding, setOnboarding] = useState(loadOnboarding)
   const [welcomeOpen, setWelcomeOpen] = useState(false)
@@ -2366,6 +2461,13 @@ export default function App() {
             }}
             onChatAbout={goChatAbout}
             onGoWorkbench={() => handlePageChange('workbench')}
+            onInspectEdge={(cardId) => {
+              setDepsFocus(cardId)
+              handlePageChange('deps')
+            }}
+            onOpenDeps={() => handlePageChange('deps')}
+            lensRequest={lensRequest}
+            onLensRequestConsumed={() => setLensRequest(null)}
             dark={dark}
           />
         </ReactFlowProvider>
@@ -2407,7 +2509,7 @@ export default function App() {
       />
     ),
     drift: <DriftPage />,
-    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} />,
+    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onOpenDeps={() => handlePageChange('deps')} />,
     modules: (
       <ModulesPage
         map={map}
@@ -2420,12 +2522,19 @@ export default function App() {
       />
     ),
     deps: (
-      <PlaceholderPage
-        title="依赖关系"
-        milestone="M4-4"
-        description="换个角度看依赖：全部模块间依赖按类型、强度与违规排序——谁被依赖最多、哪里在逆向调用。"
-        action={{ label: '先前往架构地图', onClick: () => handlePageChange('map') }}
-        icon={Waypoints}
+      <DepsPage
+        backendRepo={backendRepo}
+        map={map}
+        onCreateTask={openTaskDraft}
+        onChatAbout={goChatAbout}
+        onOpenMap={() => handlePageChange('map')}
+        onInspectModule={(id) => {
+          // 透镜跳入：选中 + 打开 solo 聚焦（画布已有「✕ 退出聚焦」与底部常驻指示）
+          setLensRequest(id)
+          handlePageChange('map')
+        }}
+        focusCardId={depsFocus}
+        onFocusConsumed={() => setDepsFocus(null)}
       />
     ),
     git: (

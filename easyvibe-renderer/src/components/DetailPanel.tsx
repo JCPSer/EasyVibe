@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare} from 'lucide-react'
 import { buildLayerTask, buildModuleTask, buildSubmoduleTask, type TaskDraft } from '@/lib/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
 import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
+import { couplingAnalysis } from '@/lib/depsAnalysis'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
 import { PanelChat } from '@/components/PanelChat'
+import { Waypoints } from 'lucide-react'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
@@ -32,6 +34,8 @@ interface Props {
   onChatAbout?: (target: ChatAboutTarget) => void
   /** 2026-10-05 Redesign-A：右栏审批出口——跳工作台「任务对话」页裁决 */
   onGoWorkbench?: () => void
+  /** 2026-10-05 依赖体检入口（详情页签「耦合概览」区块「看全部 →」） */
+  onOpenDeps?: () => void
   onClose: () => void
   /** 改进#4：右栏可调宽（测试员 IA 反馈的非破坏性验证——宽度够不够先看数据） */
   width?: number
@@ -92,12 +96,17 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
   )
 }
 
-function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void; backendRepo: string | null; onChatAbout?: (target: ChatAboutTarget) => void }) {
+function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout, onOpenDeps }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void; backendRepo: string | null; onChatAbout?: (target: ChatAboutTarget) => void; onOpenDeps?: () => void }) {
   const color = healthColor(mod.health.score)
   const deps = mod.dependencies.map((id) => map.modules.find((m) => m.id === id)).filter(Boolean) as Module[]
   const dependents = dependentsOf(map, mod)
     .map((id) => map.modules.find((m) => m.id === id))
     .filter(Boolean) as Module[]
+  // 2026-10-05 依赖体检入口：耦合概览（≤3 行 = 计数 + 首条违规 + 看全部）
+  const analysis = useMemo(() => couplingAnalysis(map), [map])
+  const nameOf = (id: string) => analysis.moduleById.get(id)?.name ?? id
+  const myViolations = analysis.violations.filter((e) => e.from === mod.id || e.to === mod.id)
+  const firstViolation = myViolations[0]
 
   return (
     <>
@@ -188,6 +197,25 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
             </Badge>
           ))}
           {dependents.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
+        </div>
+      </Row>
+
+      <Row icon={<Waypoints size={12} />} label="耦合概览">
+        <div className="space-y-1.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 p-2.5">
+          <p className="tnum text-cap text-slate-500 dark:text-slate-400">
+            出 {analysis.fanOut.get(mod.id) ?? 0} · 入 {analysis.fanIn.get(mod.id) ?? 0} · 逆向 {myViolations.length}
+            {analysis.cycleModuleIds.has(mod.id) && <span className="text-amber-500"> · 在循环群内</span>}
+          </p>
+          {firstViolation && (
+            <p className="text-cap leading-4 text-red-500">
+              「{nameOf(firstViolation.from)}」反向调用了「{nameOf(firstViolation.to)}」
+            </p>
+          )}
+          {onOpenDeps && (
+            <button onClick={onOpenDeps} className="text-micro font-bold text-blue-600 hover:text-blue-700">
+              看全部 →
+            </button>
+          )}
         </div>
       </Row>
 
@@ -413,7 +441,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onChatAbout, onGoWorkbench, onClose, width }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onChatAbout, onGoWorkbench, onOpenDeps, onClose, width }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -481,7 +509,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             scopeName={scopeModuleName}
           />
         )}
-        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} onChatAbout={onChatAbout} />}
+        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} onChatAbout={onChatAbout} onOpenDeps={onOpenDeps} />}
         {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} onChatAbout={onChatAbout} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} onCreateTask={onCreateTask} />
