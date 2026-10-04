@@ -13,6 +13,10 @@ use tracing::{info, warn};
 pub struct TaskExecutor {
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
     pub approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
+    /// L1 归因：任务会话归属影响模块（tasks.modules 首个模块 id）。
+    /// Option 的原因：12 个测试构造点没有 DB 池——new() 保持原 10 参签名，
+    /// 生产路径走 new_with_sessions() 注入
+    pub agent_session_repo: Option<Arc<easyvibe_db::AgentSessionRepo>>,
     pub session_manager: Arc<SessionManager>,
     pub map_service: Arc<MapService>,
     /// harness（单一事实源，恢复默认后热换——spawn 时现读，不缓存快照）
@@ -43,9 +47,45 @@ impl TaskExecutor {
         settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
         events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
     ) -> Arc<Self> {
+        Self::assemble(task_repo, approval_repo, None, session_manager, map_service, harness, agent_command, agent_args, max_parallel, settings_repo, events)
+    }
+
+    /// 生产路径：注入 agent 会话仓储（L1 归因写库）
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_sessions(
+        task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+        approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
+        agent_session_repo: Arc<easyvibe_db::AgentSessionRepo>,
+        session_manager: Arc<SessionManager>,
+        map_service: Arc<MapService>,
+        harness: Arc<tokio::sync::RwLock<Harness>>,
+        agent_command: Arc<String>,
+        agent_args: Arc<Vec<String>>,
+        max_parallel: usize,
+        settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
+        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+    ) -> Arc<Self> {
+        Self::assemble(task_repo, approval_repo, Some(agent_session_repo), session_manager, map_service, harness, agent_command, agent_args, max_parallel, settings_repo, events)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
+        approval_repo: Arc<easyvibe_db::SqliteApprovalRepository>,
+        agent_session_repo: Option<Arc<easyvibe_db::AgentSessionRepo>>,
+        session_manager: Arc<SessionManager>,
+        map_service: Arc<MapService>,
+        harness: Arc<tokio::sync::RwLock<Harness>>,
+        agent_command: Arc<String>,
+        agent_args: Arc<Vec<String>>,
+        max_parallel: usize,
+        settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
+        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
             approval_repo,
+            agent_session_repo,
             session_manager,
             map_service,
             harness,
@@ -359,6 +399,15 @@ impl TaskExecutor {
             Ok(session) => {
                 let session_id = session.session_id.clone();
                 let _ = self.task_repo.set_session(&task.id, &session_id).await;
+                // L1 归因：任务会话归属影响模块（多模块任务取首个；会话行此刻已由 Cli 元事件落库）
+                let first_module = serde_json::from_str::<Vec<String>>(&task.modules)
+                    .ok()
+                    .and_then(|ms| ms.into_iter().next());
+                if let (Some(repo), Some(m)) = (&self.agent_session_repo, first_module) {
+                    if let Err(err) = repo.set_module_id(&session_id, &m).await {
+                        tracing::warn!("[agent_sessions] 任务归因失败 {session_id}: {err}");
+                    }
+                }
                 // I1：任务槽位占仓库活动会话，气泡标签「任务执行」不得缺（否则降级显示会话 id）
                 self.session_manager.note_label(&session_id, "任务执行".into()).await;
                 info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);

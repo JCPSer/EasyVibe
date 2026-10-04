@@ -1,6 +1,6 @@
 //! 组装层：二进制入口，REST 路由 + WS 事件推送。
 use axum::{
-    extract::{Path, State, WebSocketUpgrade},
+    extract::{Path, Query, State, WebSocketUpgrade},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
@@ -184,6 +184,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
         .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
+        .route("/repos/{id}/usage", get(get_usage))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
         // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
         .route("/repos/{id}/events", axum::routing::post(ingest_event))
@@ -602,6 +603,10 @@ async fn analyze_submap_inner(st: AppState, id: String, module_id: String) -> Re
     // I1：气泡标签「分析模块 {name}」（name 缺失降级为 id）
     let module_name = module["name"].as_str().unwrap_or(&module_id).to_string();
     st.session_manager.note_label(&session.session_id, format!("分析模块 {module_name}")).await;
+    // L1 归因：子图会话直接归属模块（任务会话在 task_exec 经 tasks.modules 反查）
+    if let Err(err) = st.agent_session_repo.set_module_id(&session.session_id, &module_id).await {
+        tracing::warn!("[agent_sessions] 子图归因失败 {}: {err}", session.session_id);
+    }
     info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
@@ -849,6 +854,48 @@ fn session_kind_from_label(label: &str) -> &'static str {
     } else {
         "unknown"
     }
+}
+
+/** U2/L1：用量聚合（今天/7天/30天/全部 → days 参数；since 由 started_at >= 计算）。
+ *  一次端点拉全五个聚合（总量/按日/按类型/按模型/按模块）——省得前端串行打五个请求。
+ *  cost/tokens 的 SUM 天然忽略 NULL：区间无数据时前端拿到 None，诚实显示「—」而非 0。 */
+async fn get_usage(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<UsageQuery>,
+) -> Result<Response, AppError> {
+    let days = q.days.unwrap_or(30).clamp(0, 36500);
+    let since = if days == 0 {
+        "1970-01-01T00:00:00Z".to_string() // 全部
+    } else {
+        (chrono::Utc::now() - chrono::Duration::days(days.into())).to_rfc3339()
+    };
+    let (totals, daily, by_kind, by_model, by_module, sessions) = tokio::join!(
+        st.agent_session_repo.usage_totals(&id, &since),
+        st.agent_session_repo.usage_daily(&id, &since),
+        st.agent_session_repo.usage_by_kind(&id, &since),
+        st.agent_session_repo.usage_by_model(&id, &since),
+        st.agent_session_repo.usage_by_module(&id, &since),
+        st.agent_session_repo.list(&id, 50),
+    );
+    let body = serde_json::json!({
+        "success": true,
+        "data": {
+            "since": since,
+            "totals": totals.map_err(AppError::from)?,
+            "daily": daily.map_err(AppError::from)?,
+            "byKind": by_kind.map_err(AppError::from)?,
+            "byModel": by_model.map_err(AppError::from)?,
+            "byModule": by_module.map_err(AppError::from)?,
+            "sessions": sessions.map_err(AppError::from)?,
+        }
+    });
+    Ok(Json(body).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct UsageQuery {
+    days: Option<i64>,
 }
 
 /// M1/U1：会话历史（运行页历史回放 / 用量页统计的数据源；M2 输出落盘前的元数据层）
@@ -2699,9 +2746,10 @@ async fn main() {
         harness.read().await.manifest.version,
         harness.read().await.user_entry_skills.len()
     );
-    let executor = task_exec::TaskExecutor::new(
+    let executor = task_exec::TaskExecutor::new_with_sessions(
         task_repo.clone(),
         approval_repo.clone(),
+        agent_session_repo.clone(),
         session_manager.clone(),
         map_service.clone(),
         harness.clone(),
@@ -3025,6 +3073,7 @@ mod tests {
         let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(db.pool().clone()));
         let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
         let approval_repo = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
+        let agent_session_repo = Arc::new(easyvibe_db::AgentSessionRepo::new(db.pool().clone()));
         let conversation_repo = Arc::new(easyvibe_db::SqliteConversationRepository::new(db.pool().clone()));
         let harness = Arc::new(tokio::sync::RwLock::new(task_exec::Harness {
             dir: std::env::temp_dir(),

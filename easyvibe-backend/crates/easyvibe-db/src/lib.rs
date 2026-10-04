@@ -1095,6 +1095,7 @@ pub struct AgentSessionRow {
     pub model: Option<String>,
     pub parent_session_id: Option<String>,
     pub task_id: Option<String>,
+    pub module_id: Option<String>,
     pub started_at: String,
     pub terminal_at: Option<String>,
     pub status: String,
@@ -1119,6 +1120,7 @@ struct AgentSessionRowSql {
     model: Option<String>,
     parent_session_id: Option<String>,
     task_id: Option<String>,
+    module_id: Option<String>,
     started_at: String,
     terminal_at: Option<String>,
     status: String,
@@ -1137,13 +1139,115 @@ impl From<AgentSessionRowSql> for AgentSessionRow {
     fn from(r: AgentSessionRowSql) -> Self {
         Self {
             id: r.id, repo: r.repo, kind: r.kind, label: r.label, cli: r.cli, model: r.model,
-            parent_session_id: r.parent_session_id, task_id: r.task_id,
+            parent_session_id: r.parent_session_id, task_id: r.task_id, module_id: r.module_id,
             started_at: r.started_at, terminal_at: r.terminal_at, status: r.status,
             exit_code: r.exit_code, input_tokens: r.input_tokens, output_tokens: r.output_tokens,
             cache_read_tokens: r.cache_read_tokens, cache_write_tokens: r.cache_write_tokens,
             cost_usd: r.cost_usd, duration_ms: r.duration_ms, turns: r.turns,
             usage_source: r.usage_source,
         }
+    }
+}
+
+// ---- 用量聚合行（U2/L1/L2；SUM 列全可空——无数据时 None 而非 0） ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageTotalsRow {
+    pub sessions: i64,
+    pub succeeded: Option<i64>,
+    pub failed: Option<i64>,
+    pub failed_cost: Option<f64>,
+    pub cost: Option<f64>,
+    pub reported: Option<i64>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_read: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UsageTotalsSql {
+    sessions: i64,
+    succeeded: Option<i64>,
+    failed: Option<i64>,
+    failed_cost: Option<f64>,
+    cost: Option<f64>,
+    reported: Option<i64>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read: Option<i64>,
+}
+
+impl From<UsageTotalsSql> for UsageTotalsRow {
+    fn from(r: UsageTotalsSql) -> Self {
+        Self { sessions: r.sessions, succeeded: r.succeeded, failed: r.failed, failed_cost: r.failed_cost,
+               cost: r.cost, reported: r.reported, input_tokens: r.input_tokens, output_tokens: r.output_tokens,
+               cache_read: r.cache_read }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDailyRow {
+    pub day: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UsageDailySql {
+    day: String,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+}
+
+impl From<UsageDailySql> for UsageDailyRow {
+    fn from(r: UsageDailySql) -> Self {
+        Self { day: r.day, input_tokens: r.input_tokens, output_tokens: r.output_tokens }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageGroupRow {
+    pub name: String,
+    pub sessions: i64,
+    pub value: Option<f64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UsageGroupSql {
+    name: String,
+    sessions: i64,
+    value: Option<f64>,
+}
+
+impl From<UsageGroupSql> for UsageGroupRow {
+    fn from(r: UsageGroupSql) -> Self {
+        Self { name: r.name, sessions: r.sessions, value: r.value }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageModuleRow {
+    pub name: String,
+    pub sessions: i64,
+    pub cost: Option<f64>,
+    pub failed: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UsageModuleSql {
+    name: String,
+    sessions: i64,
+    cost: Option<f64>,
+    failed: Option<i64>,
+}
+
+impl From<UsageModuleSql> for UsageModuleRow {
+    fn from(r: UsageModuleSql) -> Self {
+        Self { name: r.name, sessions: r.sessions, cost: r.cost, failed: r.failed }
     }
 }
 
@@ -1172,6 +1276,17 @@ impl AgentSessionRepo {
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// L1 归因：会话归属架构模块（任务会话反查 tasks.modules / 子图会话直接写入）
+    pub async fn set_module_id(&self, id: &str, module_id: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE agent_sessions SET module_id = ? WHERE id = ?")
+            .bind(module_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(())
     }
 
@@ -1252,11 +1367,76 @@ impl AgentSessionRepo {
         Ok(())
     }
 
+    /// 总量统计（KPI 行）：cost/tokens 的 SUM 与「自报次数」分开——NULL 语义诚实降级
+    pub async fn usage_totals(&self, repo: &str, since: &str) -> Result<UsageTotalsRow, ApiError> {
+        let row = sqlx::query_as::<_, UsageTotalsSql>(
+            "SELECT COUNT(*) AS sessions,                 SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END) AS succeeded,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,                 SUM(CASE WHEN status='failed' THEN cost_usd ELSE 0 END) AS failed_cost,                 SUM(cost_usd) AS cost,                 SUM(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) AS reported,                 SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,                 SUM(cache_read_tokens) AS cache_read              FROM agent_sessions WHERE repo = ? AND started_at >= ?",
+        )
+        .bind(repo)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(row.into())
+    }
+
+    /// 按日 tokens（堆积柱）：started_at 为 RFC3339 文本，日期截前 10 位
+    pub async fn usage_daily(&self, repo: &str, since: &str) -> Result<Vec<UsageDailyRow>, ApiError> {
+        let rows = sqlx::query_as::<_, UsageDailySql>(
+            "SELECT substr(started_at, 1, 10) AS day,                 SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens              FROM agent_sessions WHERE repo = ? AND started_at >= ?              GROUP BY day ORDER BY day",
+        )
+        .bind(repo)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// 按类型分布：会话数 + 花费（子 agent 的 kind 已折入 task/subagent-*，前端再按父类聚合）
+    pub async fn usage_by_kind(&self, repo: &str, since: &str) -> Result<Vec<UsageGroupRow>, ApiError> {
+        let rows = sqlx::query_as::<_, UsageGroupSql>(
+            "SELECT kind AS name, COUNT(*) AS sessions, SUM(cost_usd) AS cost              FROM agent_sessions WHERE repo = ? AND started_at >= ?              GROUP BY kind ORDER BY cost DESC",
+        )
+        .bind(repo)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// 按模型分布：会话数 + tokens（真实模型名来自 system init 事件）
+    pub async fn usage_by_model(&self, repo: &str, since: &str) -> Result<Vec<UsageGroupRow>, ApiError> {
+        let rows = sqlx::query_as::<_, UsageGroupSql>(
+            "SELECT model AS name, COUNT(*) AS sessions,                 SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0)) AS tokens              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND model IS NOT NULL              GROUP BY model ORDER BY tokens DESC",
+        )
+        .bind(repo)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// L1 按模块归因：会话数 + 花费 + 失败数（治理账单；module_id 为 NULL 的会话不入此表）
+    pub async fn usage_by_module(&self, repo: &str, since: &str) -> Result<Vec<UsageModuleRow>, ApiError> {
+        let rows = sqlx::query_as::<_, UsageModuleSql>(
+            "SELECT module_id AS name, COUNT(*) AS sessions, SUM(cost_usd) AS cost,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND module_id IS NOT NULL              GROUP BY module_id ORDER BY cost DESC LIMIT 10",
+        )
+        .bind(repo)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
     pub async fn list(&self, repo: &str, limit: i64) -> Result<Vec<AgentSessionRow>, ApiError> {
         let rows = sqlx::query_as::<_, AgentSessionRowSql>(
             "SELECT id, repo, kind, label, cli, model, parent_session_id, task_id, started_at, terminal_at, \
              status, exit_code, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, \
-             cost_usd, duration_ms, turns, usage_source
+             cost_usd, duration_ms, turns, usage_source, module_id
              FROM agent_sessions WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
         )
         .bind(repo)
@@ -1278,14 +1458,14 @@ mod tests {
         let db = Database::connect_memory().await.unwrap();
         let repo = AgentSessionRepo::new(db.pool().clone());
         // spawn 路径：Cli 事件写行
-        repo.upsert_started("ind-1-ab12", "demo", "claude", "2026-10-05T06:00:00Z").await.unwrap();
-        repo.upsert_started("ind-1-ab12", "demo", "claude", "2026-10-05T06:00:00Z").await.unwrap(); // 幂等
+        repo.upsert_started("sess-one", "demo", "claude", "2026-10-05T06:00:00Z").await.unwrap();
+        repo.upsert_started("sess-one", "demo", "claude", "2026-10-05T06:00:00Z").await.unwrap(); // 幂等
         // system init：模型名
-        repo.set_model("ind-1-ab12", "claude-sonnet-4-6").await.unwrap();
+        repo.set_model("sess-one", "claude-sonnet-4-6").await.unwrap();
         // result：usage 覆写（NULL 列被填）
-        repo.set_usage("ind-1-ab12", 12000, 3000, 8000, 4000, 0.0421, 52000, 3).await.unwrap();
+        repo.set_usage("sess-one", 12000, 3000, 8000, 4000, 0.0421, 52000, 3).await.unwrap();
         // 终态 finalize
-        repo.finalize("ind-1-ab12", "demo", "succeeded", "2026-10-05T06:01:00Z", Some(0), Some("自动归纳"), "induce").await.unwrap();
+        repo.finalize("sess-one", "demo", "succeeded", "2026-10-05T06:01:00Z", Some(0), Some("自动归纳"), "induce").await.unwrap();
         let rows = repo.list("demo", 10).await.unwrap();
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
