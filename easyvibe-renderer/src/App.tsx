@@ -2245,15 +2245,8 @@ export default function App() {
     </div>
   )
   const topBar = (
-      <div className="relative flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         {topCenter}
-        {/* 运行会话指示器：顶栏正中绝对居中（relative 锚点——mx-auto 会被左右两簇不等宽顶偏，
-            2026-10-04 实弹「状态不居中」）。空态不渲染不占位；hover 详情卡经 z-50 浮于内容 */}
-        {backendRepo && (
-          <div className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2">
-            <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} />
-          </div>
-        )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
@@ -2450,6 +2443,7 @@ export default function App() {
           page={page}
           onPageChange={handlePageChange}
           topBar={topBar}
+          topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} /> : undefined}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
             /* 优先级：零仓库 > agent 缺失引导（M2）> 审批提醒 */

@@ -181,9 +181,12 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
         )}
       </div>
 
-      {/* 悬停详情卡：从状态丸向下弹出（活动会话时）；含会话详情 + 取消 */}
+      {/* 悬停详情卡：从状态丸向下弹出（活动会话时）；含会话详情 + 取消。
+          定位与动画分层——anim-scale-in 的 keyframes 会覆写同元素 transform（-translate-x-1/2
+          被吃掉导致卡片整体右偏呈"斜"状，2026-10-04 实弹），故定位在外层、动画在内层 */}
       {active && !failed && (
-        <div className="glass elev-3 anim-scale-in pointer-events-none invisible absolute left-1/2 top-full z-50 mt-1.5 w-64 -translate-x-1/2 rounded-xl border border-slate-200 p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100 dark:border-slate-700">
+        <div className="pointer-events-none invisible absolute left-1/2 top-full z-50 mt-1.5 w-64 -translate-x-1/2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100">
+          <div className="glass elev-3 anim-scale-in rounded-xl border border-slate-200 p-3 dark:border-slate-700">
           <p className="text-cap font-bold text-slate-700 dark:text-slate-200">{active.label}</p>
           <dl className="mt-1.5 space-y-0.5 text-micro text-slate-500 dark:text-slate-400">
             <div className="flex justify-between">
@@ -215,6 +218,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0 }: { backendRepo: str
             <X size={10} />
             取消该会话
           </button>
+          </div>
         </div>
       )}
     </div>

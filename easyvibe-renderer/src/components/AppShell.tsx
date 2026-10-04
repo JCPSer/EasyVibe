@@ -77,10 +77,13 @@ interface Props {
   attentionBar?: React.ReactNode
   /** 顶栏内容（项目选择器 + 全局动作），由 App 注入 */
   topBar: React.ReactNode
+  /** 2026-10-04 顶栏正中绝对居中槽位（运行会话指示器）——相对整条 header 居中，
+      不受左侧 logo/项目区与右侧按钮簇不等宽影响（mx-auto/相对 topBar 都会被顶偏） */
+  topCenter?: React.ReactNode
   children: React.ReactNode
 }
 
-export function AppShell({ page, onPageChange, badges, attentionBar, topBar, children }: Props) {
+export function AppShell({ page, onPageChange, badges, attentionBar, topBar, topCenter, children }: Props) {
   // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）；折叠选择持久化（真人测试建议#5）
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && localStorage.getItem('ev.nav.collapsed') === '1')
   const toggleCollapsed = () => {
@@ -96,7 +99,7 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
           + 空白 mousedown → startDragging（权限已开）；双击空白 → 最大化/还原 */}
       <header
         data-tauri-drag-region
-        className="glass z-20 flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3"
+        className="glass relative z-20 flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3"
         onMouseDown={(e) => {
           if (e.button !== 0) return
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
@@ -117,6 +120,12 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
           </span>
           {topBar}
         </div>
+        {/* 顶栏正中槽位：相对整条 header 绝对居中（不受左右簇宽度影响） */}
+        {topCenter && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2">
+            <div className="pointer-events-auto">{topCenter}</div>
+          </div>
+        )}
       </header>
       <div className="flex min-h-0 flex-1">
         {/* 左侧导航 */}
