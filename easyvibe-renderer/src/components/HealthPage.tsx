@@ -6,6 +6,7 @@ import { absTime, toMs } from '@/lib/diffStat'
 import { Select } from '@/components/ui/SelectMenu'
 import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import { onPatrolFinished } from '@/lib/growthBus'
+import { enqueue } from '@/lib/sessionQueue'
 import { toast } from '@/lib/toast'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
@@ -151,13 +152,19 @@ export function HealthPage({
     setStarting(true)
     try {
       const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' })
-      // 单会话纪律：归纳/分析会话在跑时后端返回 409——以前这里静默吞掉，按钮"点了没反应"
+      // 单会话纪律：归纳/分析会话在跑时后端返回 409——入队，当前会话结束后自动接续
       if (!r.ok) {
         const body = await r.json().catch(() => null)
         const msg = String(body?.error ?? '')
-        if (r.status === 409 || body?.code === 'CONFLICT')
-          toast('已有归纳/分析会话在进行（单会话纪律）。等它结束后即可发起巡检，无需反复点击。')
-        else toast(msg || `巡检启动失败（HTTP ${r.status}）`, 'error')
+        if (r.status === 409 || body?.code === 'CONFLICT') {
+          const res = await enqueue(backendRepo, 'patrol')
+          if (res?.outcome === 'replaced')
+            toast(`已加入队列：巡检将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
+          else if (res?.outcome === 'queued') toast('已加入队列：巡检将在当前会话结束后自动开始')
+          else if (res?.outcome === 'started') toast('已直接开始巡检')
+          return
+        }
+        toast(msg || `巡检启动失败（HTTP ${r.status}）`, 'error')
         return
       }
       toast('巡检已开始，完成后看板会自动刷新。')

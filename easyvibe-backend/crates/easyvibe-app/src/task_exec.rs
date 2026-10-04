@@ -359,6 +359,8 @@ impl TaskExecutor {
             Ok(session) => {
                 let session_id = session.session_id.clone();
                 let _ = self.task_repo.set_session(&task.id, &session_id).await;
+                // I1：任务槽位占仓库活动会话，气泡标签「任务执行」不得缺（否则降级显示会话 id）
+                self.session_manager.note_label(&session_id, "任务执行".into()).await;
                 info!("[task-exec] 任务 {} 会话 {} 已启动（trust={}）", task.id, session_id, task.trust);
                 // 终端直播命脉：set_session 后立刻广播——前端此刻才拿得到 sessionId，
                 // 按它过滤 session.output；不发事件 = 前端列表停在旧快照（sessionId=null），
@@ -701,6 +703,7 @@ async fn run_subagent_review(
         .ok()?;
     let sid = session.session_id.clone();
     info!("[task-exec] 任务 {} 审查会话 {} 已启动", task.id, sid);
+    session_manager.note_label(&sid, "任务执行·审查".into()).await;
     await_review_verdict(session_manager, &sid, &task.id, std::time::Duration::from_secs(25 * 60)).await
 }
 
@@ -726,6 +729,7 @@ async fn run_phase_doc_review(
         .ok()?;
     let sid = session.session_id.clone();
     info!("[task-exec] 任务 {} 阶段 {} 初审会话 {} 已启动", task.id, phase, sid);
+    session_manager.note_label(&sid, "任务执行·初审".into()).await;
     await_review_verdict(session_manager, &sid, &task.id, std::time::Duration::from_secs(15 * 60)).await
 }
 

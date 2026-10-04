@@ -24,6 +24,8 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 aes-gcm = "0.10"
 getrandom = "0.2"
+# 会话旁路表/队列时间戳（UTC，RFC3339 序列化）
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # 内部 crate
 easyvibe-common = { path = "crates/easyvibe-common" }
 easyvibe-api-types = { path = "crates/easyvibe-api-types" }

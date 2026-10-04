@@ -38,11 +38,13 @@ import { SuggestPanel } from '@/components/SuggestPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { SessionBubble } from '@/components/SessionBubble'
 import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
-import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
+import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitQueueChanged, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
+import { enqueue } from '@/lib/sessionQueue'
 import { pushTerminalLine } from '@/lib/terminalBuffer'
 import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
@@ -783,14 +785,33 @@ function Canvas({
     setInducing(true)
     fetch(`/api/repos/${backendRepo}/reinduce`, { method: 'POST' })
       .then((r) => {
-        if (!r.ok) throw new Error(String(r.status))
+        // S2：必须抛 Response 本体——catch 里要读 status/body 判别 409（与 analyzeSubmap 同因）
+        if (!r.ok) throw r
         // 2026-10-04 实弹修复：此前调 startGrowth() 回放 growth.log 文件快照——那是上一次
         // 归纳的旧记录，几秒播完"done"，用户误以为归纳结束。改为开空直播会话，
         // WS 的 growth.event 随 agent 产出实时追加，直到 done 事件真正到达
         growthFromReinduce.current = true
         setGrowth({ events: [], index: 0, playing: true, done: false })
       })
-      .catch(() => setInducing(false))
+      .catch(async (e) => {
+        setInducing(false)
+        // S2：409（单会话纪律）不再静默——入队，当前会话结束后自动接续
+        if ((e as Response)?.status === 409) {
+          const res = await enqueue(backendRepo, 'reinduce')
+          if (res?.outcome === 'replaced')
+            toast(`已加入队列：归纳将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
+          else if (res?.outcome === 'queued') toast('已加入队列：归纳将在当前会话结束后自动开始')
+          else if (res?.outcome === 'started') {
+            // 竞态消解：入队裁决时已无活动会话，后端直接执行——走与手动相同的 armed 逻辑
+            growthFromReinduce.current = true
+            setGrowth({ events: [], index: 0, playing: true, done: false })
+            setInducing(true)
+            toast('已直接开始归纳')
+          }
+          return
+        }
+        toast('归纳启动失败（请确认后端在线后重试）。', 'error')
+      })
   }, [backendRepo, inducing])
 
 
@@ -862,15 +883,16 @@ function Canvas({
           }, 6000)
         })
         .catch(async (e) => {
-          // 409=单会话纪律（另一个分析/归纳在跑）——说人话，不甩锅给"后端未接受"
+          // 409=单会话纪律（另一个分析/归纳在跑）——一键入队，当前会话结束后自动接续
           let msg = '分析启动失败（请确认后端在线后重试）。'
           try {
             const body = await (e as Response)?.json?.()
             if (body?.code === 'CONFLICT' || /conflict|活动会话/.test(String(body?.error ?? ''))) {
-              // 带上后端返回的会话名（如 ind-0），用户能分清是"归纳在跑"还是别的分析占坑
-              const m = /活动会话\s*([^\s，。]+)/.exec(String(body?.error ?? ''))
-              const who = m?.[1] ? `（当前会话：${m[1]}）` : ''
-              msg = `已有分析/归纳会话在进行${who}（单会话纪律）。等它完成后会自动解锁，无需重复点击。`
+              const res = await enqueue(backendRepo, 'submap', id)
+              if (res?.outcome === 'replaced')
+                msg = `已加入队列，当前会话结束后自动开始分析（已替换排队：${res.replacedLabel ?? '旧任务'}）`
+              else if (res?.outcome === 'queued') msg = '已加入队列，当前会话结束后自动开始分析'
+              else if (res?.outcome === 'started') msg = '分析已直接开始，稍候重新展开即可看到内部结构'
             }
           } catch { /* 保持默认文案 */ }
           setSubmapErrors((prev) => ({ ...prev, [id]: msg }))
@@ -878,6 +900,27 @@ function Canvas({
         })
     },
     [backendRepo, retrySubmap],
+  )
+
+  // I3：排队任务被排空（当前会话终态 → 后端自动接续）——前端走与手动入口相同的 armed 逻辑：
+  // reinduce=空直播会话+归纳中；patrol=巡检中（真实解除仍靠 patrol.finished）；
+  // submap=重新调用正常分析流程（此时会话可注册，自然进入既有 6s 轮询成功路径，I4 不重建状态机）
+  useEffect(
+    () =>
+      onQueueChanged((evt) => {
+        if (evt.repo !== backendRepo || evt.type !== 'drained' || !evt.job) return
+        if (evt.job.kind === 'reinduce') {
+          growthFromReinduce.current = true
+          setGrowth({ events: [], index: 0, playing: true, done: false })
+          setInducing(true)
+          toast('排队任务已接续：归纳自动开始')
+        } else if (evt.job.kind === 'patrol') {
+          onPatrollingChange(true)
+        } else if (evt.job.kind === 'submap' && evt.job.moduleId) {
+          analyzeSubmap(evt.job.moduleId)
+        }
+      }),
+    [backendRepo, analyzeSubmap, onPatrollingChange],
   )
 
   const expanded = useMemo(() => {
@@ -1527,6 +1570,8 @@ export default function App() {
     toast('安装命令已复制——在终端粘贴执行，完成后回到这里点"重新探测"')
   }
   const [reloadTick, setReloadTick] = useState(0)
+  // 运行会话气泡重拉信号：WS onopen（重连）时递增，作为 resyncKey 传给 SessionBubble（I5②）
+  const [queueResyncTick, setQueueResyncTick] = useState(0)
   // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
   // R3 #4：WS effect 不重跑，onopen 闭包读 state 永远是初值——版本比对存 ref
   // （首次连接为 null 时比较被短路、后端热重启后前端永远拿不到"请刷新"提示的问题）
@@ -1619,9 +1664,25 @@ export default function App() {
     setPatrolling(true)
     fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
       .then((r) => {
-        if (!r.ok) throw new Error(String(r.status))
+        // S2：抛 Response 本体——catch 里判别 409（单会话纪律）入队
+        if (!r.ok) throw r
       })
-      .catch(() => setPatrolling(false))
+      .catch(async (e) => {
+        setPatrolling(false)
+        // S2：409 不再静默——入队，当前会话结束后自动接续
+        if ((e as Response)?.status === 409) {
+          const res = await enqueue(backendRepo, 'patrol')
+          if (res?.outcome === 'replaced')
+            toast(`已加入队列：巡检将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
+          else if (res?.outcome === 'queued') toast('已加入队列：巡检将在当前会话结束后自动开始')
+          else if (res?.outcome === 'started') {
+            setPatrolling(true)
+            toast('已直接开始巡检')
+          }
+          return
+        }
+        toast('巡检启动失败（请确认后端在线后重试）。', 'error')
+      })
   }, [backendRepo, patrolling])
 
   const saveUiPref = useCallback(
@@ -1808,6 +1869,8 @@ export default function App() {
       ws.onopen = () => {
         retry = 0
         setReloadTick((t) => t + 1) // 全量重同步（覆盖断线期间的变更）
+        // I5②：WS 重连 → 触发运行会话气泡重拉队列快照（resyncKey 递增，SessionBubble 消费）
+        setQueueResyncTick((t) => t + 1)
         // Y7：重连点比对后端版本——热重启/更新后前端是旧契约，提示刷新
         fetch('/api/health')
           .then((r) => r.json())
@@ -1831,6 +1894,12 @@ export default function App() {
           if (msg.name === 'session.statusChanged') {
             const d = msg.data
             if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
+          }
+          if (msg.name === 'queue.changed') {
+            // 会话排队变更（入队/替换/取消/排空/失败）——SessionBubble 与 drained 接管逻辑消费
+            const d = msg.data
+            if (d?.repo === backendRepo)
+              emitQueueChanged({ repo: d.repo, type: d.type, job: d.job, started: d.started, error: d.error })
           }
           if (msg.name === 'session.output') {
             emitSessionOutput({ sessionId: msg.data.sessionId, line: msg.data.line })
@@ -2198,6 +2267,8 @@ export default function App() {
           <FileDown size={12} />
           导出
         </button>
+        {/* 运行会话气泡：当前仓库活动会话 + 排队任务（玻璃拟态胶囊，空态不渲染） */}
+        {backendRepo && <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} />}
         {/* 主题开关：亮=太阳 / 暗=月亮滑动拨块（2026-10-04） */}
         <ThemeToggle dark={dark} onChange={setDark} />
         {/* 新手引导：帮助入口——重看欢迎页（再点关闭 = 开关语义，2026-10-04 实弹） + 重置上手指引 */}

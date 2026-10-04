@@ -109,6 +109,9 @@ pub struct AppState {
     pub agent_test: Arc<tokio::sync::RwLock<Option<agent_conf::AgentTestResult>>>,
     /// M1：测试连接串行化（连点/并发测试互相踩结果）
     pub agent_test_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 运行会话排队（需求 v1 §4.1）：key=repo_id 的单槽队列；内存态，重启即失
+    /// （S4：重启后首帧 GET 自然清态，无需额外机制）
+    pub session_queue: session_queue::SessionQueue,
 }
 
 /// LLM 客户端来源：stub（零成本验证）或 anthropic（真实 API）
@@ -138,6 +141,8 @@ pub enum BusEvent {
     /// R3 C1：巡检终态（健康历史落库后广播）——前端据此解除"巡检中"、刷新看板，
     /// 让"体检报告出来了"成为产品事件而不是用户刷新的猜测
     PatrolFinished { repo: String, run_id: String, status: String },
+    /// 需求 v1 §5/§8：会话队列变更（入队/替换/取消/排空/重入队/失败）——气泡即时刷新
+    QueueChanged { repo: String, change: session_queue::QueueChange },
 }
 
 /// R3 C3：统一事件出口。broadcast 的 send 仅在"零订阅者"时失败（缓冲满不报错，而是 recv 端
@@ -168,6 +173,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/modules/{module_id}", get(get_submap))
         .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
         .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
+        // 运行会话排队（需求 v1 §5/§8：GET 查 active+queued；POST 原子裁决入队/代执行；DELETE 取消）
+        .route(
+            "/repos/{id}/session-queue",
+            get(session_queue::get_session_queue)
+                .post(session_queue::post_session_queue)
+                .delete(session_queue::delete_session_queue),
+        )
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
         // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
@@ -410,6 +422,11 @@ async fn remove_repo(
             }
         }
     }
+    // S1：顺带清该仓库队列项（kill 产生的终态事件会对已注销仓库触发 drain 空跑；
+    // 广播 cancelled 让前端气泡即时清态）
+    if let Some(job) = st.session_queue.lock().await.remove(&id) {
+        publish(&st.event_bus, BusEvent::QueueChanged { repo: id.clone(), change: session_queue::QueueChange::Cancelled { job } });
+    }
     // 数据清除（?wipe=true）：抹掉该仓库在本地库的全部痕迹
     // （任务/审批/会话/消息/巡检历史/事件/仓库级设置）——默认保留，用户显式选择才清
     let wiped = if q.get("wipe").map(|v| v == "true").unwrap_or(false) {
@@ -546,6 +563,11 @@ async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Res
 /// 此处把缺口变为能力：透明 agent 扫描模块文件产出子图，落盘 .easyvibe/modules/<id>.json，
 /// 与归纳共用写互斥/会话机制。读时拉取无需 watcher，产出后重新展开即见）
 async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
+    analyze_submap_inner(st, id, module_id).await
+}
+
+/// 子图分析执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）
+async fn analyze_submap_inner(st: AppState, id: String, module_id: String) -> Result<Response, AppError> {
     if !easyvibe_map::is_valid_id(&module_id) {
         return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
     }
@@ -574,6 +596,9 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
         .session_manager
         .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
         .await?;
+    // I1：气泡标签「分析模块 {name}」（name 缺失降级为 id）
+    let module_name = module["name"].as_str().unwrap_or(&module_id).to_string();
+    st.session_manager.note_label(&session.session_id, format!("分析模块 {module_name}")).await;
     info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
@@ -581,6 +606,11 @@ async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    start_reinduce_inner(st, id).await
+}
+
+/// 重新归纳执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）
+async fn start_reinduce_inner(st: AppState, id: String) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     ensure_agent_available(&st)?;
     // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
@@ -591,6 +621,8 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
         .session_manager
         .start_induction(&repo.id, &repo.root, &st.prompt_template, &resolved.command, &resolved.args, None)
         .await?;
+    // I1：气泡标签「归纳」
+    st.session_manager.note_label(&session.session_id, "归纳".into()).await;
 
     // 终态后产物核验
     // R3 P0-2：必须按「自己 spawn 的会话」轮询（status_of_session），不能用仓库级 status_of——
@@ -649,6 +681,11 @@ async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> R
 ///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
 /// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    start_patrol_inner(st, id).await
+}
+
+/// 巡检执行体（HTTP handler、队列 drain 与定时自动巡检共用——§4.1：避免行为漂移）
+async fn start_patrol_inner(st: AppState, id: String) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if *st.llm_mode == LlmMode::Anthropic {
         ensure_agent_available(&st)?;
@@ -660,6 +697,8 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
             st.session_manager
                 .try_register(SessionStatusChanged { repo: repo.id.clone(), session_id: run_id.clone(), status: easyvibe_api_types::SessionStatus::Running })
                 .await?;
+            // I1：气泡标签「巡检」
+            st.session_manager.note_label(&run_id, "巡检".into()).await;
             let snap = match st.map_service.load_map(&repo).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -700,6 +739,8 @@ async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Res
                 .session_manager
                 .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &resolved.command, &resolved.args, None)
                 .await?;
+            // I1：气泡标签「巡检」
+            st.session_manager.note_label(&session.session_id, "巡检".into()).await;
             // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
             // run_id 用时间戳独立生成，不复用 session_id——会话计数器在后端重启后归零，
             // 会与历史 patrol_runs 行主键碰撞导致落库失败（实弹：UNIQUE constraint failed）
@@ -2279,6 +2320,10 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "patrol.finished".into(),
                     data: serde_json::json!({ "repo": repo, "runId": run_id, "status": status }),
                 },
+                BusEvent::QueueChanged { repo, change } => WsMessage {
+                    name: ev::QUEUE_CHANGED.into(),
+                    data: change.to_payload(&repo),
+                },
             };
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -2317,6 +2362,7 @@ mod task_exec;
 mod freshness;
 mod git;
 mod agent_conf;
+mod session_queue;
 
 /// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
 /// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
@@ -2333,11 +2379,17 @@ async fn spawn_repo_pipeline(
     // 产物经 watcher 推送，前端 map.changed 后自动渲染
     if map_service.cached(&r.id).await.is_none() {
         info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
-        if let Err(e) = session_manager
+        match session_manager
             .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args, None)
             .await
         {
-            tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);
+            Ok(session) => {
+                // I1 评审强制覆盖点：auto-init 自动归纳同样打气泡标签，不得遗漏
+                session_manager.note_label(&session.session_id, "自动归纳".into()).await;
+            }
+            Err(e) => {
+                tracing::warn!("[auto-init] {} 触发失败: {e}", r.id);
+            }
         }
     }
     let mut rx = spawn_map_watcher(map_service.clone(), r.clone());
@@ -2652,7 +2704,31 @@ async fn main() {
         agent_detected: Default::default(),
         agent_test: Default::default(),
         agent_test_lock: Default::default(),
+        session_queue: Default::default(),
     };
+    // 队列排空（需求 v1 §4.1/§8）：
+    // ① 事件驱动——终态 SessionStatus 且「事件 session_id 经 status_of_session 确认为终态」
+    //   （B1 收紧：grace 迟到的 Succeeded 被护栏丢弃后，以 by_id 终态归属为准，不误触发）；
+    // ② 12s 清扫器兜底（B3）——覆盖 try_send 背压丢弃等漏事件路径
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let mut rx = st.event_bus.subscribe();
+            while let Ok(e) = rx.recv().await {
+                let BusEvent::SessionStatus(s) = e else { continue };
+                if !matches!(s.status, easyvibe_api_types::SessionStatus::Succeeded | easyvibe_api_types::SessionStatus::Failed) {
+                    continue;
+                }
+                if let Some(cur) = st.session_manager.status_of_session(&s.session_id).await {
+                    if matches!(cur.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) {
+                        continue;
+                    }
+                    session_queue::drain_repo_queue(&st, &s.repo).await;
+                }
+            }
+        });
+        tokio::spawn(session_queue::run_queue_sweeper(state.clone()));
+    }
     let app = build_router(state.clone());
     // M1 配置体系：启动即探测执行 agent（异步——探测失败只是 missing 态，不阻断启动；
     // 用户装完后可 POST /api/agent/detect 重探）
@@ -2920,6 +2996,7 @@ mod tests {
             agent_detected: Default::default(),
             agent_test: Default::default(),
             agent_test_lock: Default::default(),
+            session_queue: Default::default(),
         }
     }
 
@@ -3852,6 +3929,256 @@ mod tests {
         let p = resolve_agent_command("claude");
         assert!(std::path::Path::new(&p).is_file(), "claude 必须解析为真实存在的绝对路径，实际: {p}");
         assert_eq!(resolve_agent_command("/bin/echo"), "/bin/echo", "已含路径且存在的命令原样返回");
+    }
+
+    // ---------- 运行会话排队（需求 v1 §5/§8 + 评审裁决 B1/B2/B4） ----------
+
+    use easyvibe_api_types::SessionStatusChanged;
+    use session_queue::{JobKind, QueuedJob};
+
+    async fn queue_state(tag: &str) -> (AppState, String) {
+        chat_state(tag).await
+    }
+
+    async fn post_queue(app: &axum::Router, repo: &str, body: &str) -> (axum::http::StatusCode, serde_json::Value) {
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(format!("/api/repos/{repo}/session-queue"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let v = if status == axum::http::StatusCode::NO_CONTENT {
+            serde_json::Value::Null
+        } else {
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+        };
+        (status, v)
+    }
+
+    async fn get_queue(app: &axum::Router, repo: &str) -> serde_json::Value {
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::get(format!("/api/repos/{repo}/session-queue")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["data"].clone()
+    }
+
+    async fn delete_queue(app: &axum::Router, repo: &str) -> axum::http::StatusCode {
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::delete(format!("/api/repos/{repo}/session-queue")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        resp.status()
+    }
+
+    fn running(sid: &str) -> SessionStatusChanged {
+        SessionStatusChanged { repo: String::new(), session_id: sid.into(), status: easyvibe_api_types::SessionStatus::Running }
+    }
+
+    /// B4：POST 时无活动会话 → 后端直接代执行（started:true），队列保持空
+    #[tokio::test]
+    async fn session_queue_post_executes_directly_without_active() {
+        let (state, repo) = queue_state("q-b4").await;
+        let app = build_router(state.clone());
+        let (status, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+        assert_eq!(v["data"]["started"], true, "无活动会话必须直接执行: {v}");
+        assert!(v["data"]["queued"].is_null());
+        assert!(state.session_queue.lock().await.is_empty(), "直接执行不得留队列项");
+        // 代执行真实发生了：状态被新会话接管（inner 在响应返回前已同步完成注册；
+        // stub 巡检毫秒级收尾，故只断言「会话已接续」这一稳定事实，label 契约由 GET 用例覆盖）
+        let mut saw = false;
+        for _ in 0..40 {
+            if let Some(s) = state.session_manager.status_of(&repo).await {
+                if s.session_id != "ind-1" {
+                    saw = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(saw, "直接执行后应出现接续的巡检会话");
+    }
+
+    /// 入队/替换（响应带旧 label）/取消；DELETE 404；GET 契约；非法 body 400
+    #[tokio::test]
+    async fn session_queue_enqueue_replace_cancel_contract() {
+        let (state, repo) = queue_state("q-crud").await;
+        let app = build_router(state.clone());
+        // 占一个活动会话（带标签与 startedAt 戳）
+        let mut s1 = running("ind-1");
+        s1.repo = repo.clone();
+        state.session_manager.try_register(s1).await.unwrap();
+        state.session_manager.note_label("ind-1", "归纳".into()).await;
+
+        // 初始 GET：active 齐、queued 空
+        let d = get_queue(&app, &repo).await;
+        assert_eq!(d["active"]["sessionId"], "ind-1");
+        assert_eq!(d["active"]["label"], "归纳");
+        assert!(d["active"]["startedAt"].is_string());
+        assert!(d["queued"].is_null());
+
+        // 入队 → 202 queued:true replaced:null
+        let (status, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+        assert_eq!(v["data"]["queued"], true);
+        assert!(v["data"]["replaced"].is_null(), "首次入队 replaced 必须 null: {v}");
+        let d = get_queue(&app, &repo).await;
+        assert_eq!(d["queued"]["kind"], "patrol");
+        assert_eq!(d["queued"]["label"], "巡检");
+
+        // 替换 → 响应带被替换项 label（S3）
+        let (status, v) = post_queue(&app, &repo, r#"{"kind":"submap","moduleId":"exam-core"}"#).await;
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+        assert_eq!(v["data"]["replaced"]["label"], "巡检", "替换必须携带旧 label: {v}");
+        let d = get_queue(&app, &repo).await;
+        assert_eq!(d["queued"]["kind"], "submap");
+        assert_eq!(d["queued"]["moduleId"], "exam-core");
+        assert!(d["queued"]["enqueuedAt"].is_string());
+
+        // 非法 body → 400
+        let (status, _) = post_queue(&app, &repo, r#"{"kind":"task"}"#).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "未知类型必须 400");
+        let (status, _) = post_queue(&app, &repo, r#"{"kind":"submap"}"#).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "submap 缺 moduleId 必须 400");
+
+        // 取消 → 204；再取消 → 404（带错误文案）
+        assert_eq!(delete_queue(&app, &repo).await, axum::http::StatusCode::NO_CONTENT);
+        let resp = app
+            .clone()
+            .oneshot(axum::http::Request::delete(format!("/api/repos/{repo}/session-queue")).body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND, "无排队必须 404");
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("无排队任务"), "404 文案: {}", v["error"]);
+    }
+
+    /// drain 正常路径：活动会话终态 → drain pop + 代执行，队列清空、巡检接续启动
+    #[tokio::test]
+    async fn session_queue_drain_starts_queued_job_after_terminal() {
+        let (state, repo) = queue_state("q-drain").await;
+        let app = build_router(state.clone());
+        let mut s1 = running("ind-1");
+        s1.repo = repo.clone();
+        state.session_manager.try_register(s1).await.unwrap();
+        state.session_manager.note_label("ind-1", "归纳".into()).await;
+        let (_status, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
+        assert_eq!(v["data"]["queued"], true);
+
+        // 活动会话终态 → drain（事件循环/清扫器触发的就是这个函数）
+        state
+            .session_manager
+            .note_status(SessionStatusChanged { repo: repo.clone(), session_id: "ind-1".into(), status: easyvibe_api_types::SessionStatus::Succeeded })
+            .await;
+        assert!(session_queue::drain_repo_queue(&state, &repo).await, "终态后必须 drain");
+        assert!(state.session_queue.lock().await.is_empty(), "drain 必须 pop 队列项");
+
+        // 接续执行真实发生：仓库状态被新会话接管（stub 巡检毫秒级收尾，
+        // 故只断言「会话已接续」这一稳定事实）
+        let mut saw = false;
+        for _ in 0..40 {
+            if let Some(s) = state.session_manager.status_of(&repo).await {
+                if s.session_id != "ind-1" {
+                    saw = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(saw, "drain 后巡检应接续启动");
+    }
+
+    /// B2：drain 撞 Conflict → 放回原槽位且不覆盖期间用户新排的队；确定性失败 → 丢弃 + 广播 failed
+    #[tokio::test]
+    async fn session_queue_drain_failure_grading() {
+        let (state, repo) = queue_state("q-b2").await;
+        let app = build_router(state.clone());
+        let mut rx = state.event_bus.subscribe();
+        let mut s1 = running("ind-1");
+        s1.repo = repo.clone();
+        state.session_manager.try_register(s1).await.unwrap();
+        // 入队「巡检」→ 再替换为「归纳」（用户期间改主意）
+        let (_s, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
+        assert_eq!(v["data"]["queued"], true);
+        let (_s, v) = post_queue(&app, &repo, r#"{"kind":"reinduce"}"#).await;
+        assert_eq!(v["data"]["replaced"]["label"], "巡检");
+
+        // drain 的 patrol 项撞 Conflict（TOCTOU：任务槽抢注）→ 不得覆盖用户新排的「归纳」
+        let patrol = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
+        session_queue::handle_drain_failure(&state, &repo, patrol, ApiError::Conflict("仓库有活动会话".into())).await;
+        let q = state.session_queue.lock().await;
+        let kept = q.get(&repo).expect("Conflict 不得丢项");
+        assert_eq!(kept.kind, JobKind::Reinduce, "不得覆盖期间用户新排的队: {:?}", kept.kind);
+        drop(q);
+        // 槽位空时 Conflict → 放回原项（不丢）
+        state.session_queue.lock().await.remove(&repo);
+        let patrol2 = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
+        session_queue::handle_drain_failure(&state, &repo, patrol2, ApiError::Conflict("抢注".into())).await;
+        assert_eq!(state.session_queue.lock().await.get(&repo).unwrap().label, "巡检");
+
+        // 确定性失败 → 丢弃 + 广播 queue.changed{type:"failed", error}
+        // （先清槽模拟 drain 已 pop 出该项——handle 只处置被弹出的项，不动槽内其他排队）
+        state.session_queue.lock().await.remove(&repo);
+        let doomed = QueuedJob { kind: JobKind::Submap, module_id: Some("exam-core".into()), label: "分析模块 exam-core".into(), enqueued_at: chrono::Utc::now() };
+        session_queue::handle_drain_failure(&state, &repo, doomed, ApiError::BadRequest("agent 缺失".into())).await;
+        assert!(state.session_queue.lock().await.is_empty(), "确定性失败必须丢弃（不留死信）");
+        // 广播核验：从事件流里捞 queue.changed（enqueued/replaced/requeued/failed 都应出现过）
+        let mut saw_failed = false;
+        while let Ok(e) = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
+            let Ok(BusEvent::QueueChanged { change, .. }) = e else { continue };
+            if change.type_str() == "failed" {
+                saw_failed = true;
+                break;
+            }
+        }
+        assert!(saw_failed, "确定性失败必须广播 queue.changed failed");
+    }
+
+    /// B1 app 级：grace 迟到 Succeeded 不得顶掉新活动会话；drain 复查活动会话，不 pop 不误接续
+    #[tokio::test]
+    async fn grace_late_terminal_keeps_new_session_and_skips_drain() {
+        let (state, repo) = queue_state("q-b1").await;
+        let app = build_router(state.clone());
+        let mgr = &state.session_manager;
+        // S1 走完终态（归纳失败/成功皆可）→ S2 抢注为新活动会话
+        let mut s1 = running("ind-a");
+        s1.repo = repo.clone();
+        mgr.try_register(s1).await.unwrap();
+        mgr.note_label("ind-a", "归纳".into()).await;
+        mgr.note_status(SessionStatusChanged { repo: repo.clone(), session_id: "ind-a".into(), status: easyvibe_api_types::SessionStatus::Failed }).await;
+        let mut s2 = running("ind-b");
+        s2.repo = repo.clone();
+        mgr.try_register(s2).await.unwrap();
+        // grace 收尸迟到：ind-a 的 Succeeded 不得覆写 ind-b
+        mgr.note_status(SessionStatusChanged { repo: repo.clone(), session_id: "ind-a".into(), status: easyvibe_api_types::SessionStatus::Succeeded }).await;
+        let active = mgr.status_of(&repo).await.expect("仓库应有活动会话");
+        assert_eq!(active.session_id, "ind-b", "迟到 Succeeded 不得顶掉新活动会话");
+        assert_eq!(active.status, easyvibe_api_types::SessionStatus::Running);
+        // B1 drain 收紧：事件 session_id（ind-a）经 status_of_session 确认为终态（护栏丢弃后 by_id 仍 Failed）
+        let by_id = mgr.status_of_session("ind-a").await.expect("by_id 必须有 ind-a 的终态归属");
+        assert!(matches!(by_id.status, easyvibe_api_types::SessionStatus::Failed | easyvibe_api_types::SessionStatus::Succeeded));
+
+        // 事件循环的条件分支成立 → 调 drain；drain 复查发现 ind-b 活动 → 不 pop、不接续
+        let (_s, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
+        assert_eq!(v["data"]["queued"], true, "ind-b 活动期间 POST 必须入队");
+        assert!(!session_queue::drain_repo_queue(&state, &repo).await, "有活动会话不得 drain");
+        let q = state.session_queue.lock().await;
+        assert!(q.contains_key(&repo), "队项必须保留等下一终态");
+        drop(q);
+        let active = mgr.status_of(&repo).await.unwrap();
+        assert_eq!(active.session_id, "ind-b", "drain 不得误接续");
     }
 }
 

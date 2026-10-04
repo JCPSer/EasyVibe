@@ -8,6 +8,8 @@ pub mod events {
     pub const GROWTH_EVENT: &str = "growth.event";
     pub const PROGRESS_UPDATED: &str = "progress.updated";
     pub const SESSION_STATUS_CHANGED: &str = "session.statusChanged";
+    /// 运行会话队列变更（需求 v1 §5/§8：入队/替换/取消/排空/失败——气泡即时刷新）
+    pub const QUEUE_CHANGED: &str = "queue.changed";
     pub const AGENT_SLOT_UPDATED: &str = "agent.slotUpdated";
 }
 

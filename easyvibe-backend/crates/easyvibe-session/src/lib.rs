@@ -7,6 +7,7 @@
 //!   agent 只要遵守 v2.2 协议写文件，后端不关心它怎么写
 use easyvibe_api_types::{SessionStatus, SessionStatusChanged};
 use easyvibe_common::ApiError;
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
@@ -41,6 +42,12 @@ pub struct SessionManager {
     output_tx: Arc<tokio::sync::broadcast::Sender<SessionOutput>>,
     /// 会话超时（秒）：超时未终态 → 杀进程判 Failed。环境可调（EASYVIBE_SESSION_TIMEOUT_SECS），默认 30 分钟。
     timeout: std::time::Duration,
+    /// I1 旁路表①：session_id → 注册时刻（UTC）。不改 SessionStatusChanged 结构，
+    /// startedAt 由 try_register 唯一汇聚点盖戳——各发起入口无需各自记时间
+    started: Arc<RwLock<HashMap<String, DateTime<Utc>>>>,
+    /// I1 旁路表②：session_id → 展示标签（「归纳」「巡检」「分析模块 X」…）。
+    /// 由 app 层 note_label 打标；终态 publish 时与 started 一并清理
+    labels: Arc<RwLock<HashMap<String, String>>>,
 }
 
 /// 会话超时：覆盖归纳/巡检/子图分析/任务执行全部 spawn 路径（审查后端#1——agent 挂死 =
@@ -112,6 +119,8 @@ impl SessionManager {
             events,
             output_tx: Arc::new(output_tx),
             timeout: session_timeout(),
+            started: Default::default(),
+            labels: Default::default(),
         })
     }
 
@@ -147,6 +156,8 @@ impl SessionManager {
             events,
             output_tx: Arc::new(output_tx),
             timeout,
+            started: Default::default(),
+            labels: Default::default(),
         })
     }
 
@@ -204,6 +215,21 @@ impl SessionManager {
         self.active.read().await.get(repo_id).cloned()
     }
 
+    /// I1：app 层各发起入口打展示标签（「归纳」「巡检」「分析模块 X」「自动归纳」「任务执行」）
+    pub async fn note_label(&self, session_id: &str, label: String) {
+        self.labels.write().await.insert(session_id.to_string(), label);
+    }
+
+    /// I1：会话注册时刻（气泡已运行时长的数据源；缺失则不显示时长）
+    pub async fn started_at_of(&self, session_id: &str) -> Option<DateTime<Utc>> {
+        self.started.read().await.get(session_id).copied()
+    }
+
+    /// I1：会话展示标签（缺失时前端降级显示「会话 {id}」）
+    pub async fn label_of(&self, session_id: &str) -> Option<String> {
+        self.labels.read().await.get(session_id).cloned()
+    }
+
     /// 注册一个外部活动会话（如巡检）；仓库已有活动会话（归纳/巡检任一）则拒绝。
     /// 与 start_induction 共用同一纪律：地图写操作全局单飞。
     /// 注意：检查与插入必须在同一把写锁内完成（修代码审查发现的 TOCTOU 竞态）。
@@ -219,6 +245,8 @@ impl SessionManager {
         }
         map.insert(s.repo.clone(), s.clone());
         drop(map);
+        // I1：注册即盖 startedAt 戳（唯一汇聚点——所有 spawn/外部注册路径都经这里）
+        self.started.write().await.insert(s.session_id.clone(), Utc::now());
         // 非阻塞送达：通道满（下游死亡/测试无消费者）时事件丢弃——
         // 会话注册绝不能被监控通道背压卡死（2026-10-03 实弹：阶段初审让每任务
         // 会话数 4→6，测试 channel(16) 被填满，第 16 个 send 永久阻塞注册，死锁）
@@ -456,9 +484,32 @@ impl SessionManager {
         self.publish(s).await;
     }
 
+    /// 状态发布（B1 护栏在此）：`active[repo]` 已存在**不同 session_id 的活动会话**
+    /// （Starting/Running）时，本条迟到事件（含 grace 收尸的迟到 Succeeded 终态）
+    /// 不得覆写 active——整条事件丢弃 + warn。同 session_id 的正常状态推进不受限；
+    /// by_id 按 session_id 键，天然不受跨会话影响。
     async fn publish(&self, s: SessionStatusChanged) {
-        self.active.write().await.insert(s.repo.clone(), s.clone());
+        {
+            let mut active = self.active.write().await;
+            if let Some(existing) = active.get(&s.repo) {
+                if existing.session_id != s.session_id
+                    && matches!(existing.status, SessionStatus::Starting | SessionStatus::Running)
+                {
+                    tracing::warn!(
+                        "[session] B1 护栏：丢弃迟到事件——仓库 {} 已有活动会话 {}，事件 {}（{:?}）不得覆写 active",
+                        s.repo, existing.session_id, s.session_id, s.status
+                    );
+                    return;
+                }
+            }
+            active.insert(s.repo.clone(), s.clone());
+        }
         self.by_id.write().await.insert(s.session_id.clone(), s.clone());
+        // 终态清理两张旁路表（app 层 GET session-queue 读活动会话，终态后无需保留）
+        if matches!(s.status, SessionStatus::Succeeded | SessionStatus::Failed) {
+            self.started.write().await.remove(&s.session_id);
+            self.labels.write().await.remove(&s.session_id);
+        }
         // 非阻塞送达（背压卡死防线，同 try_register）
         if let Err(e) = self.events.try_send(s) {
             tracing::warn!("[session] 状态事件通道已满，丢弃事件: {e}");
@@ -639,6 +690,67 @@ mod tests {
         let _ = mgr.start_induction("repo1", &dir, "test", "false", &[], None).await.unwrap();
         let final_evt = recv_terminal(&mut rx).await;
         assert_eq!(final_evt.status, SessionStatus::Failed);
+    }
+
+    // B1 护栏单测：迟到事件不得覆写新活动会话（整条丢弃，by_id 不受影响）
+    #[tokio::test]
+    async fn publish_guard_drops_late_event_from_other_session() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let mgr = SessionManager::new(tx);
+        let mk = |sid: &str, status: SessionStatus| SessionStatusChanged {
+            repo: "g1".into(),
+            session_id: sid.into(),
+            status,
+        };
+        // S1 走完终态 → S2 抢注为新活动会话
+        mgr.note_status(mk("s1", SessionStatus::Failed)).await;
+        mgr.try_register(mk("s2", SessionStatus::Running)).await.unwrap();
+        // 迟到的非终态事件（同仓库旧会话）必须被丢弃
+        mgr.note_status(mk("s1", SessionStatus::Running)).await;
+        let cur = mgr.status_of("g1").await.unwrap();
+        assert_eq!(cur.session_id, "s2", "迟到事件不得顶掉新活动会话");
+        assert_eq!(cur.status, SessionStatus::Running);
+        // grace 乱序：迟到的 Succeeded 终态同样不得覆写（B1 原始场景）
+        mgr.note_status(mk("s1", SessionStatus::Succeeded)).await;
+        let cur = mgr.status_of("g1").await.unwrap();
+        assert_eq!(cur.session_id, "s2", "grace 迟到 Succeeded 不得顶掉新活动会话");
+        assert_eq!(cur.status, SessionStatus::Running);
+        // by_id 按 session_id 键：s1 保留自己的终态归属（try_register 不写 by_id，s2 经 status_of 观测）
+        assert_eq!(mgr.status_of_session("s1").await.unwrap().status, SessionStatus::Failed);
+        // 同 session_id 的正常推进不受限
+        mgr.note_status(mk("s2", SessionStatus::Succeeded)).await;
+        assert_eq!(mgr.status_of("g1").await.unwrap().status, SessionStatus::Succeeded);
+    }
+
+    // I1 旁路表：try_register 盖 startedAt 戳、note_label 打标、终态 publish 清理两表
+    #[tokio::test]
+    async fn bypass_tables_stamp_label_and_clean_on_terminal() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let mgr = SessionManager::new(tx);
+        mgr.try_register(SessionStatusChanged {
+            repo: "b1".into(),
+            session_id: "s-1".into(),
+            status: SessionStatus::Running,
+        })
+        .await
+        .unwrap();
+        let started = mgr.started_at_of("s-1").await.expect("注册必须盖 startedAt 戳");
+        assert!((Utc::now() - started).num_seconds() < 5, "戳应为刚才: {started}");
+        assert!(mgr.label_of("s-1").await.is_none());
+        mgr.note_label("s-1", "归纳".into()).await;
+        assert_eq!(mgr.label_of("s-1").await.as_deref(), Some("归纳"));
+        // 活动期两表都在
+        mgr.note_status(SessionStatusChanged { repo: "b1".into(), session_id: "s-1".into(), status: SessionStatus::Running }).await;
+        assert!(mgr.started_at_of("s-1").await.is_some());
+        assert!(mgr.label_of("s-1").await.is_some());
+        // 终态 publish 清理
+        mgr.note_status(SessionStatusChanged { repo: "b1".into(), session_id: "s-1".into(), status: SessionStatus::Succeeded }).await;
+        assert!(mgr.started_at_of("s-1").await.is_none(), "终态后 started 表项必须清理");
+        assert!(mgr.label_of("s-1").await.is_none(), "终态后 label 表项必须清理");
+        // 无竞争会话时 grace 路径的 note_status(Succeeded) 仍全量生效（既有行为不受护栏影响）
+        mgr.try_register(SessionStatusChanged { repo: "b2".into(), session_id: "s-2".into(), status: SessionStatus::Running }).await.unwrap();
+        mgr.note_status(SessionStatusChanged { repo: "b2".into(), session_id: "s-2".into(), status: SessionStatus::Succeeded }).await;
+        assert_eq!(mgr.status_of("b2").await.unwrap().status, SessionStatus::Succeeded);
     }
 
     #[test]

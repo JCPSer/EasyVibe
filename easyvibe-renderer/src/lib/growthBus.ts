@@ -80,6 +80,27 @@ export function onSessionOutput(l: SessionOutputListener): () => void {
   }
 }
 
+// 运行会话气泡 + 单会话排队（2026-10-04）：会话队列变更（入队/替换/取消/排空/启动失败）
+// WS queue.changed → App 层转发，SessionBubble 消费（重拉 queue 快照）
+export type QueueChangedEvent = {
+  repo: string
+  type: 'enqueued' | 'replaced' | 'cancelled' | 'drained' | 'failed'
+  job?: { kind: string; label: string; moduleId?: string }
+  started?: boolean
+  error?: string
+}
+export type QueueChangedListener = (event: QueueChangedEvent) => void
+const queueListeners = new Set<QueueChangedListener>()
+export function emitQueueChanged(e: QueueChangedEvent) {
+  for (const l of queueListeners) l(e)
+}
+export function onQueueChanged(l: QueueChangedListener): () => void {
+  queueListeners.add(l)
+  return () => {
+    queueListeners.delete(l)
+  }
+}
+
 // R3 C1：巡检终态（patrol.finished）——解除"巡检中"、驱动健康看板刷新
 export type PatrolFinishedListener = (event: { repo: string; runId: string; status: string }) => void
 const patrolListeners = new Set<PatrolFinishedListener>()
