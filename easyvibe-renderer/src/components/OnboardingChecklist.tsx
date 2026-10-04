@@ -22,7 +22,8 @@ export function OnboardingChecklist({
   const { title, items } = ONBOARDING_COPY.checklist
 
   return (
-    <div className="pointer-events-auto w-72 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+    // 宽度收敛在右栏（w-64）以内：2026-10-04 实弹——w-72 溢出压住任务对话输入框的发送按钮
+    <div className="pointer-events-auto w-60 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
       <button
         onClick={() => setCollapsed((v) => !v)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
