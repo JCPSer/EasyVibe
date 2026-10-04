@@ -678,6 +678,12 @@ function Canvas({
         })
         if (evt.status !== 'succeeded' && evt.status !== 'failed') return
         setInducing(false)
+        // 重归纳的直播生长会话诚实收尾：一个生长事件都没等到（agent 未按协议产出）→
+        // 收起空面板，不假装播完；有事件的会话等自己的 done 事件自然结束
+        if (growthFromReinduce.current) {
+          growthFromReinduce.current = false
+          setGrowth((g) => (g && g.events.length === 0 && !g.done ? null : g))
+        }
         // R3 C1：stub 模式会话 id 带 patrol- 前缀可在此解除；真实模式（ind-N）统一走 patrol.finished 事件
         if (evt.sessionId.startsWith('patrol-')) onPatrollingChange(false)
       }),
@@ -769,6 +775,7 @@ function Canvas({
   }, [])
 
   // 写路径（M2-3）：触发重新归纳 → 后端 spawn agent 按 v2.2 执行；自动进入直播模式看生长
+  const growthFromReinduce = useRef(false) // 直播会话标记：终态时诚实收尾（空事件 → 收起，不装播完）
   const startReinduce = useCallback(() => {
     if (!backendRepo || inducing) return
     // R7 清债：重新归纳 = spawn 全仓库 agent（数分钟 + LLM 成本），先确认
@@ -777,10 +784,14 @@ function Canvas({
     fetch(`/api/repos/${backendRepo}/reinduce`, { method: 'POST' })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
-        startGrowth()
+        // 2026-10-04 实弹修复：此前调 startGrowth() 回放 growth.log 文件快照——那是上一次
+        // 归纳的旧记录，几秒播完"done"，用户误以为归纳结束。改为开空直播会话，
+        // WS 的 growth.event 随 agent 产出实时追加，直到 done 事件真正到达
+        growthFromReinduce.current = true
+        setGrowth({ events: [], index: 0, playing: true, done: false })
       })
       .catch(() => setInducing(false))
-  }, [backendRepo, inducing, startGrowth])
+  }, [backendRepo, inducing])
 
 
   // 懒加载子图：任何 loading 状态触发取数（后端模式走 API，否则静态文件）
