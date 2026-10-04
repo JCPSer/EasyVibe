@@ -29,11 +29,18 @@ export function FakeTrafficLights() {
     import('@tauri-apps/api/window').then((m) => {
       if (cancelled) return
       const w = m.getCurrentWindow()
-      w.isFocused().then(setFocused).catch(() => {})
+      w.isFocused().then(setFocused).catch((e) => console.warn('[traffic-lights] isFocused 失败（权限？）', e))
       w.onFocusChanged(({ payload }) => setFocused(payload)).then((fn) => {
         if (cancelled) fn()
         else unlisten = fn
-      }).catch(() => {})
+      }).catch((e) => console.warn('[traffic-lights] onFocusChanged 订阅失败（权限？）', e))
+      // 轮询兜底：焦点事件偶发不触发时仍保正确（1s 一次，成本可忽略）
+      const t = window.setInterval(() => {
+        w.isFocused().then(setFocused).catch(() => {})
+      }, 1000)
+      unlisten = () => {
+        window.clearInterval(t)
+      }
     }).catch(() => {})
     return () => {
       cancelled = true
