@@ -13,10 +13,12 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug, MessagesSquare} from 'lucide-react'
+import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug, MessagesSquare, CircleHelp} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
+import { loadOnboarding, markCheck, markWelcomeShown, dismiss, completeAll, resetForReview, clearTaskIdea, loadTaskIdea, saveTaskIdea, prefersReducedMotion, CHECK_KEYS } from '@/lib/onboarding'
+import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
 import { ModuleNode, type ModuleNodeType } from '@/components/ModuleNode'
 import { BandNode, type BandNodeType } from '@/components/BandNode'
 import { ExpandedModuleNode, type ExpandedModuleNodeType } from '@/components/ExpandedModuleNode'
@@ -35,6 +37,8 @@ import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
+import { WelcomePage } from '@/components/WelcomePage'
+import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
@@ -1243,6 +1247,17 @@ class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Err
 
 // 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
 function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
+  // 2026-10-04 新手引导：等待期是引导黄金时间（调研 B 节）——三层递进：
+  // 真实进度叙事（原有）+ 概念卡片轮播 + 任务想法预填（归纳完成后带入任务对话）
+  const [cardIdx, setCardIdx] = useState(0)
+  const [idea, setIdea] = useState(() => loadTaskIdea() ?? '')
+  const [ideaSaved, setIdeaSaved] = useState(false)
+  const reduced = prefersReducedMotion()
+  useEffect(() => {
+    if (reduced) return // 尊重减弱动效：不自动轮播，手动翻页即可
+    const t = window.setInterval(() => setCardIdx((i) => (i + 1) % ONBOARDING_COPY.concepts.length), 20000)
+    return () => window.clearInterval(t)
+  }, [reduced])
   useEffect(() => {
     let stale = false
     const tick = () => {
@@ -1272,14 +1287,16 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
     finalize: '收尾写盘',
     done: '完成',
   }
+  const concept = ONBOARDING_COPY.concepts[cardIdx]
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 text-[13px] text-slate-500">
+    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-[13px] text-slate-500">
+      {/* 第 1 层：真实进度叙事（永远不让等待页只有 spinner） */}
       <Loader2 size={18} className="animate-spin text-blue-500" />
       <span className="font-semibold text-slate-700">
         正在归纳代码地图{prog ? `：${PHASE_LABEL[prog.phase] ?? prog.phase} ${prog.percent}%` : '…'}
       </span>
       {prog && (
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full rounded-full bg-blue-500 transition-all duration-700" style={{ width: `${prog.percent}%` }} />
         </div>
       )}
@@ -1289,6 +1306,45 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
           : '后台 agent 执行中（通常数分钟，取决于仓库规模）'}
         ，完成后地图会自动出现
       </span>
+
+      {/* 第 2 层：概念卡片轮播（每张 ~20s 自动翻，可手动点） */}
+      <div className="w-full max-w-md rounded-xl border border-slate-100 bg-white/90 px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between">
+          <p className="text-[12px] font-bold text-slate-700">{concept.title}</p>
+          <div className="flex gap-1">
+            {ONBOARDING_COPY.concepts.map((c, i) => (
+              <button
+                key={c.id}
+                onClick={() => setCardIdx(i)}
+                aria-label={`第 ${i + 1} 张：${c.title}`}
+                className={`h-1.5 rounded-full transition-all ${i === cardIdx ? 'w-4 bg-blue-500' : 'w-1.5 bg-slate-200 hover:bg-slate-300'}`}
+              />
+            ))}
+          </div>
+        </div>
+        <p className="mt-1.5 text-[11.5px] leading-5 text-slate-500">{concept.body}</p>
+      </div>
+
+      {/* 第 3 层：提前参与——任务想法预填（归纳完成后带入任务对话） */}
+      <div className="w-full max-w-md">
+        <p className="text-[11px] font-semibold text-slate-500">{ONBOARDING_COPY.waiting.ideaTitle}</p>
+        <div className="mt-1 flex gap-1.5">
+          <input
+            value={idea}
+            onChange={(e) => { setIdea(e.target.value); setIdeaSaved(false) }}
+            placeholder={ONBOARDING_COPY.waiting.ideaPlaceholder}
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-blue-300"
+          />
+          <button
+            onClick={() => { saveTaskIdea(idea.trim()); setIdeaSaved(true) }}
+            disabled={!idea.trim()}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+          >
+            {ONBOARDING_COPY.waiting.ideaButton}
+          </button>
+        </div>
+        {ideaSaved && <p className="mt-1 text-[10.5px] text-emerald-600">{ONBOARDING_COPY.waiting.ideaSaved}</p>}
+      </div>
     </div>
   )
 }
@@ -1493,6 +1549,9 @@ export default function App() {
   const [page, setPage] = useState<PageId>('map')
   // v0.2：地图页「就此对话」跨页上下文（消费即清；后写覆盖先写，竞态语义自然）
   const [pendingChatContext, setPendingChatContext] = useState<{ refId: string; refName: string; kind: 'module' | 'layer' } | null>(null)
+  // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
+  const [onboarding, setOnboarding] = useState(loadOnboarding)
+  const [welcomeOpen, setWelcomeOpen] = useState(false)
   // ui-test P1：表单创建成功 → 任务页流水线选中该任务（nonce 区分多次跳入）
   const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
@@ -1552,6 +1611,55 @@ export default function App() {
     },
     [handlePageChange],
   )
+
+  // ---------- 新手引导：事件驱动勾选（调研 C2——完成 = 真实激活动作，不是"看过"） ----------
+  useEffect(() => {
+    if (repos.length > 0) setOnboarding((prev) => markCheck(prev, 'addRepo'))
+  }, [repos.length])
+  useEffect(() => {
+    if (page === 'map' && map) setOnboarding((prev) => markCheck(prev, 'viewMap'))
+  }, [page, map])
+  useEffect(() => {
+    if (page === 'health' || page === 'drift') setOnboarding((prev) => markCheck(prev, 'viewHealth'))
+  }, [page])
+  // firstApproval：轮询探测"任何任务存在审批记录"（只在本项未完成时跑，30s 节拍）
+  useEffect(() => {
+    if (!backendRepo || onboarding.checklist.firstApproval === 'done') return
+    let dead = false
+    const probe = async () => {
+      try {
+        const r = await fetch(`/api/repos/${backendRepo}/tasks`)
+        const d: { data?: { id: string }[] } = r.ok ? await r.json() : null
+        for (const t of (d?.data ?? []).slice(0, 5)) {
+          const ra = await fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(t.id)}/approvals`)
+          if (!ra.ok) continue
+          const da: { data?: unknown[] } = await ra.json()
+          if ((da?.data?.length ?? 0) > 0) {
+            if (!dead) setOnboarding((prev) => markCheck(prev, 'firstApproval'))
+            return
+          }
+        }
+      } catch {
+        /* 后端离线等场景静默 */
+      }
+    }
+    void probe()
+    const t = window.setInterval(() => void probe(), 30000)
+    return () => {
+      dead = true
+      window.clearInterval(t)
+    }
+  }, [backendRepo, onboarding.checklist.firstApproval])
+  // 全部完成 → 庆祝 + 自动收尾（只触发一次）
+  const onboardDoneRef = useRef(-1)
+  useEffect(() => {
+    const n = CHECK_KEYS.filter((k) => onboarding.checklist[k] === 'done').length
+    if (n === CHECK_KEYS.length && onboardDoneRef.current !== n) {
+      toast(ONBOARDING_COPY.checklist.doneToast, 'info')
+      setOnboarding((prev) => completeAll(prev))
+    }
+    onboardDoneRef.current = n
+  }, [onboarding])
 
   // 每项目记忆：右栏宽度 / 面板开合随项目持久化（M4-1 状态持久化，防刷新丢位置）。
   // 页签不恢复（2026-10-03 用户裁定）：切换仓库固定落架构地图——上次在 A 仓库看任务，
@@ -1815,7 +1923,7 @@ export default function App() {
   }, [])
 
   // 添加本地仓库：桌面壳走系统目录选择器（Tauri dialog），浏览器降级为路径输入
-  const addRepo = useCallback(async () => {
+  const addRepo = useCallback(async (): Promise<boolean> => {
     let path: string | null = null
     try {
       if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
@@ -1828,7 +1936,7 @@ export default function App() {
     } catch {
       path = window.prompt('目录选择器不可用，输入本地仓库目录的绝对路径')
     }
-    if (!path?.trim()) return
+    if (!path?.trim()) return false
     try {
       const r = await fetch('/api/repos', {
         method: 'POST',
@@ -1838,13 +1946,15 @@ export default function App() {
       const d = await r.json().catch(() => null)
       if (!r.ok) {
         toast(d?.error ?? '添加失败（目录不可读或已挂载）', 'error')
-        return
+        return false
       }
       toast('已添加仓库，正在归纳…')
       refreshRepos()
       setBackendRepo(d.data.id)
+      return true
     } catch {
       toast('添加失败（需要后端在线）', 'error')
+      return false
     }
   }, [refreshRepos])
 
@@ -2047,6 +2157,17 @@ export default function App() {
           <FileDown size={12} />
           导出
         </button>
+        {/* 新手引导：帮助入口——重看欢迎页 + 重置上手指引（调研 C2：可随时召回） */}
+        <button
+          onClick={() => {
+            setOnboarding(resetForReview())
+            setWelcomeOpen(true)
+          }}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
+          title="重新查看新手引导（欢迎页 + 上手指引）"
+        >
+          <CircleHelp size={12} />
+        </button>
         <button
           onClick={() => handlePageChange('settings')}
           className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
@@ -2096,6 +2217,7 @@ export default function App() {
             }
             onTaskCreated={(id) => {
               setTaskFocus({ id, nonce: Date.now() })
+              setOnboarding((prev) => markCheck(prev, 'firstTask'))
               handlePageChange('tasks')
             }}
             onChatAbout={goChatAbout}
@@ -2118,6 +2240,8 @@ export default function App() {
         }}
         pendingChatContext={pendingChatContext}
         onConsumeChatContext={() => setPendingChatContext(null)}
+        initialIdea={page === 'workbench' ? loadTaskIdea() : null}
+        onConsumeIdea={clearTaskIdea}
         onNavigate={(p) => handlePageChange(p)}
       />
     ),
@@ -2289,11 +2413,43 @@ export default function App() {
           onClose={() => setTaskDraft(null)}
           onCreated={(id) => {
             setTaskFocus({ id, nonce: Date.now() })
+            setOnboarding((prev) => markCheck(prev, 'firstTask'))
             handlePageChange('tasks')
           }}
           onLocateModule={() => handlePageChange('map')}
           agentReady={agentState.found !== false}
         />
+      )}
+      {/* 新手引导：首启欢迎工作台（零仓库首启自动出现；顶栏 ? 可重看） */}
+      {(welcomeOpen || (backendOnline === true && repos.length === 0 && !onboarding.welcomeShown)) && (
+        <WelcomePage
+          hasRepo={repos.length > 0}
+          onAddRepo={async () => {
+            const ok = await addRepo()
+            if (ok) setOnboarding((prev) => markWelcomeShown(prev))
+            return ok
+          }}
+          onClose={() => {
+            setWelcomeOpen(false)
+            setOnboarding((prev) => markWelcomeShown(prev))
+          }}
+        />
+      )}
+      {/* 新手引导：事件驱动 checklist（Linear 式；完成/关闭后不再打扰） */}
+      {backendOnline === true && repos.length > 0 && !onboarding.dismissedAt && !welcomeOpen && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-40">
+          <OnboardingChecklist
+            state={onboarding}
+            onGo={(key) => {
+              if (key === 'addRepo') void addRepo()
+              else if (key === 'viewMap') handlePageChange('map')
+              else if (key === 'viewHealth') handlePageChange('health')
+              else if (key === 'firstTask') handlePageChange('workbench')
+              else handlePageChange('tasks')
+            }}
+            onDismiss={() => setOnboarding((prev) => dismiss(prev))}
+          />
+        </div>
       )}
       <ToastHost />
     </>

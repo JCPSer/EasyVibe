@@ -40,6 +40,8 @@ export function WorkbenchPage({
   onLocateModule,
   pendingChatContext,
   onConsumeChatContext,
+  initialIdea,
+  onConsumeIdea,
   onNavigate,
 }: {
   backendRepo: string | null
@@ -49,6 +51,9 @@ export function WorkbenchPage({
   /** v0.2：地图页「💬 对话/就此对话」带入的上下文（消费即清，后写覆盖先写） */
   pendingChatContext: ChatAboutTarget | null
   onConsumeChatContext: () => void
+  /** 新手引导：归纳等待期保存的第一个任务想法（消费即清，自动建会话预填） */
+  initialIdea?: string | null
+  onConsumeIdea?: () => void
   /** v0.2：互指提示条跳「任务」页 */
   onNavigate: (page: 'tasks') => void
 }) {
@@ -141,6 +146,25 @@ export function WorkbenchPage({
       .catch(() => toast('带入上下文失败（新会话未创建）', 'error'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChatContext])
+
+  // 新手引导：等待期保存的任务想法 → 自动建会话预填（同样的 convId+nonce 契约）
+  useEffect(() => {
+    if (!initialIdea?.trim() || !backendRepo) return
+    onConsumeIdea?.()
+    fetch(`/api/repos/${backendRepo}/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ConversationSummary }) => {
+        setActiveConv(d.data.id)
+        loadConvs()
+        setChatDraft({ convId: d.data.id, text: initialIdea.trim(), nonce: Date.now() })
+      })
+      .catch(() => toast('带入想法失败（新会话未创建）', 'error'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialIdea])
 
   const createConv = () => {
     if (!backendRepo) return

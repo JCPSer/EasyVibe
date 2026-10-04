@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
 import { AnswerCards } from '@/components/AnswerCards'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
+import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
 import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle} from 'lucide-react'
 
 interface ChatMessage {
@@ -564,6 +565,15 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
 
   const currentConv = convs.find((c) => c.id === convId)
   const displayTitle = currentConv?.title ?? (convId ? '会话' : '默认会话')
+  // 示例 prompt：模块感知（首个模块入句）+ 通用两条；仅在空对话渲染
+  const samplePrompts = useMemo(() => {
+    const sp = ONBOARDING_COPY.samplePrompts
+    const first = map?.modules[0]
+    return [
+      ...(first ? [sp.withModule.replace('{module}', first.name)] : []),
+      ...sp.generic,
+    ]
+  }, [map])
 
   return (
     <div className="flex h-full flex-col">
@@ -988,6 +998,20 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                   <AtSign size={10} className="shrink-0 text-blue-400" />
                   <span className="truncate text-[12px] font-medium text-slate-700">{m.name}</span>
                   <span className="ml-auto shrink-0 font-mono text-micro text-slate-400">{m.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* 新手引导（2026-10-04）：空对话时给示例 prompt（AionUi 式"活的引导"——点一下即进入真实工作流） */}
+          {messages.length === 0 && !sending && !suggest && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {samplePrompts.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setInput(p)}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-500 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-600"
+                >
+                  {p}
                 </button>
               ))}
             </div>
