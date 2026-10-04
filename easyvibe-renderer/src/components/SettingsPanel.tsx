@@ -3,6 +3,7 @@ import {
   Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
+import { Select } from '@/components/ui/SelectMenu'
 
 interface Service {
   id: string
@@ -620,15 +621,12 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                         <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">{label}</p>
                         <p className="text-micro text-slate-300 dark:text-slate-600">{desc}</p>
                       </div>
-                      <select
-                        className={`${field} flex-1`}
+                      <Select
+                        className="flex-1"
                         value={slots[slot] ?? 'default'}
-                        onChange={(e) => setSlots((p) => ({ ...p, [slot]: e.target.value }))}
-                      >
-                        {Object.values(services).map((s) => (
-                          <option key={s.id} value={s.id}>{s.name || s.id}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => setSlots((p) => ({ ...p, [slot]: v }))}
+                        options={Object.values(services).map((s) => ({ value: s.id, label: s.name || s.id }))}
+                      />
                     </div>
                   ))}
                 </div>

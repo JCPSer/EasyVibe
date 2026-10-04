@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FileDiff, History, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/lib/growthBus'
+import { Select } from '@/components/ui/SelectMenu'
 import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/lib/diffStat'
 import type { CodeMap } from '@/types/map'
 
@@ -157,16 +158,16 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
                     </button>
                   ))}
                 </div>
-                <select
+                <Select
                   value={moduleFilter}
-                  onChange={(e) => setModuleFilter(e.target.value)}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-cap text-slate-600 dark:text-slate-300 focus:outline-none"
-                >
-                  <option value="all">全部模块</option>
-                  {(map?.modules ?? []).map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
+                  onChange={setModuleFilter}
+                  ariaLabel="按模块过滤"
+                  className="w-40"
+                  options={[
+                    { value: 'all', label: '全部模块' },
+                    ...(map?.modules ?? []).map((m) => ({ value: m.id, label: m.name })),
+                  ]}
+                />
                 <span className="tnum ml-auto text-cap text-slate-300 dark:text-slate-600">共 {filtered.length} 条</span>
               </div>
             </div>

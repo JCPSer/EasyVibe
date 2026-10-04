@@ -71,14 +71,12 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
         </div>
       </button>
 
-      {/* 横带主体：交替底色 + 实线边界，让分层一目了然 */}
+      {/* 横带主体：交替底色走 CSS 类（dark 适配在 index.css）——inline 硬编码浅色是暗色漏网根因 */}
       <div
-        className="h-full flex-1 rounded-lg border"
+        className={`h-full flex-1 rounded-lg border ${index % 2 === 0 ? 'band-strip-a' : 'band-strip-b'}`}
         style={{
           margin: '10px 16px 10px 10px',
           pointerEvents: 'none',
-          background: index % 2 === 0 ? 'rgba(226,232,240,0.5)' : 'rgba(241,245,249,0.6)',
-          borderColor: selected ? '#93c5fd' : '#e2e8f0',
           borderLeftWidth: 3,
           borderLeftColor: selected ? '#2563eb' : `${color}99`,
         }}

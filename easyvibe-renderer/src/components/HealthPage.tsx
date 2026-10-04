@@ -3,6 +3,7 @@ import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench, Trash2, X 
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
 import { absTime, toMs } from '@/lib/diffStat'
+import { Select } from '@/components/ui/SelectMenu'
 import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
 import { onPatrolFinished } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
@@ -302,15 +303,12 @@ export function HealthPage({
               {confirmPrune ? (
                 <>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">保留最近</span>
-                  <select
-                    value={pruneKeep}
-                    onChange={(e) => setPruneKeep(Number(e.target.value))}
-                    className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1 py-0.5 text-[10px] text-slate-600 dark:text-slate-300 outline-none"
-                  >
-                    {[5, 10, 20, 50].map((n) => (
-                      <option key={n} value={n}>{n} 次</option>
-                    ))}
-                  </select>
+                  <Select
+                    className="w-20"
+                    value={String(pruneKeep)}
+                    onChange={(v) => setPruneKeep(Number(v))}
+                    options={[5, 10, 20, 50].map((n) => ({ value: String(n), label: `${n} 次` }))}
+                  />
                   <button
                     onClick={() => void prune()}
                     disabled={pruning}
