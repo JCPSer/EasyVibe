@@ -81,6 +81,8 @@ pub struct AppState {
     // M2-4：巡检槽位 + 域 2 健康历史
     pub patrol_service: Arc<easyvibe_ai_agent::PatrolService<easyvibe_db::SqliteHealthRepository>>,
     pub health_repo: Arc<easyvibe_db::SqliteHealthRepository>,
+    /// M1/U1：agent 会话持久层（运行页历史回放 + 用量页统计的地基）
+    pub agent_session_repo: Arc<easyvibe_db::AgentSessionRepo>,
     pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
@@ -181,6 +183,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(session_queue::delete_session_queue),
         )
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
+        .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
         // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
         .route("/repos/{id}/events", axum::routing::post(ingest_event))
@@ -825,6 +828,36 @@ async fn events_summary(State(st): State<AppState>, Path(id): Path<String>) -> R
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let rows = st.event_repo.summary(&repo.id).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
+/// M1/U1：会话 kind 从展示 label 推导（app 层 note_label 的文本是已知的稳定词表）
+fn session_kind_from_label(label: &str) -> &'static str {
+    if label.contains("任务执行") {
+        if label.contains("初审") {
+            "subagent-review"
+        } else if label.contains("审查") {
+            "subagent-audit"
+        } else {
+            "task"
+        }
+    } else if label.contains("巡检") {
+        "patrol"
+    } else if label.contains("分析") {
+        "submap"
+    } else if label.contains("归纳") {
+        "induce"
+    } else {
+        "unknown"
+    }
+}
+
+/// M1/U1：会话历史（运行页历史回放 / 用量页统计的数据源；M2 输出落盘前的元数据层）
+async fn list_agent_sessions(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let rows = st.agent_session_repo.list(&id, 50).await?;
+    Ok(Json(ApiResponse::ok(rows)).into_response())
 }
 
 async fn list_patrol_runs(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
@@ -2487,26 +2520,9 @@ async fn main() {
 
     let (event_bus, _) = broadcast::channel(256);
 
-    // session 管理：会话事件翻译进总线
+    // session 管理：会话事件翻译进总线（channel → manager → 桥，顺序不可乱）
     let (session_tx, mut session_rx) = tokio::sync::mpsc::channel::<SessionStatusChanged>(64);
-    let bus = event_bus.clone();
-    tokio::spawn(async move {
-        while let Some(s) = session_rx.recv().await {
-            publish(&bus, BusEvent::SessionStatus(s));
-        }
-    });
     let session_manager = SessionManager::new(session_tx);
-    // 改进#2：agent 输出 → 事件总线（过程直播）
-    {
-        let mut rx = session_manager.subscribe_output();
-        let bus = event_bus.clone();
-        tokio::spawn(async move {
-            while let Ok(o) = rx.recv().await {
-                publish(&bus, BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
-            }
-        });
-    }
-
     // agent CLI 配置：命令/参数/提示词模板均可环境变量覆盖（测试可用 stub 命令）。
     // 默认 -p --bare --dangerously-skip-permissions --output-format stream-json：
     // bare 跳过宿主 hooks（防 grill-me 类钩子把无人值守任务带偏成访谈模式）；
@@ -2557,6 +2573,67 @@ async fn main() {
         .expect("SQLite 初始化失败");
     info!("域 2 状态库: {data_dir}/easyvibe.db");
     let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(database.pool().clone()));
+    let agent_session_repo = Arc::new(easyvibe_db::AgentSessionRepo::new(database.pool().clone()));
+    // session 管理：会话事件翻译进总线 + 终态落库（channel/manager 在前，桥在此，顺序不可乱）
+    {
+        let bus = event_bus.clone();
+        let mgr_for_final = session_manager.clone();
+        let repo_for_final = agent_session_repo.clone();
+        tokio::spawn(async move {
+            while let Some(s) = session_rx.recv().await {
+                // M1/U1 终态收尾：label/kind/terminal_at 落库（INSERT OR IGNORE 兜底 Stub 巡检等无 spawn 会话）
+                if matches!(s.status, easyvibe_api_types::SessionStatus::Succeeded | easyvibe_api_types::SessionStatus::Failed) {
+                    let label = mgr_for_final.label_of(&s.session_id).await.unwrap_or_else(|| s.session_id.clone());
+                    let kind = session_kind_from_label(&label);
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let repo = repo_for_final.clone();
+                    let sid = s.session_id.clone();
+                    let repo_id = s.repo.clone();
+                    let status = format!("{:?}", s.status).to_lowercase();
+                    tokio::spawn(async move {
+                        if let Err(err) = repo.finalize(&sid, &repo_id, &status, &now, None, Some(&label), &kind).await {
+                            tracing::warn!("[agent_sessions] finalize 失败 {sid}: {err}");
+                        }
+                    });
+                }
+                publish(&bus, BusEvent::SessionStatus(s));
+            }
+        });
+    }
+    // 改进#2：agent 输出 → 事件总线（过程直播）
+    {
+        let mut rx = session_manager.subscribe_output();
+        let bus = event_bus.clone();
+        tokio::spawn(async move {
+            while let Ok(o) = rx.recv().await {
+                publish(&bus, BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
+            }
+        });
+    }
+    // M1/U1：会话元事件 → agent_sessions 落盘（model/usage 边读边写；DB 故障只告警不阻流）
+    {
+        use easyvibe_session::SessionMetaUpdate as Meta;
+        let mut rx = session_manager.subscribe_meta();
+        let repo = agent_session_repo.clone();
+        tokio::spawn(async move {
+            while let Ok(e) = rx.recv().await {
+                let res = match &e.update {
+                    Meta::Cli(cli) => {
+                        let cmd = cli.rsplit(['/', '\\']).next().unwrap_or(cli).to_string();
+                        repo.upsert_started(&e.session_id, &e.repo, &cmd, &chrono::Utc::now().to_rfc3339()).await
+                    }
+                    Meta::Model(m) => repo.set_model(&e.session_id, m).await,
+                    Meta::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, turns } => {
+                        repo.set_usage(&e.session_id, *input_tokens, *output_tokens, *cache_read_tokens, *cache_write_tokens, *cost_usd, *duration_ms, *turns).await
+                    }
+                    Meta::ExitCode(_) => Ok(()), // 退出码随终态事件 finalize 统一写
+                };
+                if let Err(err) = res {
+                    tracing::warn!("[agent_sessions] 元事件落盘失败 {}: {err}", e.session_id);
+                }
+            }
+        });
+    }
     let patrol_service = Arc::new(easyvibe_ai_agent::PatrolService::new(health_repo.clone()));
     let settings_repo = Arc::new(easyvibe_db::SqliteSettingsRepository::new(database.pool().clone()));
     let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(database.pool().clone()));
@@ -2686,6 +2763,7 @@ async fn main() {
         agent_args: Arc::new(agent_args),
         patrol_service,
         health_repo,
+        agent_session_repo,
         settings_repo,
         cipher: Arc::new(cipher),
         task_repo,
@@ -2978,6 +3056,7 @@ mod tests {
             agent_args: Arc::new(vec![]),
             patrol_service,
             health_repo,
+            agent_session_repo: Arc::new(easyvibe_db::AgentSessionRepo::new(db.pool().clone())),
             settings_repo,
             cipher: Arc::new(cipher),
             task_repo,

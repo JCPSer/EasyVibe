@@ -28,6 +28,37 @@ pub struct SessionOutput {
     pub line: String,
 }
 
+/// M1/U1 会话元事件（2026-10-05）：真实模型名 / token 用量 / 退出码，看门任务边读边分派。
+/// 设计约束（docs/llm-usage-page-design-v1.md §1.2）：result 事件不进 1MB 缓冲、
+/// 终态后补解析不可行——解析必须在读行循环内做；被 kill 的会话无 result 事件，usage 恒 NULL。
+/// 首期只解析 claude stream-json；其余 CLI 的 usage 列留 NULL 诚实降级。
+#[derive(Debug, Clone)]
+pub enum SessionMetaUpdate {
+    /// spawn 入口已知（命令名）——落盘桥据此刻写 agent_sessions 行
+    Cli(String),
+    /// system init 事件的真实模型名（不等终态，kill 也能拿到）
+    Model(String),
+    /// result 事件的会话级累计 usage（claude 自报口径，含缓存折扣价）
+    Usage {
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+        cost_usd: f64,
+        duration_ms: i64,
+        turns: i64,
+    },
+    /// 进程退出码（被 kill/超时无退出码则不分派）
+    ExitCode(i32),
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionMetaEvent {
+    pub repo: String,
+    pub session_id: String,
+    pub update: SessionMetaUpdate,
+}
+
 pub struct SessionManager {
     active: Arc<RwLock<HashMap<String, SessionStatusChanged>>>, // repo -> 最新会话状态（互斥判定用）
     by_id: Arc<RwLock<HashMap<String, SessionStatusChanged>>>,  // session_id -> 状态（终态归属用，审查 🔴1）
@@ -40,6 +71,8 @@ pub struct SessionManager {
     events: SessionEventSender,
     /// agent 过程直播：stdout 逐行广播（改进#2）
     output_tx: Arc<tokio::sync::broadcast::Sender<SessionOutput>>,
+    /// M1/U1：会话元事件广播（model/usage/exit——落盘桥在 app 层订阅写 agent_sessions）
+    meta_tx: Arc<tokio::sync::broadcast::Sender<SessionMetaEvent>>,
     /// 会话超时（秒）：超时未终态 → 杀进程判 Failed。环境可调（EASYVIBE_SESSION_TIMEOUT_SECS），默认 30 分钟。
     timeout: std::time::Duration,
     /// I1 旁路表①：session_id → 注册时刻（UTC）。不改 SessionStatusChanged 结构，
@@ -107,9 +140,37 @@ fn parse_stream_event(line: &str) -> Option<String> {
     }
 }
 
+/// M1/U1：stream-json 事件 → 会话元更新（system init 抽模型名 / result 抽 usage）。
+/// 与 parse_stream_event 互补：那边跳过的 system/result，在这里被分派去落盘——
+/// 文本归直播，元数据归 agent_sessions，互不干扰。
+fn parse_stream_meta(line: &str) -> Option<SessionMetaUpdate> {
+    let ev: serde_json::Value = serde_json::from_str(line).ok()?;
+    match ev["type"].as_str()? {
+        "system" if ev["subtype"].as_str() == Some("init") => {
+            ev["model"].as_str().map(|m| SessionMetaUpdate::Model(m.to_string()))
+        }
+        "result" => {
+            let usage = &ev["usage"];
+            // cost_usd 为必填门槛：连自报成本都没有的事件不更新 usage 列（保持 NULL 语义）
+            let cost_usd = ev["total_cost_usd"].as_f64()?;
+            Some(SessionMetaUpdate::Usage {
+                input_tokens: usage["input_tokens"].as_i64()?,
+                output_tokens: usage["output_tokens"].as_i64()?,
+                cache_read_tokens: usage["cache_read_input_tokens"].as_i64().unwrap_or(0),
+                cache_write_tokens: usage["cache_creation_input_tokens"].as_i64().unwrap_or(0),
+                cost_usd,
+                duration_ms: ev["duration_ms"].as_i64().unwrap_or(0),
+                turns: ev["num_turns"].as_i64().unwrap_or(0),
+            })
+        }
+        _ => None,
+    }
+}
+
 impl SessionManager {
     pub fn new(events: SessionEventSender) -> Arc<Self> {
         let (output_tx, _) = tokio::sync::broadcast::channel(512);
+        let (meta_tx, _) = tokio::sync::broadcast::channel(256);
         Arc::new(Self {
             active: Default::default(),
             by_id: Default::default(),
@@ -118,6 +179,7 @@ impl SessionManager {
             counter: AtomicU64::new(0),
             events,
             output_tx: Arc::new(output_tx),
+            meta_tx: Arc::new(meta_tx),
             timeout: session_timeout(),
             started: Default::default(),
             labels: Default::default(),
@@ -147,6 +209,7 @@ impl SessionManager {
     #[cfg(test)]
     pub fn new_with_timeout(events: SessionEventSender, timeout: std::time::Duration) -> Arc<Self> {
         let (output_tx, _) = tokio::sync::broadcast::channel(512);
+        let (meta_tx, _) = tokio::sync::broadcast::channel(256);
         Arc::new(Self {
             active: Default::default(),
             by_id: Default::default(),
@@ -155,6 +218,7 @@ impl SessionManager {
             counter: AtomicU64::new(100), // 与 new() 的计数器错开，避免测试间 session id 冲突
             events,
             output_tx: Arc::new(output_tx),
+            meta_tx: Arc::new(meta_tx),
             timeout,
             started: Default::default(),
             labels: Default::default(),
@@ -195,6 +259,11 @@ impl SessionManager {
     /// 订阅会话 stdout 行（app 层翻译为 WS session.output）
     pub fn subscribe_output(&self) -> tokio::sync::broadcast::Receiver<SessionOutput> {
         self.output_tx.subscribe()
+    }
+
+    /// M1/U1：订阅会话元事件（app 层落盘 agent_sessions 的数据源）
+    pub fn subscribe_meta(&self) -> tokio::sync::broadcast::Receiver<SessionMetaEvent> {
+        self.meta_tx.subscribe()
     }
 
     /// 会话 stdout（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料；无捕获返回 None。
@@ -274,7 +343,9 @@ impl SessionManager {
         args: &[String],
         timeout: Option<std::time::Duration>,
     ) -> Result<SessionStatusChanged, ApiError> {
-        let session_id = format!("ind-{}", self.counter.fetch_add(1, Ordering::SeqCst));
+        // B6：计数器重启归零会与历史行撞 id——纳秒尾缀保证全局唯一，人读仍带序号
+        let uniq = Utc::now().timestamp_subsec_nanos() % 65_536;
+        let session_id = format!("ind-{}-{uniq:04x}", self.counter.fetch_add(1, Ordering::SeqCst));
         // 单会话纪律：与巡检等地图写操作共用（try_register 内含活动会话检查）
         self.try_register(SessionStatusChanged {
             repo: repo_id.to_string(),
@@ -320,6 +391,13 @@ impl SessionManager {
             });
         }
 
+        // M1/U1：CLI 元事件 → 落盘桥写 agent_sessions 行（spawn 路径的 cli 真实来源）
+        let _ = self.meta_tx.send(SessionMetaEvent {
+            repo: repo_id.to_string(),
+            session_id: session_id.clone(),
+            update: SessionMetaUpdate::Cli(command.to_string()),
+        });
+
         // stdout 捕获缓冲（M4-1）：任务终态后解析 [EASYVIBE-RESULT] 的原料
         let stdout_buf = Arc::new(std::sync::Mutex::new(String::new()));
         self.outputs.write().await.insert(session_id.clone(), stdout_buf.clone());
@@ -347,9 +425,12 @@ impl SessionManager {
         // 还原成可读文本再进直播/缓冲，否则终端刷原始 JSON、[EASYVIBE-RESULT] 协议行
         // 也会被 JSON 转义而解析不到。由 args 自动探测，老参数（纯文本）行为不变。
         let stream_json = args.iter().any(|a| a.contains("stream-json"));
+        let meta_tx = self.meta_tx.clone();
+        let meta_tx2 = self.meta_tx.clone();
         tokio::spawn(async move {
             use tokio::io::AsyncBufReadExt as _;
             let out_id = session_id_task.clone();
+            let out_repo = repo.clone();
             let out_task = tokio::spawn(async move {
                 let mut lines = 0u64;
                 if let Some(mut s) = stdout {
@@ -359,11 +440,19 @@ impl SessionManager {
                         match reader.read_line(&mut line).await {
                             Ok(0) => break,
                             Ok(_) => {
-                                // stream-json 模式：JSON 事件 → 可读文本（无可展示内容则跳过该行）
+                                // stream-json 模式：JSON 事件 → 可读文本（无可展示内容则跳过该行）；
+                                // M1/U1：跳过的 system/result 事件在这里分派元数据去落盘
                                 let payload: String = if stream_json {
                                     match parse_stream_event(&line) {
                                         Some(text) => text,
                                         None => {
+                                            if let Some(update) = parse_stream_meta(&line) {
+                                                let _ = meta_tx.send(SessionMetaEvent {
+                                                    repo: out_repo.clone(),
+                                                    session_id: out_id.clone(),
+                                                    update,
+                                                });
+                                            }
                                             line.clear();
                                             continue;
                                         }
@@ -442,20 +531,32 @@ impl SessionManager {
                 _ = tokio::time::sleep(timeout) => Outcome::Killed("会话超时（agent 挂死防线）"),
                 s = child.wait() => Outcome::Exited(s),
             };
-            let status = match outcome {
+            let (status, _exit_code) = match outcome {
                 Outcome::Killed(reason) => {
                     warn!("[session {session_id_task}] 被终止: {reason}");
                     if let Err(e) = child.start_kill() {
                         warn!("[session {session_id_task}] start_kill 失败: {e}");
                     }
                     let _ = child.wait().await;
-                    SessionStatus::Failed
+                    (SessionStatus::Failed, None)
                 }
-                Outcome::Exited(Ok(exit)) if exit.success() => SessionStatus::Succeeded,
-                Outcome::Exited(Ok(_exit)) => SessionStatus::Failed,
+                Outcome::Exited(Ok(exit)) => {
+                    let code = exit.code();
+                    if let Some(c) = code {
+                        let _ = meta_tx2.send(SessionMetaEvent {
+                            repo: repo.clone(),
+                            session_id: session_id_task.clone(),
+                            update: SessionMetaUpdate::ExitCode(c),
+                        });
+                    }
+                    (
+                        if exit.success() { SessionStatus::Succeeded } else { SessionStatus::Failed },
+                        code.map(i64::from),
+                    )
+                }
                 Outcome::Exited(Err(e)) => {
                     warn!("[session {session_id_task}] wait 失败: {e}");
-                    SessionStatus::Failed
+                    (SessionStatus::Failed, None)
                 }
             };
             // 子进程已退出：管道写端关闭，排空任务很快收尾
@@ -505,11 +606,9 @@ impl SessionManager {
             active.insert(s.repo.clone(), s.clone());
         }
         self.by_id.write().await.insert(s.session_id.clone(), s.clone());
-        // 终态清理两张旁路表（app 层 GET session-queue 读活动会话，终态后无需保留）
-        if matches!(s.status, SessionStatus::Succeeded | SessionStatus::Failed) {
-            self.started.write().await.remove(&s.session_id);
-            self.labels.write().await.remove(&s.session_id);
-        }
+        // B4（M1，2026-10-05）：终态不再删旁路表——startedAt/label 是 runs 页列表与
+        // agent_sessions finalize 的兜底来源；两张表仅按会话数自然增长（每项几十字节，可控）。
+        // （原清理逻辑移除；测试 bypass_tables_* 已同步改期望）
         // 非阻塞送达（背压卡死防线，同 try_register）
         if let Err(e) = self.events.try_send(s) {
             tracing::warn!("[session] 状态事件通道已满，丢弃事件: {e}");
@@ -722,9 +821,10 @@ mod tests {
         assert_eq!(mgr.status_of("g1").await.unwrap().status, SessionStatus::Succeeded);
     }
 
-    // I1 旁路表：try_register 盖 startedAt 戳、note_label 打标、终态 publish 清理两表
+    // I1 旁路表 + B4（M1）：try_register 盖 startedAt 戳、note_label 打标；
+    // 终态 publish 不再清理两表（历史可查，见 publish 注释）
     #[tokio::test]
-    async fn bypass_tables_stamp_label_and_clean_on_terminal() {
+    async fn bypass_tables_stamp_label_and_keep_on_terminal() {
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let mgr = SessionManager::new(tx);
         mgr.try_register(SessionStatusChanged {
@@ -743,14 +843,45 @@ mod tests {
         mgr.note_status(SessionStatusChanged { repo: "b1".into(), session_id: "s-1".into(), status: SessionStatus::Running }).await;
         assert!(mgr.started_at_of("s-1").await.is_some());
         assert!(mgr.label_of("s-1").await.is_some());
-        // 终态 publish 清理
+        // 终态 publish 保留（B4：runs 页列表与 agent_sessions finalize 的兜底来源）
         mgr.note_status(SessionStatusChanged { repo: "b1".into(), session_id: "s-1".into(), status: SessionStatus::Succeeded }).await;
-        assert!(mgr.started_at_of("s-1").await.is_none(), "终态后 started 表项必须清理");
-        assert!(mgr.label_of("s-1").await.is_none(), "终态后 label 表项必须清理");
+        assert!(mgr.started_at_of("s-1").await.is_some(), "终态后 started 表项保留（B4）");
+        assert!(mgr.label_of("s-1").await.is_some(), "终态后 label 表项保留（B4）");
         // 无竞争会话时 grace 路径的 note_status(Succeeded) 仍全量生效（既有行为不受护栏影响）
         mgr.try_register(SessionStatusChanged { repo: "b2".into(), session_id: "s-2".into(), status: SessionStatus::Running }).await.unwrap();
         mgr.note_status(SessionStatusChanged { repo: "b2".into(), session_id: "s-2".into(), status: SessionStatus::Succeeded }).await;
         assert_eq!(mgr.status_of("b2").await.unwrap().status, SessionStatus::Succeeded);
+    }
+
+    #[test]
+    fn stream_meta_extracts_model_and_usage() {
+        // system init → Model（不等终态）
+        let init = r#"{"type":"system","subtype":"init","model":"claude-sonnet-4-6"}"#;
+        match parse_stream_meta(init) {
+            Some(SessionMetaUpdate::Model(m)) => assert_eq!(m, "claude-sonnet-4-6"),
+            other => panic!("init 事件应解析出模型名: {other:?}"),
+        }
+        // result → Usage（claude 自报口径：cost/tokens/时长/轮数）
+        let result = r#"{"type":"result","model":"claude-sonnet-4-6","total_cost_usd":0.0421,"duration_ms":52000,"num_turns":3,
+            "usage":{"input_tokens":12000,"output_tokens":3000,"cache_read_input_tokens":8000,"cache_creation_input_tokens":4000}}"#;
+        match parse_stream_meta(result) {
+            Some(SessionMetaUpdate::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, turns }) => {
+                assert_eq!(input_tokens, 12000);
+                assert_eq!(output_tokens, 3000);
+                assert_eq!(cache_read_tokens, 8000);
+                assert_eq!(cache_write_tokens, 4000);
+                assert!((cost_usd - 0.0421).abs() < 1e-9);
+                assert_eq!(duration_ms, 52000);
+                assert_eq!(turns, 3);
+            }
+            other => panic!("result 事件应解析出 usage: {other:?}"),
+        }
+        // 无 total_cost_usd → 不更新（usage 列保持 NULL 语义）
+        let no_cost = r#"{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}"#;
+        assert!(parse_stream_meta(no_cost).is_none());
+        // assistant/垃圾行不归元分派
+        assert!(parse_stream_meta(r#"{"type":"assistant"}"#).is_none());
+        assert!(parse_stream_meta("not json").is_none());
     }
 
     #[test]
