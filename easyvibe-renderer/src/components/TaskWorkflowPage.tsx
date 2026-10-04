@@ -339,6 +339,8 @@ export function TaskWorkflowPage({
   const [deciding, setDeciding] = useState<string | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [rejecting, setRejecting] = useState(false)
+  // 2026-10-04：warnings 列表折叠（默认 3 条，防路径墙刷屏）
+  const [showAllWarnings, setShowAllWarnings] = useState(false)
   // 终端跟随滚动（用户上翻时暂停跟随）
   const termRef = useRef<HTMLPreElement | null>(null)
   const [follow, setFollow] = useState(true)
@@ -881,11 +883,23 @@ export function TaskWorkflowPage({
                         </p>
                       ))}
                       {(sel.result?.warnings?.length ?? 0) > 0 && (
-                        <ul className="mt-1 space-y-0.5">
-                          {sel.result!.warnings!.map((w, i) => (
-                            <li key={i} className="text-micro text-amber-600">⚠ {w}</li>
-                          ))}
-                        </ul>
+                        <div className="mt-1">
+                          <ul className="space-y-0.5">
+                            {(showAllWarnings ? sel.result!.warnings! : sel.result!.warnings!.slice(0, 3)).map((w, i) => (
+                              // 2026-10-04 实弹：合约警告内嵌文件路径列表（曾一次刷出 644 条路径墙）——
+                              // 单行钳制两行 + title 悬浮看全文，超 3 条折叠
+                              <li key={i} className="line-clamp-2 break-all text-micro text-amber-600" title={w}>⚠ {w}</li>
+                            ))}
+                          </ul>
+                          {(sel.result!.warnings!.length > 3) && (
+                            <button
+                              onClick={() => setShowAllWarnings((v) => !v)}
+                              className="mt-0.5 text-micro font-semibold text-amber-500 hover:text-amber-600"
+                            >
+                              {showAllWarnings ? '收起' : `展开全部 ${sel.result!.warnings!.length} 条`}
+                            </button>
+                          )}
+                        </div>
                       )}
                       <p className="text-micro text-slate-400">审查报告全文随归档产出；通过后任务锁定，STAR 记忆与操作日志留痕。</p>
                     </div>
