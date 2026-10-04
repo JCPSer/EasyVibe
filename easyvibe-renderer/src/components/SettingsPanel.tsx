@@ -333,42 +333,42 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
     setServices((p) => ({ ...p, [id]: { ...p[id], ...patch } }))
 
   const field =
-    'w-full rounded-md border bg-slate-50 px-2.5 py-1.5 text-[12px] text-slate-700 outline-none transition-colors focus:border-blue-300 focus:bg-white'
+    'w-full rounded-md border bg-slate-50 dark:bg-slate-950/70 px-2.5 py-1.5 text-[12px] text-slate-700 dark:text-slate-200 outline-none transition-colors focus:border-blue-300 focus:bg-white'
 
   const Field = ({
     label, hint, error, children,
   }: { label: string; hint?: string; error?: string; children: React.ReactNode }) => (
     <div>
-      <div className="mb-1 text-cap font-semibold text-slate-500">{label}</div>
+      <div className="mb-1 text-cap font-semibold text-slate-500 dark:text-slate-400">{label}</div>
       {children}
       {error ? (
         <p className="text-micro mt-1 font-medium text-red-500">{error}</p>
       ) : hint ? (
-        <p className="text-micro mt-1 text-slate-300">{hint}</p>
+        <p className="text-micro mt-1 text-slate-300 dark:text-slate-600">{hint}</p>
       ) : null}
     </div>
   )
 
   return (
-    <div className={`${embedded ? 'h-full w-full' : 'anim-drawer-in fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 bg-white`}>
+    <div className={`${embedded ? 'h-full w-full' : 'anim-drawer-in fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900`}>
       {/* 分区导航（macOS 系统设置式左栏） */}
-      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 bg-slate-50/50 p-3">
+      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 p-3">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => setSection(s.id)}
             className={`flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-              section === s.id ? 'bg-white elev-1 text-blue-600' : 'text-slate-500 hover:bg-white/70'
+              section === s.id ? 'bg-white dark:bg-slate-900 elev-1 text-blue-600' : 'text-slate-500 dark:text-slate-400 hover:bg-white/70 dark:bg-slate-900/70'
             }`}
           >
             <s.icon size={14} className="mt-0.5 shrink-0" />
             <span>
-              <span className={`block text-[12px] font-bold ${section === s.id ? 'text-slate-800' : ''}`}>{s.label}</span>
-              <span className="text-micro block text-slate-400">{s.hint}</span>
+              <span className={`block text-[12px] font-bold ${section === s.id ? 'text-slate-800 dark:text-slate-100' : ''}`}>{s.label}</span>
+              <span className="text-micro block text-slate-400 dark:text-slate-500">{s.hint}</span>
             </span>
           </button>
         ))}
-        <div className="mt-auto text-micro px-2.5 leading-4 text-slate-300">
+        <div className="mt-auto text-micro px-2.5 leading-4 text-slate-300 dark:text-slate-600">
           API Key 加密存储
           <br />
           仅本机可解密
@@ -377,43 +377,43 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
 
       {/* 内容区 */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <h2 className="text-[15px] font-bold text-slate-800">{SECTIONS.find((s) => s.id === section)?.label}</h2>
+            <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{SECTIONS.find((s) => s.id === section)?.label}</h2>
             {dirty && (
-              <span className="anim-scale-in flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-micro font-semibold text-amber-600">
+              <span className="anim-scale-in flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-semibold text-amber-600">
                 <i className="h-1 w-1 rounded-full bg-amber-500" /> 未保存
               </span>
             )}
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600">
+          <button onClick={onClose} className="rounded-md p-1 text-slate-400 dark:text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
             <X size={15} />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 pt-20 text-[12px] text-slate-400">
+            <div className="flex items-center justify-center gap-2 pt-20 text-[12px] text-slate-400 dark:text-slate-500">
               <Loader2 size={14} className="animate-spin" /> 加载配置…
             </div>
           ) : section === 'agent' ? (
             /* M1 执行 agent 区（方案 §5.1） */
             <div className="space-y-4">
-              <p className="text-cap text-slate-400">
+              <p className="text-cap text-slate-400 dark:text-slate-500">
                 归纳 / 巡检 / 任务由本地 CLI agent 执行——配置在 spawn 时现读，保存后对下一次执行生效
               </p>
 
               {/* 状态卡：探测结果 + 生效配置 + 测试连接 */}
-              <div className="space-y-2 rounded-md border border-slate-200 bg-white p-4">
+              <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-cap font-semibold text-slate-500">探测结果</span>
+                  <span className="text-cap font-semibold text-slate-500 dark:text-slate-400">探测结果</span>
                   {(agentStatus?.presets ?? []).map((p) => {
                     const det = agentStatus?.detected.find((x) => x.command === p.id)
                     return (
                       <span
                         key={p.id}
                         className={`rounded-full px-2 py-0.5 text-micro font-semibold ${
-                          det ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'
+                          det ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' : 'bg-slate-50 dark:bg-slate-950/70 text-slate-400 dark:text-slate-500'
                         }`}
                         title={det?.path ?? '未在 PATH 与常见安装位找到'}
                       >
@@ -424,12 +424,12 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                   <button
                     onClick={() => void detectAgent()}
                     disabled={agentBusy !== null}
-                    className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 px-2 py-0.5 text-micro font-semibold text-slate-400 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+                    className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro font-semibold text-slate-400 dark:text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
                   >
                     <RotateCcw size={10} className={agentBusy === 'detect' ? 'animate-spin' : ''} /> 重新探测
                   </button>
                 </div>
-                <p className="text-micro leading-4 text-slate-400">
+                <p className="text-micro leading-4 text-slate-400 dark:text-slate-500">
                   生效：<code className="mono">{agentStatus?.effective.command ?? '…'}</code>
                   {agentStatus && <span>（{({ settings: '来自设置', env: '来自环境变量', default: '默认' } as Record<string, string>)[agentStatus.effective.source] ?? agentStatus.effective.source}）</span>}
                   {agentStatus && !agentStatus.effective.found && <span className="font-semibold text-red-500"> · 未找到可执行文件</span>}
@@ -451,7 +451,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                   >
                     {agentBusy === 'test' ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} 测试连接
                   </button>
-                  <span className="text-micro text-slate-300">测试作用于已保存的配置（先保存再测）</span>
+                  <span className="text-micro text-slate-300 dark:text-slate-600">测试作用于已保存的配置（先保存再测）</span>
                 </div>
               </div>
 
@@ -464,13 +464,13 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                       onClick={() => applyPreset(p)}
                       className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-cap font-semibold transition-colors ${
                         agentEdit?.preset === p.id
-                          ? 'border-blue-300 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                          ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                       }`}
                     >
                       {p.label}
                       {p.stability === 'experimental' && (
-                        <span className="rounded-full bg-amber-50 px-1 text-[9px] font-bold text-amber-600" title="无流式，完成后输出全文；参数为初值，可用测试连接验证">
+                        <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1 text-[9px] font-bold text-amber-600" title="无流式，完成后输出全文；参数为初值，可用测试连接验证">
                           实验
                         </span>
                       )}
@@ -519,11 +519,11 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                   {agentBusy === 'save' ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存 agent 配置
                 </button>
                 {agentDirty && (
-                  <button onClick={() => void loadAgent()} className="rounded-md border border-slate-200 px-2.5 py-1.5 text-cap text-slate-400 hover:text-slate-600">
+                  <button onClick={() => void loadAgent()} className="rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-cap text-slate-400 dark:text-slate-500 hover:text-slate-600">
                     放弃
                   </button>
                 )}
-                <span className="ml-auto text-micro text-slate-300">
+                <span className="ml-auto text-micro text-slate-300 dark:text-slate-600">
                   协议：{agentStatus?.effective.type === 'claude' ? 'stream-json 流式' : 'plain 纯文本（完成后输出）'}
                 </span>
               </div>
@@ -531,17 +531,17 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
           ) : section === 'services' ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-cap text-slate-400">配置可复用的 LLM 服务，再绑定到功能槽位</p>
+                <p className="text-cap text-slate-400 dark:text-slate-500">配置可复用的 LLM 服务，再绑定到功能槽位</p>
                 <button
                   onClick={addService}
-                  className="flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-cap font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                  className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-cap font-semibold text-slate-500 dark:text-slate-400 transition-colors hover:border-blue-300 hover:text-blue-600"
                 >
                   <Plus size={11} /> 添加服务
                 </button>
               </div>
               <div className="space-y-3">
                 {Object.values(services).map((s) => (
-                  <div key={s.id} className="lift elev-1 space-y-3 rounded-md border border-slate-200 bg-white p-4">
+                  <div key={s.id} className="lift elev-1 space-y-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
                         <Field label="服务名称" error={errors[`name:${s.id}`]}>
@@ -562,14 +562,14 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                           <button
                             onClick={() => void testService(s.id)}
                             disabled={testingSvc === s.id}
-                            className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-blue-50 hover:text-blue-500 disabled:opacity-40"
+                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-500 disabled:opacity-40"
                             title="测试连接：用当前表单值 ping 服务端点（max_tokens=1）"
                           >
                             {testingSvc === s.id ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
                           </button>
                           <button
                             onClick={() => setConfirmDelete(s.id)}
-                            className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-red-50 hover:text-red-500"
                             title={Object.values(slots).includes(s.id) ? '该服务被槽位绑定，不可删除' : '删除服务'}
                           >
                             <Trash2 size={13} />
@@ -585,7 +585,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                     </Field>
                     <Field label="API Key" error={errors[`apiKey:${s.id}`]}>
                       <div className="relative">
-                        <KeyRound size={12} className="absolute left-2.5 top-2.5 text-slate-300" />
+                        <KeyRound size={12} className="absolute left-2.5 top-2.5 text-slate-300 dark:text-slate-600" />
                         <input
                           className={`${field} mono pl-7 pr-8`}
                           type={showKey[s.id] ? 'text' : 'password'}
@@ -595,7 +595,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                         />
                         <button
                           onClick={() => setShowKey((p) => ({ ...p, [s.id]: !p[s.id] }))}
-                          className="absolute right-2 top-2 rounded p-0.5 text-slate-300 hover:text-slate-500"
+                          className="absolute right-2 top-2 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-slate-500"
                           title={showKey[s.id] ? '隐藏' : '显示'}
                         >
                           {showKey[s.id] ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -607,18 +607,18 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
               </div>
 
               {/* 槽位绑定 */}
-              <div className="rounded-md border border-slate-200 bg-white p-4">
+              <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
                 <div className="mb-3 flex items-center gap-1.5">
-                  <ShieldCheck size={13} className="text-slate-400" />
-                  <span className="text-[13px] font-bold text-slate-700">槽位绑定</span>
-                  <span className="text-micro ml-auto text-slate-300">哪个功能用哪个服务</span>
+                  <ShieldCheck size={13} className="text-slate-400 dark:text-slate-500" />
+                  <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">槽位绑定</span>
+                  <span className="text-micro ml-auto text-slate-300 dark:text-slate-600">哪个功能用哪个服务</span>
                 </div>
                 <div className="space-y-2.5">
                   {SLOTS.map(([slot, label, desc]) => (
                     <div key={slot} className="flex items-center gap-3">
                       <div className="w-24 shrink-0">
-                        <p className="text-[12px] font-semibold text-slate-600">{label}</p>
-                        <p className="text-micro text-slate-300">{desc}</p>
+                        <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">{label}</p>
+                        <p className="text-micro text-slate-300 dark:text-slate-600">{desc}</p>
                       </div>
                       <select
                         className={`${field} flex-1`}
@@ -638,8 +638,8 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
             <HarnessSection about={about} onVersionChange={(v) => setAbout((p) => (p ? { ...p, harness: v } : p))} />
           ) : section === 'advanced' ? (
             <div className="space-y-4">
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="mb-3 text-[13px] font-bold text-slate-700">上下文与输出</div>
+              <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                <div className="mb-3 text-[13px] font-bold text-slate-700 dark:text-slate-200">上下文与输出</div>
                 <div className="space-y-3.5">
                   <Field label="上下文预算（token）" error={errors['contextBudget']} hint="会话占满预算的 80% 时自动压缩摘要（默认 256K）">
                     <input
@@ -664,11 +664,11 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                 </div>
               </div>
 
-              <div className="rounded-md border border-slate-200 bg-white p-4">
+              <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
                 <div className="mb-1 flex items-center justify-between">
                   <div>
-                    <div className="text-[13px] font-bold text-slate-700">定时巡检</div>
-                    <p className="text-cap mt-0.5 text-slate-400">按间隔自动体检仓库健康度（消耗 LLM token，无活动会话才触发）</p>
+                    <div className="text-[13px] font-bold text-slate-700 dark:text-slate-200">定时巡检</div>
+                    <p className="text-cap mt-0.5 text-slate-400 dark:text-slate-500">按间隔自动体检仓库健康度（消耗 LLM token，无活动会话才触发）</p>
                   </div>
                   <Toggle checked={adv.autoPatrolEnabled} onChange={(v) => setAdv((p) => ({ ...p, autoPatrolEnabled: v }))} />
                 </div>
@@ -694,12 +694,12 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                 { label: 'Harness 版本', value: about?.harness ?? '加载中…' },
                 { label: '数据存储', value: '本机 SQLite（会话/任务/巡检历史）' },
               ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-3">
-                  <span className="text-[12px] text-slate-500">{row.label}</span>
-                  <span className="mono text-cap font-semibold text-slate-700">{row.value}</span>
+                <div key={row.label} className="flex items-center justify-between rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+                  <span className="text-[12px] text-slate-500 dark:text-slate-400">{row.label}</span>
+                  <span className="mono text-cap font-semibold text-slate-700 dark:text-slate-200">{row.value}</span>
                 </div>
               ))}
-              <p className="text-micro px-1 leading-4 text-slate-300">
+              <p className="text-micro px-1 leading-4 text-slate-300 dark:text-slate-600">
                 地图与产物保存在各仓库的 .easyvibe/ 目录；全部数据不出本机。
               </p>
             </div>
@@ -707,17 +707,17 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
         </div>
 
         {/* 保存栏（脏状态驱动） */}
-        <div className="flex items-center gap-2 border-t border-slate-100 px-5 py-3">
+        <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 px-5 py-3">
           {dirty && (
             <button
               onClick={load}
               disabled={saving}
-              className="flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1.5 text-cap font-semibold text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-cap font-semibold text-slate-500 dark:text-slate-400 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
             >
               <RotateCcw size={11} /> 放弃更改
             </button>
           )}
-          <span className="text-micro ml-auto text-slate-300">{backendRepo ? '' : '需要本地后端在线'}</span>
+          <span className="text-micro ml-auto text-slate-300 dark:text-slate-600">{backendRepo ? '' : '需要本地后端在线'}</span>
           <button
             onClick={save}
             disabled={saving || loading || !dirty || !backendRepo}
@@ -820,27 +820,27 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
       {/* 板块头（文生图设计 v1）：标题 + 副文案 + 当前版本徽章 */}
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-[15px] font-bold text-slate-800">Harness 工作流护栏</h3>
-          <p className="text-cap mt-0.5 text-slate-400">管理您的工作流护栏规则与备份——编辑即时生效，可随时回滚</p>
+          <h3 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Harness 工作流护栏</h3>
+          <p className="text-cap mt-0.5 text-slate-400 dark:text-slate-500">管理您的工作流护栏规则与备份——编辑即时生效，可随时回滚</p>
         </div>
-        <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-micro font-bold text-blue-600">
+        <span className="shrink-0 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-micro font-bold text-blue-600">
           当前版本 v{about?.harness ?? '…'}
         </span>
       </div>
 
       {/* 规则文件编辑：保存即热装载（chat 与任务执行立即生效，无需重启）。
           编辑器用深色代码主题（文生图设计 v1），与浅色的表单区形成"代码即资产"的视觉分层 */}
-      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 px-3 pt-2">
-          {files === null && <p className="text-cap py-1.5 text-slate-400">加载中…</p>}
+      <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 dark:border-slate-800 px-3 pt-2">
+          {files === null && <p className="text-cap py-1.5 text-slate-400 dark:text-slate-500">加载中…</p>}
           {files?.map((f) => (
             <button
               key={f}
               onClick={() => openFile(f)}
               className={`mono rounded-t-md border-b-2 px-2.5 py-1.5 text-[10.5px] transition-colors ${
                 editing === f
-                  ? 'border-blue-500 bg-slate-50 font-semibold text-blue-700'
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
+                  ? 'border-blue-500 bg-slate-50 dark:bg-slate-950/70 font-semibold text-blue-700'
+                  : 'border-transparent text-slate-400 dark:text-slate-500 hover:text-slate-600'
               }`}
             >
               {f}
@@ -856,9 +856,12 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
               spellCheck={false}
               className="mono select-text w-full resize-y bg-slate-900 p-3 text-[11px] leading-5 text-slate-200 outline-none transition-colors focus:ring-2 focus:ring-blue-500/30 focus:ring-inset"
             />
-            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/60 px-3 py-2">
-              <p className="text-micro text-slate-300">
+            <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-2">
+              <p className="text-micro text-slate-300 dark:text-slate-600">
                 {content === loaded ? '未修改' : '● 有未保存修改'} · 保存后 chat 与任务执行立即生效；可用备份恢复回滚
+              </p>
+              <p className="mt-0.5 flex items-start gap-1 text-micro text-amber-500">
+                ⚠ 产物输出目录（.easyvibe/development_docs/）被任务流水线的归档/评审卡扫描依赖——改了它 agent 会照新路径写，但产物将在流水线中"失联"（执行本身不受影响）
               </p>
               <button
                 onClick={saveFile}
@@ -870,7 +873,7 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
             </div>
           </div>
         ) : (
-          <p className="px-3 py-6 text-center text-cap text-slate-300">点击上方文件名开始编辑</p>
+          <p className="px-3 py-6 text-center text-cap text-slate-300 dark:text-slate-600">点击上方文件名开始编辑</p>
         )}
       </div>
 
@@ -897,7 +900,7 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
             <button
               onClick={() => setConfirmReset(true)}
               onMouseLeave={() => setConfirmReset(false)}
-              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100"
+              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100"
             >
               <RotateCcw size={11} /> 恢复默认
             </button>
@@ -905,16 +908,16 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
         </div>
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-[13px] font-bold text-slate-700">历史备份</div>
+          <div className="text-[13px] font-bold text-slate-700 dark:text-slate-200">历史备份</div>
         </div>
-        {backups === null && <p className="text-cap py-2 text-slate-400">加载中…</p>}
-        {backups?.length === 0 && <p className="text-cap py-2 text-slate-400">暂无备份（恢复默认后此处出现旧版本）</p>}
+        {backups === null && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">加载中…</p>}
+        {backups?.length === 0 && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">暂无备份（恢复默认后此处出现旧版本）</p>}
         {backups?.map((b) => (
           <div key={b.name} className="flex items-center gap-2 border-t border-slate-50 py-2 first:border-0">
-            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-500" title={b.name}>{b.name}</span>
-            <span className="tnum shrink-0 text-micro text-slate-300">{new Date(b.mtimeMs).toLocaleString()}</span>
+            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-500 dark:text-slate-400" title={b.name}>{b.name}</span>
+            <span className="tnum shrink-0 text-micro text-slate-300 dark:text-slate-600">{new Date(b.mtimeMs).toLocaleString()}</span>
             {confirmRestore === b.name ? (
               <button
                 onClick={() => restore(b.name)}
@@ -927,14 +930,14 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
               <button
                 onClick={() => setConfirmRestore(b.name)}
                 onMouseLeave={() => setConfirmRestore(null)}
-                className="shrink-0 rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+                className="shrink-0 rounded border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
               >
                 恢复此版本
               </button>
             )}
           </div>
         ))}
-        <p className="text-micro mt-2 leading-4 text-slate-300">恢复前当前层会自动留档为 harness.pre-restore-*，操作可反悔。</p>
+        <p className="text-micro mt-2 leading-4 text-slate-300 dark:text-slate-600">恢复前当前层会自动留档为 harness.pre-restore-*，操作可反悔。</p>
       </div>
     </div>
   )
@@ -949,7 +952,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150 ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}
     >
       <i
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white elev-1 transition-all duration-150 ${checked ? 'left-[18px]' : 'left-0.5'}`}
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white dark:bg-slate-900 elev-1 transition-all duration-150 ${checked ? 'left-[18px]' : 'left-0.5'}`}
       />
     </button>
   )

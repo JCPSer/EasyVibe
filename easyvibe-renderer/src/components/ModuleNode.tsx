@@ -47,7 +47,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
 
   return (
     <div
-      className="lift rounded-xl border bg-white shadow-sm transition-shadow"
+      className="lift rounded-xl border bg-white dark:bg-slate-900 shadow-sm transition-shadow"
       style={{
         width: NODE_W,
         height: NODE_H,
@@ -60,10 +60,10 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
       {spreadHandles(data.outCount, Position.Bottom, 's')}
 
       <div className="flex items-start gap-2.5">
-        <FileCode2 size={18} className="mt-0.5 shrink-0 text-slate-400" />
+        <FileCode2 size={18} className="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold leading-5 text-slate-800">{mod.name}</div>
-          <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-500">{mod.responsibility}</div>
+          <div className="truncate text-[13px] font-semibold leading-5 text-slate-800 dark:text-slate-100">{mod.name}</div>
+          <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-500 dark:text-slate-400">{mod.responsibility}</div>
         </div>
         {/* 健康状态环 */}
         <div className="relative shrink-0" title={`${healthLabel(mod.health.score)} · ${mod.health.score}`}>
@@ -94,7 +94,7 @@ export const ModuleNode = memo(function ModuleNode({ data, selected }: NodeProps
           {mod.health.decay_flags.slice(0, 3).map((f) => (
             <span
               key={f}
-              className="rounded-full border border-red-200 bg-red-50 px-1.5 py-px text-micro leading-4 text-red-600"
+              className="rounded-full border border-red-200 bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-micro leading-4 text-red-600"
             >
               {FLAG_LABEL[f] ?? f}
             </span>

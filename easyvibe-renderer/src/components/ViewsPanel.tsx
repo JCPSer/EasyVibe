@@ -120,13 +120,13 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   }
 
   if (!backendRepo) {
-    return <p className="py-8 text-center text-[12px] text-slate-400">需要本地后端在线</p>
+    return <p className="py-8 text-center text-[12px] text-slate-400 dark:text-slate-500">需要本地后端在线</p>
   }
   if (error) {
     return (
       <div className="py-8 text-center">
         <p className="text-[12px] text-red-500">{error}</p>
-        <button onClick={load} className="mt-2 rounded-lg border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:bg-slate-50">
+        <button onClick={load} className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1 text-[11px] text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70">
           重试
         </button>
       </div>
@@ -134,26 +134,26 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   }
   if (views === null) {
     return (
-      <p className="flex items-center justify-center gap-2 py-8 text-[12px] text-slate-400">
+      <p className="flex items-center justify-center gap-2 py-8 text-[12px] text-slate-400 dark:text-slate-500">
         <Loader2 size={13} className="animate-spin" /> 加载视图…
       </p>
     )
   }
   if (views.length === 0) {
     return (
-      <p className="py-8 text-center text-[12px] leading-5 text-slate-400">
+      <p className="py-8 text-center text-[12px] leading-5 text-slate-400 dark:text-slate-500">
         还没有保存的视图。
         <br />
-        在<span className="text-slate-500">对话</span>页签提问后，点回答下方的
+        在<span className="text-slate-500 dark:text-slate-400">对话</span>页签提问后，点回答下方的
         <br />
-        <span className="text-slate-500">"存为视图"</span>即可创建可复用的模块集合。
+        <span className="text-slate-500 dark:text-slate-400">"存为视图"</span>即可创建可复用的模块集合。
       </p>
     )
   }
 
   return (
     <div className="space-y-2.5">
-      <p className="text-cap leading-4 text-slate-400">
+      <p className="text-cap leading-4 text-slate-400 dark:text-slate-500">
         共 {views.length} 个视图 · 引用式存储（.easyvibe/views/，随仓库走）
       </p>
       {views.map((v) => {
@@ -161,7 +161,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
         const note = v.view.annotations?.find((a) => a.note)?.note
         const mermaid = v.view.annotations?.find((a) => a.type === 'mermaid' && a.content)?.content
         return (
-          <div key={v.slug} className="rounded-lg border border-slate-200 p-3">
+          <div key={v.slug} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
             <div className="flex items-center gap-1.5">
               <Bookmark size={11} className="shrink-0 text-emerald-500" />
               {renamingSlug === v.slug ? (
@@ -174,40 +174,40 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                       if (e.key === 'Enter') rename(v.slug)
                       if (e.key === 'Escape') setRenamingSlug(null)
                     }}
-                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white px-1.5 py-px text-[12px] outline-none focus:border-blue-400"
+                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white dark:bg-slate-900 px-1.5 py-px text-[12px] outline-none focus:border-blue-400"
                   />
                   <button onClick={() => rename(v.slug)} className="shrink-0 rounded bg-blue-600 p-0.5 text-white" title="保存新名称">
                     <Check size={10} />
                   </button>
-                  <button onClick={() => setRenamingSlug(null)} className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600" title="取消">
+                  <button onClick={() => setRenamingSlug(null)} className="shrink-0 rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600" title="取消">
                     <span className="text-[10px]">✕</span>
                   </button>
                 </span>
               ) : (
-                <span className="truncate text-[12px] font-semibold text-slate-800">{v.name}</span>
+                <span className="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">{v.name}</span>
               )}
-              <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-micro text-slate-400">
+              <span className="ml-auto shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-px text-micro text-slate-400 dark:text-slate-500">
                 {v.nodes === 0 && v.view.annotations?.some((a) => a.type === 'mermaid') ? '纯图视图' : `${v.nodes} 个模块`}
               </span>
             </div>
-            {note && <p className="mt-1 line-clamp-2 text-micro leading-4 text-slate-400">{note}</p>}
+            {note && <p className="mt-1 line-clamp-2 text-micro leading-4 text-slate-400 dark:text-slate-500">{note}</p>}
             {moduleIds.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {moduleIds.slice(0, 6).map((id) => (
-                  <span key={id} className="rounded-full bg-slate-50 px-1.5 py-px font-mono text-micro text-slate-500">
+                  <span key={id} className="rounded-full bg-slate-50 dark:bg-slate-950/70 px-1.5 py-px font-mono text-micro text-slate-500 dark:text-slate-400">
                     {id}
                   </span>
                 ))}
                 {moduleIds.length > 6 && (
-                  <span className="rounded-full bg-slate-50 px-1.5 py-px text-micro text-slate-400">
+                  <span className="rounded-full bg-slate-50 dark:bg-slate-950/70 px-1.5 py-px text-micro text-slate-400 dark:text-slate-500">
                     +{moduleIds.length - 6}
                   </span>
                 )}
               </div>
             )}
             {mermaid && (
-              <details className="mt-1.5 rounded-md border border-slate-100 bg-white p-1.5">
-                <summary className="cursor-pointer text-micro font-semibold text-slate-500 hover:text-slate-700">
+              <details className="mt-1.5 rounded-md border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-1.5">
+                <summary className="cursor-pointer text-micro font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700">
                   附：对话生成的流程图
                 </summary>
                 <div className="mt-1 max-h-72 overflow-auto">
@@ -215,7 +215,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                 </div>
                 <button
                   onClick={() => setZoomed({ name: v.name, content: mermaid })}
-                  className="mt-1 rounded-full border border-slate-200 px-2 py-0.5 text-micro text-slate-500 hover:bg-slate-50"
+                  className="mt-1 rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
                 >
                   放大查看
                 </button>
@@ -233,7 +233,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
               </button>
               <button
                 onClick={() => download(v)}
-                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-500 hover:bg-slate-50"
+                className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
                 title="下载视图文件（含流程图，资产可外带）"
               >
                 <Download size={10} />
@@ -243,7 +243,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                   setRenamingSlug(renamingSlug === v.slug ? null : v.slug)
                   setRenameVal(v.name)
                 }}
-                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+                className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-blue-600"
                 title="重命名视图"
               >
                 <Pencil size={10} />
@@ -260,7 +260,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                   </button>
                   <button
                     onClick={() => setConfirming(null)}
-                    className="rounded-lg px-2 py-1 text-cap text-slate-400 hover:text-slate-600"
+                    className="rounded-lg px-2 py-1 text-cap text-slate-400 dark:text-slate-500 hover:text-slate-600"
                   >
                     取消
                   </button>
@@ -268,14 +268,14 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
               ) : (
                 <button
                   onClick={() => setConfirming(v.slug)}
-                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-cap text-slate-500 hover:bg-slate-50 hover:text-red-600"
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-cap text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-red-600"
                   title="删除该视图文件"
                 >
                   <Trash2 size={10} />
                   删除
                 </button>
               )}
-              <span className="ml-auto text-micro text-slate-300">{v.createdAt?.slice(0, 10)}</span>
+              <span className="ml-auto text-micro text-slate-300 dark:text-slate-600">{v.createdAt?.slice(0, 10)}</span>
             </div>
           </div>
         )
@@ -283,10 +283,10 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
       {/* 深挖#B/E：流程图大图查看——340px 卡片里字小看不清，放大到全屏 */}
       {zoomed && (
         <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-6" onClick={() => setZoomed(null)}>
-          <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-white dark:bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[13px] font-bold text-slate-800">{zoomed.name}</span>
-              <button onClick={() => setZoomed(null)} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-500 hover:bg-slate-200">
+              <span className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{zoomed.name}</span>
+              <button onClick={() => setZoomed(null)} className="rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-[11px] text-slate-500 dark:text-slate-400 hover:bg-slate-200">
                 关闭
               </button>
             </div>

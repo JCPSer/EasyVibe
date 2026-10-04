@@ -37,10 +37,10 @@ interface RepoDrift {
 }
 
 const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
-  fresh: { color: '#10b981', bg: 'bg-emerald-50', label: '新鲜' },
-  drifting: { color: '#f59e0b', bg: 'bg-amber-50', label: '漂移中' },
-  stale: { color: '#ef4444', bg: 'bg-red-50', label: '已过期' },
-  unknown: { color: '#94a3b8', bg: 'bg-slate-50', label: '未知' },
+  fresh: { color: '#10b981', bg: 'bg-emerald-50 dark:bg-emerald-950/40', label: '新鲜' },
+  drifting: { color: '#f59e0b', bg: 'bg-amber-50 dark:bg-amber-950/40', label: '漂移中' },
+  stale: { color: '#ef4444', bg: 'bg-red-50 dark:bg-red-950/40', label: '已过期' },
+  unknown: { color: '#94a3b8', bg: 'bg-slate-50 dark:bg-slate-950/70', label: '未知' },
 }
 
 /** 漂移进度：已漂移天数占 7 天保鲜窗的比例（fresh=0%，超过 7 天=100%） */
@@ -147,15 +147,15 @@ export function DriftPage() {
     <div className="h-full overflow-y-auto p-5">
       <div className="mb-4 flex items-start justify-between">
         <div>
-          <h2 className="text-[15px] font-bold text-slate-800">漂移洞察</h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">漂移洞察</h2>
+          <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
             持续跟踪代码仓库与归纳状态之间的漂移，帮助团队及时发现并处理落后风险。
           </p>
         </div>
         <button
           onClick={load}
           disabled={loading}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
         >
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> 刷新
         </button>
@@ -164,16 +164,16 @@ export function DriftPage() {
       {/* KPI 行 */}
       <div className="mb-4 grid grid-cols-3 gap-3">
         {[
-          { icon: <Coins size={16} className="text-red-500" />, chip: 'bg-red-50', label: '需重归纳', value: kpis.needReinduce, unit: '仓库' },
-          { icon: <Clock3 size={16} className="text-amber-500" />, chip: 'bg-amber-50', label: '平均落后', value: kpis.avgCommits, unit: '提交' },
-          { icon: <RefreshCw size={16} className="text-emerald-500" />, chip: 'bg-emerald-50', label: '最近巡检', value: kpis.latestPatrol ? relTime(kpis.latestPatrol, now) : null, unit: '' },
+          { icon: <Coins size={16} className="text-red-500" />, chip: 'bg-red-50 dark:bg-red-950/40', label: '需重归纳', value: kpis.needReinduce, unit: '仓库' },
+          { icon: <Clock3 size={16} className="text-amber-500" />, chip: 'bg-amber-50 dark:bg-amber-950/40', label: '平均落后', value: kpis.avgCommits, unit: '提交' },
+          { icon: <RefreshCw size={16} className="text-emerald-500" />, chip: 'bg-emerald-50 dark:bg-emerald-950/40', label: '最近巡检', value: kpis.latestPatrol ? relTime(kpis.latestPatrol, now) : null, unit: '' },
         ].map((k) => (
-          <div key={k.label} className="lift flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div key={k.label} className="lift flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
             <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${k.chip}`}>{k.icon}</div>
             <div>
-              <p className="text-cap text-slate-400">{k.label}</p>
-              <p className="tnum text-[17px] font-bold leading-5 text-slate-800">
-                {k.value ?? '—'} {k.unit && <span className="text-cap font-normal text-slate-400">{k.unit}</span>}
+              <p className="text-cap text-slate-400 dark:text-slate-500">{k.label}</p>
+              <p className="tnum text-[17px] font-bold leading-5 text-slate-800 dark:text-slate-100">
+                {k.value ?? '—'} {k.unit && <span className="text-cap font-normal text-slate-400 dark:text-slate-500">{k.unit}</span>}
               </p>
             </div>
           </div>
@@ -181,13 +181,13 @@ export function DriftPage() {
       </div>
 
       {/* 仓库漂移排名 */}
-      <div ref={tableRef} className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-4 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700">仓库漂移排名</span>
+      <div ref={tableRef} className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="border-b border-slate-100 dark:border-slate-800 px-4 py-2.5">
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">仓库漂移排名</span>
         </div>
         <table className="w-full text-left">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold text-slate-400">
+            <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
               <th className="w-14 px-4 py-2">排名</th>
               <th className="px-3 py-2">仓库</th>
               <th className="px-3 py-2">漂移进度</th>
@@ -199,22 +199,22 @@ export function DriftPage() {
               const meta = STATUS_META[r.freshness?.status ?? 'unknown']
               const pct = r.freshness ? driftPercent(r.freshness, now) : null
               return (
-                <tr key={r.repo.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                <tr key={r.repo.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60 dark:bg-slate-900/60">
                   <td className="px-4 py-3">
                     <span
                       className={`tnum inline-flex h-5 w-5 items-center justify-center rounded-md text-cap font-bold ${
-                        i < 3 ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-400'
+                        i < 3 ? 'bg-red-50 dark:bg-red-950/40 text-red-500' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                       }`}
                     >
                       {i + 1}
                     </span>
                   </td>
                   <td className="px-3 py-3">
-                    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700">
+                    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-700 dark:text-slate-200">
                       {r.repo.name}
                       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
                     </p>
-                    <p className="tnum mt-0.5 text-cap text-slate-400">
+                    <p className="tnum mt-0.5 text-cap text-slate-400 dark:text-slate-500">
                       {typeof r.freshness?.commitsSinceMap === 'number'
                         ? `落后 ${r.freshness.commitsSinceMap} 提交`
                         : '落后提交数未知'}
@@ -223,7 +223,7 @@ export function DriftPage() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                         <div
                           className="h-full rounded-full transition-all duration-500"
                           style={{ width: `${pct ?? 0}%`, backgroundColor: meta.color }}
@@ -238,7 +238,7 @@ export function DriftPage() {
                     <button
                       onClick={() => reinduce(r.repo.id)}
                       disabled={r.reinducing}
-                      className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                      className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                     >
                       {r.reinducing ? '归纳中…' : '重新归纳'}
                     </button>
@@ -248,7 +248,7 @@ export function DriftPage() {
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-[12px] text-slate-400">
+                <td colSpan={4} className="px-4 py-10 text-center text-[12px] text-slate-400 dark:text-slate-500">
                   {loadError
                     ? '后端不在线——请确认 EasyVibe 服务已启动后点「刷新」重试。'
                     : rows === null
@@ -263,7 +263,7 @@ export function DriftPage() {
 
       {/* 漂移横幅 */}
       {kpis.needReinduce > 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-3">
           <AlertTriangle size={16} className="shrink-0 text-amber-500" />
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-bold text-amber-700">检测到仓库漂移</p>
@@ -274,7 +274,7 @@ export function DriftPage() {
           {/* 重审 P2：横幅"查看详情"此前是 span 假链接（点了没反应）——真按钮，滚动到上方排名表 */}
           <button
             onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            className="shrink-0 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100"
+            className="shrink-0 rounded-lg border border-amber-200 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100"
           >
             查看详情 ↑
           </button>

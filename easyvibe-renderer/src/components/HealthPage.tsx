@@ -61,9 +61,9 @@ function Ring({ score, size = 44 }: { score: number; size?: number }) {
 }
 
 function Delta({ now, prev }: { now: number; prev: number | null }) {
-  if (prev === null) return <p className="mt-0.5 text-micro text-slate-300">无上次记录</p>
+  if (prev === null) return <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">无上次记录</p>
   const d = now - prev
-  if (d === 0) return <p className="mt-0.5 flex items-center gap-0.5 text-micro text-slate-400">较上次 +0</p>
+  if (d === 0) return <p className="mt-0.5 flex items-center gap-0.5 text-micro text-slate-400 dark:text-slate-500">较上次 +0</p>
   const up = d > 0
   return (
     <p className={`mt-0.5 flex items-center gap-0.5 text-micro ${up ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -168,7 +168,7 @@ export function HealthPage({
 
   if (!backendRepo) {
     return (
-      <div className="flex h-full items-center justify-center text-[12px] text-slate-400">先在左侧选择一个项目。</div>
+      <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
     )
   }
 
@@ -178,17 +178,17 @@ export function HealthPage({
     <div className="h-full overflow-y-auto p-5">
       <div className="mb-4 flex items-start justify-between">
         <div>
-          <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800">
+          <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800 dark:text-slate-100">
             <HeartPulse size={15} className="text-red-400" /> 健康看板
           </h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">
+          <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
             这个仓库的体检报告：架构与模块健康分的趋势、最差模块排行、每次巡检的记录与结论。
           </p>
         </div>
         <button
           onClick={startPatrol}
           disabled={starting}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
         >
           {starting ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />} 发起巡检
         </button>
@@ -196,53 +196,53 @@ export function HealthPage({
 
       {/* KPI 行 */}
       <div className="mb-4 grid grid-cols-4 gap-3">
-        <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-cap text-slate-400">架构健康</p>
+        <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+          <p className="text-cap text-slate-400 dark:text-slate-500">架构健康</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6" style={{ color: archScore !== null ? healthColor(archScore) : '#94a3b8' }}>
-            {archScore ?? '—'} <span className="text-cap font-normal text-slate-300">/ 100</span>
+            {archScore ?? '—'} <span className="text-cap font-normal text-slate-300 dark:text-slate-600">/ 100</span>
           </p>
           {archScore !== null && <Delta now={archScore} prev={prev?.archScore ?? null} />}
           <div className="absolute right-3 top-1/2 -translate-y-1/2">{archScore !== null && <Ring score={archScore} />}</div>
         </div>
-        <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-cap text-slate-400">模块平均</p>
+        <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+          <p className="text-cap text-slate-400 dark:text-slate-500">模块平均</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6" style={{ color: healthColor(moduleAvg ?? mapModuleAvg ?? 0) }}>
-            {moduleAvg ?? mapModuleAvg ?? '—'} <span className="text-cap font-normal text-slate-300">/ 100</span>
+            {moduleAvg ?? mapModuleAvg ?? '—'} <span className="text-cap font-normal text-slate-300 dark:text-slate-600">/ 100</span>
           </p>
           {moduleAvg !== null && <Delta now={moduleAvg} prev={prev && prev.moduleCount > 0 ? prev.moduleAvg : null} />}
-          {moduleAvg === null && <p className="mt-0.5 text-micro text-slate-300">{mapModuleAvg !== null ? '当前地图口径' : '暂无数据'}</p>}
+          {moduleAvg === null && <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">{mapModuleAvg !== null ? '当前地图口径' : '暂无数据'}</p>}
           <div className="absolute right-3 top-1/2 -translate-y-1/2">
             {(moduleAvg ?? mapModuleAvg) !== null && <Ring score={(moduleAvg ?? mapModuleAvg)!} />}
           </div>
         </div>
-        <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-cap text-slate-400">逆向依赖</p>
+        <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+          <p className="text-cap text-slate-400 dark:text-slate-500">逆向依赖</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-red-500">{reverseDeps ?? '—'}</p>
-          <p className="mt-0.5 text-micro text-slate-300">当前地图口径</p>
+          <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">当前地图口径</p>
         </div>
-        <div className="lift relative rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-cap text-slate-400">覆盖率</p>
+        <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+          <p className="text-cap text-slate-400 dark:text-slate-500">覆盖率</p>
           <p className="tnum mt-1 text-[22px] font-bold leading-6 text-emerald-500">
             {coverage !== null ? `${Math.round(coverage * 100)}` : '—'}
             <span className="text-[12px]"> %</span>
           </p>
-          <p className="mt-0.5 text-micro text-slate-300">当前地图口径</p>
+          <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">当前地图口径</p>
         </div>
       </div>
 
       {!hasAnyRun && !loading && (
-        <div className="mb-4 rounded-xl border border-dashed border-slate-200 bg-white/60 px-4 py-8 text-center">
-          <p className="text-[12px] font-semibold text-slate-500">还没有任何巡检记录</p>
-          <p className="mt-1 text-[11px] text-slate-400">发起一次巡检，让 EasyVibe 给这个仓库做一次全面体检。</p>
+        <div className="mb-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-white/60 px-4 py-8 text-center">
+          <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">还没有任何巡检记录</p>
+          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">发起一次巡检，让 EasyVibe 给这个仓库做一次全面体检。</p>
         </div>
       )}
 
       <div className="grid grid-cols-3 gap-3">
         {/* 趋势图 */}
-        <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-4">
+        <div className="col-span-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[13px] font-bold text-slate-700">架构健康趋势（近 {Math.min(10, trend.length)} 次巡检）</span>
-            <div className="flex items-center gap-3 text-micro text-slate-400">
+            <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">架构健康趋势（近 {Math.min(10, trend.length)} 次巡检）</span>
+            <div className="flex items-center gap-3 text-micro text-slate-400 dark:text-slate-500">
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-500" /> 架构级</span>
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-slate-300" /> 模块平均</span>
             </div>
@@ -250,20 +250,20 @@ export function HealthPage({
           {trend.length >= 2 ? (
             <TrendChart runs={trend} hover={hover} setHover={setHover} />
           ) : (
-            <div className="flex h-[180px] items-center justify-center text-[11px] text-slate-300">
+            <div className="flex h-[180px] items-center justify-center text-[11px] text-slate-300 dark:text-slate-600">
               至少两次成功巡检后绘制趋势
             </div>
           )}
         </div>
 
         {/* 最差模块排行 */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <p className="mb-2 text-[13px] font-bold text-slate-700">模块健康排行</p>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+          <p className="mb-2 text-[13px] font-bold text-slate-700 dark:text-slate-200">模块健康排行</p>
           <div className="space-y-1">
             {(data?.latestModules ?? []).slice(0, 10).map((m, i) => (
-              <div key={m.moduleId} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                <span className="tnum w-4 text-micro text-slate-300">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-slate-600">{m.name ?? m.moduleId}</span>
+              <div key={m.moduleId} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/70">
+                <span className="tnum w-4 text-micro text-slate-300 dark:text-slate-600">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-slate-600 dark:text-slate-300">{m.name ?? m.moduleId}</span>
                 {/* 把关台范式：健康问题就地派单（buildModuleTask 带 concern 描述与验收标准） */}
                 {map && (
                   <button
@@ -286,26 +286,26 @@ export function HealthPage({
               </div>
             ))}
             {(data?.latestModules.length ?? 0) === 0 && (
-              <p className="py-6 text-center text-[11px] text-slate-300">暂无模块巡检明细</p>
+              <p className="py-6 text-center text-[11px] text-slate-300 dark:text-slate-600">暂无模块巡检明细</p>
             )}
           </div>
         </div>
       </div>
 
       {/* 巡检记录 */}
-      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700">巡检记录</span>
+      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-2.5">
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">巡检记录</span>
           {/* 重审 P1：历史只增不减——保留最近 N 次的显式清理（running 永不删，后端保证） */}
           {hasAnyRun && (
             <span className="ml-auto flex items-center gap-1">
               {confirmPrune ? (
                 <>
-                  <span className="text-[10px] text-slate-400">保留最近</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">保留最近</span>
                   <select
                     value={pruneKeep}
                     onChange={(e) => setPruneKeep(Number(e.target.value))}
-                    className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-600 outline-none"
+                    className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1 py-0.5 text-[10px] text-slate-600 dark:text-slate-300 outline-none"
                   >
                     {[5, 10, 20, 50].map((n) => (
                       <option key={n} value={n}>{n} 次</option>
@@ -318,14 +318,14 @@ export function HealthPage({
                   >
                     {pruning ? '清理中…' : '确认清理'}
                   </button>
-                  <button onClick={() => setConfirmPrune(false)} className="rounded p-0.5 text-slate-400 hover:text-slate-600" title="取消">
+                  <button onClick={() => setConfirmPrune(false)} className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600" title="取消">
                     <X size={11} />
                   </button>
                 </>
               ) : (
                 <button
                   onClick={() => setConfirmPrune(true)}
-                  className="flex items-center gap-0.5 rounded-md border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400 hover:border-red-300 hover:text-red-500"
+                  className="flex items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 hover:border-red-300 hover:text-red-500"
                   title="清理历史巡检记录（只保留最近 N 次，进行中的巡检不受影响）"
                 >
                   <Trash2 size={10} /> 清理历史
@@ -336,7 +336,7 @@ export function HealthPage({
         </div>
         <table className="w-full text-left">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold text-slate-400">
+            <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
               <th className="px-4 py-2">时间</th>
               <th className="px-3 py-2">模型</th>
               <th className="px-3 py-2 text-right">架构分</th>
@@ -347,22 +347,22 @@ export function HealthPage({
           </thead>
           <tbody>
             {(data?.runs ?? []).map((r) => (
-              <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                <td className="tnum px-4 py-2.5 text-[12px] text-slate-600">{absTime(r.startedAt)}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-500">{r.model ?? '—'}</td>
+              <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60 dark:bg-slate-900/60">
+                <td className="tnum px-4 py-2.5 text-[12px] text-slate-600 dark:text-slate-300">{absTime(r.startedAt)}</td>
+                <td className="px-3 py-2.5 text-[12px] text-slate-500 dark:text-slate-400">{r.model ?? '—'}</td>
                 <td className="tnum px-3 py-2.5 text-right text-[12px] font-semibold" style={{ color: r.archScore !== null ? healthColor(r.archScore) : '#94a3b8' }}>
                   {r.archScore ?? '—'}
                 </td>
-                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-600">{r.moduleCount > 0 ? r.moduleAvg : '—'}</td>
-                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-400">{r.moduleCount > 0 ? r.moduleCount : '—'}</td>
+                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-600 dark:text-slate-300">{r.moduleCount > 0 ? r.moduleAvg : '—'}</td>
+                <td className="tnum px-3 py-2.5 text-right text-[12px] text-slate-400 dark:text-slate-500">{r.moduleCount > 0 ? r.moduleCount : '—'}</td>
                 <td className="px-3 py-2.5">
                   <span
                     className={`rounded-full px-1.5 py-px text-micro font-semibold ${
                       r.status === 'succeeded'
-                        ? 'bg-emerald-50 text-emerald-600'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'
                         : r.status === 'failed'
-                          ? 'bg-red-50 text-red-500'
-                          : 'bg-amber-50 text-amber-600'
+                          ? 'bg-red-50 dark:bg-red-950/40 text-red-500'
+                          : 'bg-amber-50 dark:bg-amber-950/40 text-amber-600'
                     }`}
                   >
                     {r.status === 'succeeded' ? '成功' : r.status === 'failed' ? '失败' : '运行中'}
@@ -372,7 +372,7 @@ export function HealthPage({
             ))}
             {!hasAnyRun && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[12px] text-slate-300">{loading ? '加载中…' : '暂无巡检记录'}</td>
+                <td colSpan={6} className="px-4 py-8 text-center text-[12px] text-slate-300 dark:text-slate-600">{loading ? '加载中…' : '暂无巡检记录'}</td>
               </tr>
             )}
           </tbody>
@@ -448,12 +448,12 @@ function TrendChart({
       </svg>
       {h && (
         <div
-          className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-micro shadow-lg"
+          className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-2.5 py-1.5 text-micro shadow-lg"
           style={{ left: `${(x(hover!) / W) * 100}%`, top: 0, transform: `translateX(${hover! > runs.length / 2 ? '-110%' : '10%'})` }}
         >
-          <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400">架构级</span></p>
-          <p className="tnum text-slate-500">{h.moduleCount > 0 ? h.moduleAvg : '—'} <span className="font-normal text-slate-300">模块平均</span></p>
-          <p className="tnum text-slate-300">{absTime(h.startedAt).slice(0, 10)}</p>
+          <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400 dark:text-slate-500">架构级</span></p>
+          <p className="tnum text-slate-500 dark:text-slate-400">{h.moduleCount > 0 ? h.moduleAvg : '—'} <span className="font-normal text-slate-300 dark:text-slate-600">模块平均</span></p>
+          <p className="tnum text-slate-300 dark:text-slate-600">{absTime(h.startedAt).slice(0, 10)}</p>
         </div>
       )}
     </div>

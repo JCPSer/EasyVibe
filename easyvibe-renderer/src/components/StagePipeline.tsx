@@ -25,7 +25,7 @@ export function StagePipeline({
     return 'todo'
   }
   const cls = (s: DotState) =>
-    s === 'done' ? 'bg-emerald-500 text-white' : s === 'now' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
+    s === 'done' ? 'bg-emerald-500 text-white' : s === 'now' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
 
   if (variant === 'compact') {
     return (
@@ -35,7 +35,7 @@ export function StagePipeline({
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro font-bold ${cls(dotState(i))}`}>
               {dotState(i) === 'done' ? <CheckCircle2 size={10} /> : i + 1}
             </span>
-            <span className={`truncate text-micro ${dotState(i) === 'todo' ? 'text-slate-400' : 'font-semibold text-slate-600'}`}>{s.label}</span>
+            <span className={`truncate text-micro ${dotState(i) === 'todo' ? 'text-slate-400 dark:text-slate-500' : 'font-semibold text-slate-600 dark:text-slate-300'}`}>{s.label}</span>
             {i < STAGES.length - 1 && (
               <span className={`h-px flex-1 ${dotState(i) === 'done' ? 'bg-emerald-400' : 'bg-slate-200'}`} />
             )}
@@ -53,8 +53,8 @@ export function StagePipeline({
             {dotState(i) === 'done' ? <CheckCircle2 size={11} /> : i + 1}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-micro font-semibold text-slate-600">{s.label}</span>
-            <span className="block truncate text-[9px] text-slate-400">{stage === 'error' ? '—' : s.hint}</span>
+            <span className="block truncate text-micro font-semibold text-slate-600 dark:text-slate-300">{s.label}</span>
+            <span className="block truncate text-[9px] text-slate-400 dark:text-slate-500">{stage === 'error' ? '—' : s.hint}</span>
           </span>
           {i < STAGES.length - 1 && (
             <span className={`h-px flex-1 ${dotState(i) === 'done' ? 'bg-emerald-400' : 'bg-slate-200'}`} />

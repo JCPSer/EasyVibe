@@ -33,24 +33,24 @@ export function WelcomePage({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="欢迎使用 EasyVibe">
-      <div className="anim-scale-in glass w-full max-w-2xl rounded-2xl border border-slate-200 bg-white/95 p-8 shadow-2xl">
+      <div className="anim-scale-in glass w-full max-w-2xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-8 shadow-2xl">
         <div className="flex items-start justify-between">
           <p className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-widest text-blue-500">
             <Sparkles size={12} /> {welcome.kicker}
           </p>
-          <button onClick={onClose} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500" aria-label="关闭引导">
+          <button onClick={onClose} className="rounded p-1 text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-500" aria-label="关闭引导">
             <X size={16} />
           </button>
         </div>
-        <h1 className="mt-2 text-[22px] font-bold leading-8 text-slate-800">{welcome.title}</h1>
-        <p className="mt-1.5 max-w-xl text-[13px] leading-6 text-slate-500">{welcome.subtitle}</p>
+        <h1 className="mt-2 text-[22px] font-bold leading-8 text-slate-800 dark:text-slate-100">{welcome.title}</h1>
+        <p className="mt-1.5 max-w-xl text-[13px] leading-6 text-slate-500 dark:text-slate-400">{welcome.subtitle}</p>
 
         {/* 概念卡片：建立心智模型（每张 20-30 字正文，给长文本语言留冗余） */}
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {concepts.map((c) => (
-            <div key={c.id} className="rounded-xl border border-slate-100 bg-white px-3.5 py-3">
-              <p className="text-[12.5px] font-bold text-slate-700">{c.title}</p>
-              <p className="mt-1 text-[11.5px] leading-5 text-slate-500">{c.body}</p>
+            <div key={c.id} className="rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-3">
+              <p className="text-[12.5px] font-bold text-slate-700 dark:text-slate-200">{c.title}</p>
+              <p className="mt-1 text-[11.5px] leading-5 text-slate-500 dark:text-slate-400">{c.body}</p>
             </div>
           ))}
         </div>
@@ -67,13 +67,13 @@ export function WelcomePage({
           {!hasRepo && (
             <button
               onClick={onClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-semibold text-slate-500 hover:border-slate-300 hover:text-slate-700"
+              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-[12.5px] font-semibold text-slate-500 dark:text-slate-400 hover:border-slate-300 hover:text-slate-700"
               title={welcome.ctaSecondaryHint}
             >
               {welcome.ctaSecondary}
             </button>
           )}
-          <span className="ml-auto text-[10.5px] text-slate-300">{welcome.reopenNote}</span>
+          <span className="ml-auto text-[10.5px] text-slate-300 dark:text-slate-600">{welcome.reopenNote}</span>
         </div>
       </div>
     </div>

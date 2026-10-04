@@ -52,15 +52,15 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
       })
   }
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-2">
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-2">
       <div className="flex items-center gap-1">
         <button
           onClick={() => setOpen((v) => !v)}
           className="flex min-w-0 flex-1 items-center gap-1 text-left"
           title={open ? '收起全文' : '打开全文'}
         >
-          <ChevronRight size={10} className={`shrink-0 text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`} />
-          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">{doc.name}</span>
+          <ChevronRight size={10} className={`shrink-0 text-slate-300 dark:text-slate-600 transition-transform ${open ? 'rotate-90' : ''}`} />
+          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700 dark:text-slate-200">{doc.name}</span>
         </button>
         {confirmDel ? (
           <button
@@ -74,7 +74,7 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
         ) : (
           <button
             onClick={() => setConfirmDel(true)}
-            className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
+            className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 hover:text-red-500"
             title="删除该产物文档"
             onMouseLeave={() => setConfirmDel(false)}
           >
@@ -82,13 +82,13 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
           </button>
         )}
       </div>
-      <p className="mono mt-0.5 truncate text-[9px] text-slate-400" title={doc.path}>{doc.path}</p>
-      {!open && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{doc.excerpt || '（空文档）'}</p>}
+      <p className="mono mt-0.5 truncate text-[9px] text-slate-400 dark:text-slate-500" title={doc.path}>{doc.path}</p>
+      {!open && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500 dark:text-slate-400">{doc.excerpt || '（空文档）'}</p>}
       {open && (
-        <div className="mt-1.5 max-h-64 overflow-y-auto rounded-md bg-slate-50 p-2">
-          {full === null && !err && <p className="text-[10px] text-slate-400"><Loader2 size={10} className="mr-1 inline animate-spin" />加载全文…</p>}
+        <div className="mt-1.5 max-h-64 overflow-y-auto rounded-md bg-slate-50 dark:bg-slate-950/70 p-2">
+          {full === null && !err && <p className="text-[10px] text-slate-400 dark:text-slate-500"><Loader2 size={10} className="mr-1 inline animate-spin" />加载全文…</p>}
           {err && <p className="text-[10px] text-red-500">全文加载失败</p>}
-          {full !== null && <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-slate-600">{full || '（空文档）'}</pre>}
+          {full !== null && <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-slate-600 dark:text-slate-300">{full || '（空文档）'}</pre>}
         </div>
       )}
     </div>
@@ -198,18 +198,18 @@ function PhaseDocReview({
   }, [backendRepo, taskId, compareDirHint, retryTick])
 
   return (
-    <div className="m-4 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+    <div className="m-4 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+      <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
         <FileText size={13} className="text-blue-600" />
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-bold text-slate-800">{title}</p>
-          {doc && <p className="mono mt-0.5 truncate text-[10px] text-slate-400">{doc.path}</p>}
+          <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{title}</p>
+          {doc && <p className="mono mt-0.5 truncate text-[10px] text-slate-400 dark:text-slate-500">{doc.path}</p>}
         </div>
         <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待你的评审</span>
       </div>
       {/* 对照回看标签栏：方案评审时可回看需求矩阵（只读）；缺失时标签不出现 */}
       {compareDirHint && !compareMissing && (
-        <div className="flex items-center gap-1 border-b border-slate-100 px-4 py-1.5">
+        <div className="flex items-center gap-1 border-b border-slate-100 dark:border-slate-800 px-4 py-1.5">
           {(
             [
               ['main', `${title}（评审中）`],
@@ -220,7 +220,7 @@ function PhaseDocReview({
               key={k}
               onClick={() => setTab(k)}
               className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                tab === k ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+                tab === k ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 ring-1 ring-blue-200' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-600'
               }`}
             >
               {label}
@@ -234,7 +234,7 @@ function PhaseDocReview({
             /* 对照文档只读——裁决按钮只对当前阶段产物 */
             <MarkdownMessage content={compareDoc.content} />
           ) : (
-            <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400">
+            <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400 dark:text-slate-500">
               <Loader2 size={13} className="animate-spin" /> 正在加载对照文档…
             </p>
           )
@@ -254,23 +254,23 @@ function PhaseDocReview({
                 子 agent 初审：{review.verdict === 'pass' ? '通过' : '未通过'}
                 {review.verdict !== 'pass' && <span className="ml-1 font-normal">（建议打回重做，最终由你裁决）</span>}
               </p>
-              <p className="mt-0.5 text-micro leading-4 text-slate-600">{review.summary}</p>
+              <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{review.summary}</p>
             </div>
           </div>
         )}
         {!doc && !missing && (
-          <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400">
+          <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400 dark:text-slate-500">
             <Loader2 size={13} className="animate-spin" /> 正在加载产物文档…
           </p>
         )}
         {missing && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
             未找到本阶段产物文档（agent 未按规范路径产出）。你可以打回要求重做，或通过进入下一阶段（实施时将无矩阵/方案可依）。
           </div>
         )}
         {loadErr && (
           /* 2026-10-03 实弹 bug：全文 404 曾静默空白——失败必须显式可见 */
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] leading-5 text-red-600">
+          <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/40 px-3 py-2.5 text-[12px] leading-5 text-red-600">
             产物文档全文加载失败（后端响应异常）。可重试；持续失败请打回重做。
             <button
               onClick={() => {
@@ -278,7 +278,7 @@ function PhaseDocReview({
                 setLoadErr(false)
                 setRetryTick((t) => t + 1)
               }}
-              className="ml-2 rounded-md border border-red-200 bg-white px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
+              className="ml-2 rounded-md border border-red-200 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
             >
               重试
             </button>
@@ -291,9 +291,9 @@ function PhaseDocReview({
           </>
         )}
       </div>
-      <div className="border-t border-slate-100 p-3">
+      <div className="border-t border-slate-100 dark:border-slate-800 p-3">
         {tab === 'compare' && (
-          <p className="mb-1.5 text-center text-[10px] text-slate-400">正在对照回看——下方通过/打回作用于「{title}」</p>
+          <p className="mb-1.5 text-center text-[10px] text-slate-400 dark:text-slate-500">正在对照回看——下方通过/打回作用于「{title}」</p>
         )}
         {rejecting ? (
           <div className="space-y-1.5">
@@ -303,7 +303,7 @@ function PhaseDocReview({
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               placeholder="打回意见（必填）——agent 将带着意见重做本阶段"
-              className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+              className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
             />
             <div className="flex gap-2">
               <button
@@ -313,7 +313,7 @@ function PhaseDocReview({
               >
                 确认打回本阶段
               </button>
-              <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+              <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
                 取消
               </button>
             </div>
@@ -330,7 +330,7 @@ function PhaseDocReview({
             <button
               onClick={() => setRejecting(true)}
               disabled={!!deciding}
-              className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+              className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
             >
               打回重做…
             </button>
@@ -571,11 +571,11 @@ export function TaskWorkflowPage({
   }
 
   if (!backendRepo) {
-    return <p className="p-8 text-center text-[12px] text-slate-400">需要本地后端在线</p>
+    return <p className="p-8 text-center text-[12px] text-slate-400 dark:text-slate-500">需要本地后端在线</p>
   }
   if (tasks === null) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-[12px] text-slate-400">
+      <div className="flex h-full items-center justify-center gap-2 text-[12px] text-slate-400 dark:text-slate-500">
         <Loader2 size={14} className="animate-spin" /> 加载任务…
       </div>
     )
@@ -587,15 +587,15 @@ export function TaskWorkflowPage({
   return (
     <div className="flex h-full">
       {/* 左列：任务列表 */}
-      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700">
+      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">
             任务列表
             {pendingCount > 0 && (
               <span className="tnum ml-1.5 rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{pendingCount}</span>
             )}
           </span>
-          <p className="mt-0.5 text-micro text-slate-400">待你审批的任务在前</p>
+          <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">待你审批的任务在前</p>
         </div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
           {tasks.map((t) => (
@@ -603,46 +603,46 @@ export function TaskWorkflowPage({
               key={t.id}
               onClick={() => setSelected(t.id)}
               className={`w-full rounded-lg px-2.5 py-2 text-left ${
-                t.id === selected ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-slate-50'
+                t.id === selected ? 'bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-200' : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
               }`}
             >
               <div className="flex items-center gap-1.5">
-                <span className={`min-w-0 flex-1 truncate text-[12px] font-semibold ${t.id === selected ? 'text-blue-700' : 'text-slate-700'}`}>
+                <span className={`min-w-0 flex-1 truncate text-[12px] font-semibold ${t.id === selected ? 'text-blue-700' : 'text-slate-700 dark:text-slate-200'}`}>
                   {t.title}
                 </span>
                 {t.status === 'awaiting_approval' && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />}
               </div>
-              <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
+              <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
                 <span>{STATUS_LABEL[t.status] ?? t.status}</span>
                 {gateLabel(t.status, t.gate) && (
-                  <span className="rounded-full bg-slate-100 px-1.5">{gateLabel(t.status, t.gate)}</span>
+                  <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5">{gateLabel(t.status, t.gate)}</span>
                 )}
                 <span className="tnum">{t.trust === 'auto' ? '自动' : t.trust === 'supervised' ? '监督' : '手动'}</span>
               </p>
             </button>
           ))}
-          {tasks.length === 0 && <p className="px-2 py-6 text-center text-[11px] text-slate-400">暂无任务——从地图/问题/建议发起一个</p>}
+          {tasks.length === 0 && <p className="px-2 py-6 text-center text-[11px] text-slate-400 dark:text-slate-500">暂无任务——从地图/问题/建议发起一个</p>}
         </div>
       </aside>
 
       {/* 右列：工作流主体 */}
       <div className="flex min-w-0 flex-1 flex-col">
         {!sel || stage === null ? (
-          <p className="flex flex-1 items-center justify-center text-[12px] text-slate-400">选择左侧任务查看工作流</p>
+          <p className="flex flex-1 items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">选择左侧任务查看工作流</p>
         ) : (
           <>
             {/* 头部：标题 + 五阶段管道 */}
-            <div className="border-b border-slate-100 bg-white px-4 py-3">
+            <div className="border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3">
               <div className="flex items-center gap-2">
-                <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-slate-800">{sel.title}</h2>
+                <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-slate-800 dark:text-slate-100">{sel.title}</h2>
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-bold ${
-                    sel.status === 'awaiting_approval' ? 'bg-amber-100 text-amber-700' : sel.status === 'running' ? 'bg-blue-50 text-blue-600' : sel.status === 'done' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
+                    sel.status === 'awaiting_approval' ? 'bg-amber-100 text-amber-700' : sel.status === 'running' ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600' : sel.status === 'done' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                   }`}
                 >
                   {STATUS_LABEL[sel.status] ?? sel.status}
                 </span>
-                <span className="tnum shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-micro font-semibold text-slate-500">{duration(sel)}</span>
+                <span className="tnum shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-micro font-semibold text-slate-500 dark:text-slate-400">{duration(sel)}</span>
                 {/* 管理三操作（重审 P0）：终止（活动）/ 重试（失败·中断）/ 删除（非运行） */}
                 <TaskAdminButtons
                   repo={backendRepo}
@@ -661,7 +661,7 @@ export function TaskWorkflowPage({
               </div>
               {/* 合约红线：审批必见 */}
               {(sel.result?.contractViolations?.length ?? 0) > 0 && (
-                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/40 px-3 py-2">
                   <p className="flex items-center gap-1 text-micro font-bold text-red-600">
                     <ShieldAlert size={10} /> 影响面合约：{sel.result!.contractViolations!.length} 个文件越出声明边界
                   </p>
@@ -674,8 +674,8 @@ export function TaskWorkflowPage({
               )}
               {/* 评审留痕：迭代到通过的全过程 */}
               {reviewTrail.length > 0 && (
-                <p className="mt-2 truncate text-[10px] leading-4 text-slate-400">
-                  <span className="font-bold text-slate-500">评审轮回：</span>
+                <p className="mt-2 truncate text-[10px] leading-4 text-slate-400 dark:text-slate-500">
+                  <span className="font-bold text-slate-500 dark:text-slate-400">评审轮回：</span>
                   {reviewTrail.map((r, i) => (
                     <span key={i}>{i > 0 && ' → '}{r}</span>
                   ))}
@@ -688,28 +688,28 @@ export function TaskWorkflowPage({
               <div className="flex min-w-0 flex-1 flex-col">
                 {/* ① 需求分析：三子态——任务书待批 / 分析中终端 / 矩阵评审卡 */}
                 {stage === 0 && sel.gate === 'plan' && !isRunning && (
-                  <div className="m-4 rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
+                  <div className="m-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                       <ClipboardList size={10} /> 任务书 · 已就绪，批准后先做需求分析
                     </p>
                     {/* TaskPanel 碎片③：监督模式风险预评（flagged 留痕——审批人必见风险理由） */}
                     {(() => {
                       const flagged = approvals.find((a) => a.decision === 'flagged' && a.note)
                       return flagged ? (
-                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-micro leading-4 text-amber-700">⚠ {flagged.note}</p>
+                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-micro leading-4 text-amber-700">⚠ {flagged.note}</p>
                       ) : null
                     })()}
-                    <p className="mt-2 line-clamp-6 text-[12px] leading-5 text-slate-700">{sel.description}</p>
+                    <p className="mt-2 line-clamp-6 text-[12px] leading-5 text-slate-700 dark:text-slate-200">{sel.description}</p>
                     {(sel.modules?.length ?? 0) > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
                         {sel.modules!.map((mid) => (
-                          <span key={mid} className="rounded-full bg-slate-50 px-2 py-px text-micro font-semibold text-slate-500 ring-1 ring-slate-200">
+                          <span key={mid} className="rounded-full bg-slate-50 dark:bg-slate-950/70 px-2 py-px text-micro font-semibold text-slate-500 dark:text-slate-400 ring-1 ring-slate-200">
                             {map.modules.find((m) => m.id === mid)?.name ?? mid}
                           </span>
                         ))}
                       </div>
                     )}
-                    {sel.acceptance && <p className="mt-2 text-micro leading-4 text-slate-400">验收：{sel.acceptance}</p>}
+                    {sel.acceptance && <p className="mt-2 text-micro leading-4 text-slate-400 dark:text-slate-500">验收：{sel.acceptance}</p>}
                     <div className="mt-3 flex gap-2">
                       <button
                         onClick={() => decide('approved')}
@@ -721,7 +721,7 @@ export function TaskWorkflowPage({
                       <button
                         onClick={() => setRejecting(true)}
                         disabled={!!deciding}
-                        className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
                       >
                         打回…
                       </button>
@@ -734,7 +734,7 @@ export function TaskWorkflowPage({
                           onChange={(e) => setRejectNote(e.target.value)}
                           rows={3}
                           placeholder="打回意见（必填）——将作为新任务的上下文"
-                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                         />
                         <div className="flex gap-2">
                           <button
@@ -744,7 +744,7 @@ export function TaskWorkflowPage({
                           >
                             确认打回
                           </button>
-                          <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+                          <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
                             取消
                           </button>
                         </div>
@@ -787,7 +787,7 @@ export function TaskWorkflowPage({
                 {/* ③ 实施（及 ①② 产文档期间）：实时终端——按阶段标记换标题 */}
                 {(stage === 2 || isRunning) && (
                   <div className="flex min-h-0 flex-1 flex-col p-4">
-                    <div className="mb-2 flex items-center gap-2 text-micro text-slate-400">
+                    <div className="mb-2 flex items-center gap-2 text-micro text-slate-400 dark:text-slate-500">
                       <Terminal size={11} />
                       <span className="font-bold uppercase tracking-wider">
                         {sel.gate === 'p:analysis' ? '需求分析产出中' : sel.gate === 'p:solution' ? '方案设计产出中' : '实时执行'}
@@ -802,21 +802,21 @@ export function TaskWorkflowPage({
                         const el = e.currentTarget
                         setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 24)
                       }}
-                      className="select-text mono min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-5 text-slate-300"
+                      className="select-text mono min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-5 text-slate-300 dark:text-slate-600"
                     >
                       {terminalLines(sel.sessionId ?? '').length === 0 ? (
-                        <span className="text-slate-500">等待 agent 输出…（agent 启动可能需要 1-2 分钟）</span>
+                        <span className="text-slate-500 dark:text-slate-400">等待 agent 输出…（agent 启动可能需要 1-2 分钟）</span>
                       ) : (
                         terminalLines(sel.sessionId ?? '').map((l, i) => (
                           <div key={i} className={l.startsWith('[err]') ? 'text-red-400' : ''}>{l}</div>
                         ))
                       )}
                       {/* WS 断线无回放是已知边界（方案 §6）——明示不造假 */}
-                      <div className="mt-1 flex items-center gap-1 text-slate-600">
+                      <div className="mt-1 flex items-center gap-1 text-slate-600 dark:text-slate-300">
                         <Unplug size={10} /> 断线期间的输出不可回放（直播通道无缓冲）
                       </div>
                     </pre>
-                    <p className="mt-1.5 text-[10px] text-slate-400">
+                    <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
                       {sel.gate === 'p:analysis'
                         ? '需求矩阵将写入 .easyvibe/development_docs/1_requirements_matrix/，产出后在此评审'
                         : sel.gate === 'p:solution'
@@ -842,13 +842,13 @@ export function TaskWorkflowPage({
                           <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
                             子 agent 初审：{sel.result.review.verdict === 'pass' ? '通过' : '未通过'}
                           </p>
-                          <p className="mt-0.5 line-clamp-2 text-micro leading-4 text-slate-600">{sel.result.review.summary}</p>
+                          <p className="mt-0.5 line-clamp-2 text-micro leading-4 text-slate-600 dark:text-slate-300">{sel.result.review.summary}</p>
                         </div>
                       </div>
                     )}
                     <div className="flex min-h-0 flex-1">
-                    <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 bg-slate-50/50 p-2">
-                      <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400">
+                    <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 p-2">
+                      <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                         <FileCode2 size={10} /> 文件（{files.length}）
                       </p>
                       {files.map((f) => (
@@ -856,16 +856,16 @@ export function TaskWorkflowPage({
                           key={f}
                           onClick={() => setFileSel((fs) => ({ taskId: selKey, file: fs.file === f ? null : f }))}
                           className={`block w-full truncate rounded px-1.5 py-1 text-left font-mono text-micro ${
-                            f === activeFile ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'
+                            f === activeFile ? 'bg-blue-100 text-blue-700' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70'
                           }`}
                           title={f}
                         >
                           {f}
                         </button>
                       ))}
-                      {files.length === 0 && <p className="px-1.5 py-2 text-micro text-slate-400">无 diff 数据</p>}
+                      {files.length === 0 && <p className="px-1.5 py-2 text-micro text-slate-400 dark:text-slate-500">无 diff 数据</p>}
                     </div>
-                    <div className="min-w-0 flex-1 overflow-auto bg-white p-3">
+                    <div className="min-w-0 flex-1 overflow-auto bg-white dark:bg-slate-900 p-3">
                       {activeDiff ? (
                         <pre className="select-text mono text-cap leading-4">
                           {diffLines.slice(0, diffState.limit).map((line, i) => (
@@ -873,10 +873,10 @@ export function TaskWorkflowPage({
                               key={i}
                               className={
                                 line.startsWith('+') && !line.startsWith('+++')
-                                  ? 'bg-emerald-50 text-emerald-700'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700'
                                   : line.startsWith('-') && !line.startsWith('---')
-                                    ? 'bg-red-50 text-red-600'
-                                    : 'text-slate-600'
+                                    ? 'bg-red-50 dark:bg-red-950/40 text-red-600'
+                                    : 'text-slate-600 dark:text-slate-300'
                               }
                             >
                               {line || ' '}
@@ -885,20 +885,20 @@ export function TaskWorkflowPage({
                           {diffLines.length > diffState.limit && (
                             <button
                               onClick={() => setDiffState((s) => ({ ...s, limit: s.limit + DIFF_PAGE }))}
-                              className="mt-1 w-full rounded-md border border-dashed border-slate-200 py-1 text-cap font-semibold text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                              className="mt-1 w-full rounded-md border border-dashed border-slate-200 dark:border-slate-700 py-1 text-cap font-semibold text-slate-400 dark:text-slate-500 hover:border-blue-300 hover:text-blue-600"
                             >
                               还有 {diffLines.length - diffState.limit} 行，点击加载更多
                             </button>
                           )}
                         </pre>
                       ) : (
-                        <p className="py-8 text-center text-[11px] text-slate-400">该任务无变更归档</p>
+                        <p className="py-8 text-center text-[11px] text-slate-400 dark:text-slate-500">该任务无变更归档</p>
                       )}
                     </div>
                     </div>
                     {/* 2026-10-03 实弹 bug：Diff 关此前没有裁决按钮——任务卡死在代码审查关无法推进。
                         通过 = 进审查报告关（终审），打回 = 终止返工（复制为新任务或修改复审） */}
-                    <div className="border-t border-slate-100 px-4 py-2.5">
+                    <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-2.5">
                       {rejecting ? (
                         <div className="space-y-1.5">
                           <textarea
@@ -907,7 +907,7 @@ export function TaskWorkflowPage({
                             onChange={(e) => setRejectNote(e.target.value)}
                             rows={2}
                             placeholder="打回意见（必填）——将作为新任务的上下文"
-                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                           />
                           <div className="flex gap-2">
                             <button
@@ -917,7 +917,7 @@ export function TaskWorkflowPage({
                             >
                               确认打回
                             </button>
-                            <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+                            <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
                               取消
                             </button>
                           </div>
@@ -937,11 +937,11 @@ export function TaskWorkflowPage({
                               setRejectNote('')
                             }}
                             disabled={!!deciding}
-                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                            className="rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
                           >
                             打回…
                           </button>
-                          <span className="ml-auto text-[10px] text-slate-300">
+                          <span className="ml-auto text-[10px] text-slate-300 dark:text-slate-600">
                             通过 Diff 后还需在审查报告关终审归档
                           </span>
                         </div>
@@ -952,13 +952,13 @@ export function TaskWorkflowPage({
 
                 {/* ⑤ report 关：审查报告 */}
                 {stage === 4 && (
-                  <div className="m-4 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
+                  <div className="m-4 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                       <Lock size={10} /> 审查报告 · 通过后锁定归档
                     </p>
-                    <div className="mt-2 space-y-1.5 text-[12px] leading-5 text-slate-700">
+                    <div className="mt-2 space-y-1.5 text-[12px] leading-5 text-slate-700 dark:text-slate-200">
                       {impact.map((im, i) => (
-                        <p key={i} className="tnum text-micro text-slate-500">
+                        <p key={i} className="tnum text-micro text-slate-500 dark:text-slate-400">
                           本次变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件
                         </p>
                       ))}
@@ -981,7 +981,7 @@ export function TaskWorkflowPage({
                           )}
                         </div>
                       )}
-                      <p className="text-micro text-slate-400">审查报告全文随归档产出；通过后任务锁定，STAR 记忆与操作日志留痕。</p>
+                      <p className="text-micro text-slate-400 dark:text-slate-500">审查报告全文随归档产出；通过后任务锁定，STAR 记忆与操作日志留痕。</p>
                     </div>
                     <div className="mt-3 flex gap-2">
                       <button
@@ -994,7 +994,7 @@ export function TaskWorkflowPage({
                       <button
                         onClick={() => setRejecting(true)}
                         disabled={!!deciding}
-                        className="flex-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
                       >
                         打回…
                       </button>
@@ -1007,7 +1007,7 @@ export function TaskWorkflowPage({
                           onChange={(e) => setRejectNote(e.target.value)}
                           rows={3}
                           placeholder="打回意见（必填）"
-                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                         />
                         <div className="flex gap-2">
                           <button
@@ -1017,7 +1017,7 @@ export function TaskWorkflowPage({
                           >
                             确认打回
                           </button>
-                          <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] text-slate-500">
+                          <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
                             取消
                           </button>
                         </div>
@@ -1028,12 +1028,12 @@ export function TaskWorkflowPage({
 
                 {/* done：归档摘要（迁入 TaskPanel 独有碎片：复检按钮 + archivedPath） */}
                 {stage === 'done' && (
-                  <div className="m-4 overflow-y-auto rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+                  <div className="m-4 overflow-y-auto rounded-xl border border-emerald-200 bg-emerald-50/40 dark:bg-emerald-950/30 p-4">
                     <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-emerald-600">
                       <CheckCircle2 size={10} /> 已归档 · 全程留痕
                     </p>
                     {impact.map((im, i) => (
-                      <p key={i} className="tnum mt-2 text-micro text-slate-500">
+                      <p key={i} className="tnum mt-2 text-micro text-slate-500 dark:text-slate-400">
                         变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件 · 完成于 {absTime(sel.updatedAt ?? '')}
                       </p>
                     ))}
@@ -1043,7 +1043,7 @@ export function TaskWorkflowPage({
                       if (!ap) return null
                       const rel = ap.includes('/.easyvibe/') ? `.easyvibe/${ap.split('/.easyvibe/')[1]}` : ap.split('/').pop()
                       return (
-                        <p className="mono mt-1 flex items-center gap-1 text-micro text-slate-400">
+                        <p className="mono mt-1 flex items-center gap-1 text-micro text-slate-400 dark:text-slate-500">
                           <span className="truncate" title={rel}>已归档:{rel}</span>
                           {/* 审计 P2：归档路径可复制（此前只能眼看） */}
                           <button
@@ -1053,7 +1053,7 @@ export function TaskWorkflowPage({
                                 () => toast('复制失败（剪贴板不可用）', 'error'),
                               )
                             }}
-                            className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+                            className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-500"
                             title="复制归档路径"
                           >
                             <Copy size={9} />
@@ -1061,7 +1061,7 @@ export function TaskWorkflowPage({
                         </p>
                       )
                     })()}
-                    <p className="mt-1 text-micro text-slate-400">STAR 记忆与操作日志见右侧产物文档。</p>
+                    <p className="mt-1 text-micro text-slate-400 dark:text-slate-500">STAR 记忆与操作日志见右侧产物文档。</p>
                     {/* TaskPanel 碎片①：重新巡检验证改动效果（治理闭环入口不能丢） */}
                     <button
                       onClick={() => {
@@ -1069,7 +1069,7 @@ export function TaskWorkflowPage({
                         fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' }).catch(() => {})
                         toast('巡检已启动——稍后到健康看板验证改善', 'info')
                       }}
-                      className="mt-2 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50"
+                      className="mt-2 rounded-lg border border-emerald-300 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50"
                     >
                       重新巡检验证改动效果
                     </button>
@@ -1078,14 +1078,14 @@ export function TaskWorkflowPage({
 
                 {/* 未启动/终态灰态：error + 重试/复制入口 + 删除 */}
                 {stage === 'error' && (
-                  <div className="m-4 rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400">
+                  <div className="m-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+                    <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                       <XCircle size={10} /> {STATUS_LABEL[sel.status] ?? sel.status}
                     </p>
-                    {sel.error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-600">{sel.error}</p>}
+                    {sel.error && <p className="mt-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-[12px] leading-5 text-red-600">{sel.error}</p>}
                     {/* 重审 P0：无 error 详情的终态卡不再是死胡同——把可走的路明说 */}
                     {!sel.error && (
-                      <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-500">
+                      <p className="mt-2 rounded-lg bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400">
                         该任务没有产出错误详情（常见于后端重启或进程被终止）。可就地重试从头再跑，或复制为新任务。
                       </p>
                     )}
@@ -1123,7 +1123,7 @@ export function TaskWorkflowPage({
                             context: { origin_task_id: sel.id },
                           })
                         }
-                        className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-micro font-semibold text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600"
+                        className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-micro font-semibold text-slate-500 dark:text-slate-400 transition-colors hover:border-blue-300 hover:text-blue-600"
                       >
                         <Copy size={9} /> 复制为新任务
                       </button>
@@ -1134,15 +1134,15 @@ export function TaskWorkflowPage({
 
               {/* 产物文档卡（④⑤ 与 done 的侧栏） */}
               {(stage === 3 || stage === 4 || stage === 'done') && (
-                <aside className="flex w-64 shrink-0 flex-col border-l border-slate-100 bg-slate-50/40">
-                  <p className="px-3 pt-3 text-micro font-bold uppercase tracking-wider text-slate-400">产物文档</p>
+                <aside className="flex w-64 shrink-0 flex-col border-l border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40">
+                  <p className="px-3 pt-3 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">产物文档</p>
                   <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
-                    {docs.length === 0 && <p className="px-1 py-2 text-micro text-slate-400">本任务暂无产物文档</p>}
+                    {docs.length === 0 && <p className="px-1 py-2 text-micro text-slate-400 dark:text-slate-500">本任务暂无产物文档</p>}
                     {docs.map((d) => (
                       <DocCard key={d.path} backendRepo={backendRepo} doc={d} onDeleted={() => setDocsTick((t) => t + 1)} />
                     ))}
                   </div>
-                  <p className="px-3 pb-2.5 text-[9px] text-slate-300">路径规范：.easyvibe/development_docs/</p>
+                  <p className="px-3 pb-2.5 text-[9px] text-slate-300 dark:text-slate-600">路径规范：.easyvibe/development_docs/</p>
                 </aside>
               )}
             </div>

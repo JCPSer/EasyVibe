@@ -39,8 +39,8 @@ const MermaidBlock = memo(function MermaidBlock({ chart }: { chart: string }) {
     }
   }, [chart])
 
-  if (failed) return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-cap">{chart}</pre>
-  return <div ref={ref} className="my-1 overflow-x-auto rounded bg-white p-1 [&>svg]:mx-auto" />
+  if (failed) return <pre className="overflow-x-auto rounded bg-slate-100 dark:bg-slate-800 p-2 text-cap">{chart}</pre>
+  return <div ref={ref} className="my-1 overflow-x-auto rounded bg-white dark:bg-slate-900 p-1 [&>svg]:mx-auto" />
 })
 
 // 对话消息的 Markdown 渲染：GFM（表格/列表/粗体）+ mermaid 代码块
@@ -56,7 +56,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: { cont
             const cls = code?.className ?? ''
             const text = Array.isArray(code?.children) ? code.children.join('') : (code?.children ?? '')
             if (cls.includes('language-mermaid')) return <MermaidBlock chart={String(text).trim()} />
-            return <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-cap">{children}</pre>
+            return <pre className="overflow-x-auto rounded bg-slate-100 dark:bg-slate-800 p-2 text-cap">{children}</pre>
           },
         }}
       >

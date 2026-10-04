@@ -62,7 +62,7 @@ function Dots({ t }: { t: BoardTask }) {
   return (
     <span className="flex items-center gap-1">
       {[0, 1, 2, 3, 4].map((i) => {
-        let cls = 'bg-slate-100'
+        let cls = 'bg-slate-100 dark:bg-slate-800'
         if (s === 'done') cls = 'bg-emerald-500'
         else if (s !== 'error') {
           if (i < s) cls = 'bg-emerald-500'
@@ -257,7 +257,7 @@ export function TaskBoardPage({
   }
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
   }
 
   const renderCard = (t: BoardTask, failed = false) => (
@@ -279,23 +279,23 @@ export function TaskBoardPage({
         onSelectTask(t.id)
       }}
       title="点击查看该任务的流水线全程"
-      className={`rounded-xl border bg-white p-3 transition-shadow ${
+      className={`rounded-xl border bg-white dark:bg-slate-900 p-3 transition-shadow ${
         dragId === t.id ? 'opacity-40' : ''
-      } ${failed ? 'border-red-200 bg-red-50/40' : 'border-slate-200'} cursor-pointer shadow-sm hover:shadow-md`}
+      } ${failed ? 'border-red-200 bg-red-50/40 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'} cursor-pointer shadow-sm hover:shadow-md`}
     >
       <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 text-[12px] font-bold leading-4 text-slate-700">{t.title}</span>
+        <span className="min-w-0 flex-1 text-[12px] font-bold leading-4 text-slate-700 dark:text-slate-200">{t.title}</span>
         {(t.result?.contractViolations?.length ?? 0) > 0 && (
-          <span className="tnum shrink-0 rounded-full bg-red-50 px-1.5 py-px text-[9px] font-bold text-red-500">
+          <span className="tnum shrink-0 rounded-full bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-[9px] font-bold text-red-500">
             越界 {t.result!.contractViolations!.length}
           </span>
         )}
       </div>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-slate-400">
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500">
         {(t.modules?.length ?? 0) > 0 && (
           <>
             {t.modules!.slice(0, 2).map((m) => (
-              <span key={m} className="rounded bg-slate-100 px-1 py-px">{m}</span>
+              <span key={m} className="rounded bg-slate-100 dark:bg-slate-800 px-1 py-px">{m}</span>
             ))}
             <span>·</span>
           </>
@@ -304,13 +304,13 @@ export function TaskBoardPage({
       </div>
       <div className="mt-2 flex items-center gap-2">
         <Dots t={t} />
-        <span className="tnum ml-auto text-[9px] text-slate-400">{duration(t)}</span>
+        <span className="tnum ml-auto text-[9px] text-slate-400 dark:text-slate-500">{duration(t)}</span>
         {/* 管理三操作（重审 P0）：终止/重试/删除——按状态自动出现，两步确认 */}
         <TaskAdminButtons repo={backendRepo!} taskId={t.id} status={t.status} onDone={load} />
       </div>
       {/* 待你评审卡：内联通过/打回（拖拽之外的等价入口） */}
       {colOf(t).col === 'review' && (
-        <div className="mt-2 border-t border-slate-100 pt-2">
+        <div className="mt-2 border-t border-slate-100 dark:border-slate-800 pt-2">
           {rejecting === t.id ? (
             <div className="flex gap-1.5">
               <input
@@ -327,13 +327,13 @@ export function TaskBoardPage({
               >
                 确认
               </button>
-              <button onClick={() => setRejecting(null)} className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-[10px] text-slate-400">
+              <button onClick={() => setRejecting(null)} className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-[10px] text-slate-400 dark:text-slate-500">
                 <X size={10} />
               </button>
             </div>
           ) : (
             <div className="flex gap-1.5">
-              <span className="rounded-full bg-blue-50 px-1.5 py-px text-[9px] font-bold text-blue-600">
+              <span className="rounded-full bg-blue-50 dark:bg-blue-950/40 px-1.5 py-px text-[9px] font-bold text-blue-600">
                 {t.gate === 'diff' ? 'Diff 审批' : '审查报告'}
               </span>
               <button
@@ -380,13 +380,13 @@ export function TaskBoardPage({
   return (
     <div className="flex h-full flex-col p-4">
       <div className="mb-3 flex items-baseline gap-3">
-        <h2 className="text-[15px] font-bold text-slate-800">任务编排</h2>
-        <p className="text-[11px] text-slate-400">
+        <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">任务编排</h2>
+        <p className="text-[11px] text-slate-400 dark:text-slate-500">
           列 = 状态；拖到「已完成」= 通过，拖到「待启动」= 打回，失败卡拖到主体区 = 复制重提
         </p>
         <button
           onClick={onOpenWorkflow}
-          className="ml-auto rounded-lg border border-slate-200 px-2.5 py-1 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+          className="ml-auto rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
         >
           工作流视图 →
         </button>
@@ -418,15 +418,15 @@ export function TaskBoardPage({
             onDrop={onDrop(key)}
             className={`flex min-w-0 flex-1 flex-col rounded-xl p-2 transition-colors ${
               overCol === key
-                ? 'bg-blue-50 ring-2 ring-blue-200'
+                ? 'bg-blue-50 dark:bg-blue-950/40 ring-2 ring-blue-200'
                 : illegalCol === key
                   ? 'bg-red-50/60 ring-2 ring-red-200'
-                  : 'bg-slate-50'
+                  : 'bg-slate-50 dark:bg-slate-950/70'
             }`}
           >
             <div className="flex items-center gap-1.5 px-1.5 py-1.5">
-              <span className="text-[12px] font-bold text-slate-600">{label}</span>
-              <span className="tnum rounded-full bg-slate-200/70 px-1.5 text-[10px] font-semibold text-slate-500">{counts[key]}</span>
+              <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300">{label}</span>
+              <span className="tnum rounded-full bg-slate-200/70 px-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">{counts[key]}</span>
               {key === 'running' && counts.running > 0 && <Loader2 size={10} className="animate-spin text-blue-500" />}
               {/* 非法落点即时解释（拖拽中可见，比落下后 toast 更早一步） */}
               {illegalCol === key && dragId && (
@@ -440,13 +440,13 @@ export function TaskBoardPage({
                 <div>
                   <p className="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-red-400">失败·驳回</p>
                   {grouped.failedTop.map((t) => renderCard(t, true))}
-                  <div className="my-1.5 border-t border-dashed border-slate-200" />
+                  <div className="my-1.5 border-t border-dashed border-slate-200 dark:border-slate-700" />
                 </div>
               )}
               {grouped[key].map((t) => renderCard(t))}
               {/* ui-test P2：空列给引导占位（密度与可发现性），不只 backlog 一列 */}
               {grouped[key].length === 0 && !(key === 'backlog' && grouped.failedTop.length > 0) && (
-                <p className="rounded-lg border border-dashed border-slate-200 px-1 py-6 text-center text-[10px] text-slate-300">
+                <p className="rounded-lg border border-dashed border-slate-200 dark:border-slate-700 px-1 py-6 text-center text-[10px] text-slate-300 dark:text-slate-600">
                   {key === 'backlog' ? '暂无任务——从地图/问题/建议发起' : '没有任务'}
                 </p>
               )}

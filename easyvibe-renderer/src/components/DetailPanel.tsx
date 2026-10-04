@@ -37,7 +37,7 @@ interface Props {
 function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
         {icon}
         {label}
       </div>
@@ -70,7 +70,7 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
   const delta = latest - prev
   return (
     <div className="mt-2 flex items-center gap-2">
-      <span className="text-micro font-semibold text-slate-400">健康趋势</span>
+      <span className="text-micro font-semibold text-slate-400 dark:text-slate-500">健康趋势</span>
       <div className="flex h-4 items-end gap-0.5">
         {rows.slice(-12).map((r, i) => (
           <div
@@ -100,13 +100,13 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
     <>
       <div>
         <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-bold text-slate-800">{mod.name}</h2>
-          <Badge variant="outline" className="border-slate-200 text-slate-500">
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{mod.name}</h2>
+          <Badge variant="outline" className="border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
             {mod.id}
           </Badge>
         </div>
-        <p className="mt-1 text-[12px] leading-5 text-slate-500">{mod.responsibility}</p>
-        <p className="mt-1 text-[11px] text-slate-400">
+        <p className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-400">{mod.responsibility}</p>
+        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
           所属层：{map.layers.find((l) => l.id === mod.layer)?.name ?? mod.layer}
         </p>
       </div>
@@ -122,7 +122,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
             {onChatAbout && (
               <button
                 onClick={() => onChatAbout({ refId: mod.id, refName: mod.name, kind: 'module' })}
-                className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-micro font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-micro font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600"
                 title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
               >
                 <MessagesSquare size={10} /> 就此对话
@@ -137,29 +137,29 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
             </button>
           </div>
         </div>
-        <p className="mt-1 text-cap text-slate-400">
+        <p className="mt-1 text-cap text-slate-400 dark:text-slate-500">
           coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
         </p>
         {backendRepo && <HealthTrend backendRepo={backendRepo} moduleId={mod.id} />}
-        {mod.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600">{mod.health.review_note}</p>}
+        {mod.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600 dark:text-slate-300">{mod.health.review_note}</p>}
       </div>
 
       <Row icon={<KeyRound size={12} />} label="关键入口">
         <div className="space-y-1.5">
           {mod.key_entries.slice(0, 6).map((k) => (
-            <div key={k.file + k.symbol} className="rounded-md bg-slate-50 px-2.5 py-1.5">
-              <div className="font-mono text-[11px] font-medium text-slate-700">{k.symbol}</div>
-              <div className="truncate font-mono text-micro text-slate-400">{k.file}</div>
+            <div key={k.file + k.symbol} className="rounded-md bg-slate-50 dark:bg-slate-950/70 px-2.5 py-1.5">
+              <div className="font-mono text-[11px] font-medium text-slate-700 dark:text-slate-200">{k.symbol}</div>
+              <div className="truncate font-mono text-micro text-slate-400 dark:text-slate-500">{k.file}</div>
             </div>
           ))}
-          {mod.key_entries.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+          {mod.key_entries.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
 
       <Row icon={<FileCode2 size={12} />} label="文件归属">
         <div className="space-y-1">
           {mod.files.map((f) => (
-            <div key={f} className="truncate font-mono text-cap text-slate-500">
+            <div key={f} className="truncate font-mono text-cap text-slate-500 dark:text-slate-400">
               {f}
             </div>
           ))}
@@ -169,22 +169,22 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
       <Row icon={<ArrowDownToLine size={12} />} label={`依赖（${deps.length}）`}>
         <div className="flex flex-wrap gap-1.5">
           {deps.map((d) => (
-            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
               {d.name}
             </Badge>
           ))}
-          {deps.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+          {deps.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
 
       <Row icon={<ArrowUpFromLine size={12} />} label={`被依赖（${dependents.length}）`}>
         <div className="flex flex-wrap gap-1.5">
           {dependents.map((d) => (
-            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
               {d.name}
             </Badge>
           ))}
-          {dependents.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+          {dependents.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
 
@@ -192,7 +192,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
         <Row icon={<Flag size={12} />} label="腐化标记">
           <div className="flex flex-wrap gap-1.5">
             {mod.health.decay_flags.map((f) => (
-              <Badge key={f} className="border-red-200 bg-red-50 font-normal text-red-600">
+              <Badge key={f} className="border-red-200 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">
                 {f}
               </Badge>
             ))}
@@ -203,7 +203,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
       <Separator />
 
       <Row icon={<StickyNote size={12} />} label="说明">
-        <p className="text-[11px] leading-5 text-slate-400">
+        <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500">
           健康度为 LLM 巡检评估结果，仅供架构演进参考；关键入口与文件归属来自语义代码地图（{map.meta.generator}）。
         </p>
       </Row>
@@ -225,14 +225,14 @@ function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; la
     <>
       <div>
         <div className="flex items-center gap-2">
-          <Boxes size={16} className="text-slate-500" />
-          <h2 className="text-[15px] font-bold text-slate-800">{layer.name}</h2>
-          <Badge variant="outline" className="border-slate-200 text-slate-500">
+          <Boxes size={16} className="text-slate-500 dark:text-slate-400" />
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{layer.name}</h2>
+          <Badge variant="outline" className="border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
             {layer.id}
           </Badge>
         </div>
-        <p className="mt-1 text-[12px] leading-5 text-slate-500">{layer.description}</p>
-        <p className="mt-1 text-[11px] text-slate-400">层序：L{layer.order}（0 为最顶层 / 入口侧）</p>
+        <p className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-400">{layer.description}</p>
+        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">层序：L{layer.order}（0 为最顶层 / 入口侧）</p>
       </div>
 
       <div className="rounded-lg border p-3" style={{ borderColor: `${color}55`, background: `${color}0d` }}>
@@ -245,7 +245,7 @@ function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; la
             {onChatAbout && (
               <button
                 onClick={() => onChatAbout({ refId: layer.id, refName: layer.name, kind: 'layer' })}
-                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-micro font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-micro font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600"
                 title="就此层发起对话：跳转「任务对话」并自动带入层上下文"
               >
                 <MessagesSquare size={10} /> 就此对话
@@ -260,11 +260,11 @@ function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; la
             </button>
           </div>
         </div>
-        <p className="mt-1 text-cap text-slate-400">
+        <p className="mt-1 text-cap text-slate-400 dark:text-slate-500">
           {mods.length} 模块 · 逆向依赖 <span className="tnum">{violations.length}</span> 条
         </p>
-        <p className="mt-2 flex items-start gap-1.5 text-cap leading-4 text-slate-500">
-          <Info size={11} className="mt-0.5 shrink-0 text-slate-400" />
+        <p className="mt-2 flex items-start gap-1.5 text-cap leading-4 text-slate-500 dark:text-slate-400">
+          <Info size={11} className="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500" />
           层健康是成员模块分数的聚合参考，并非 LLM 独立评估；LLM 评估仅模块级与架构级两级。
         </p>
       </div>
@@ -272,25 +272,25 @@ function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; la
       <Row icon={<Flag size={12} />} label={`层间逆向依赖（${violations.length}）`}>
         <div className="space-y-1.5">
           {violations.slice(0, 8).map((e, i) => (
-            <div key={i} className="flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1.5 text-cap text-red-600">
+            <div key={i} className="flex items-center gap-1.5 rounded-md bg-red-50 dark:bg-red-950/40 px-2 py-1.5 text-cap text-red-600">
               <span className="font-mono font-medium">{e.from}</span>
               <span className="text-red-400">→</span>
               <span className="font-mono font-medium">{e.to}</span>
               <span className="ml-auto truncate text-red-400">{e.label ?? e.type}</span>
             </div>
           ))}
-          {violations.length === 0 && <p className="text-[11px] text-slate-400">（无，该层方向约束良好）</p>}
+          {violations.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无，该层方向约束良好）</p>}
         </div>
       </Row>
 
       <Row icon={<Boxes size={12} />} label={`成员模块（${mods.length}）`}>
         <div className="space-y-1.5">
           {mods.map((m) => (
-            <div key={m.id} className="flex items-center gap-2 rounded-md bg-slate-50 px-2.5 py-2">
+            <div key={m.id} className="flex items-center gap-2 rounded-md bg-slate-50 dark:bg-slate-950/70 px-2.5 py-2">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: healthColor(m.health.score) }} />
               <div className="min-w-0">
-                <div className="text-[12px] font-medium text-slate-700">{m.name}</div>
-                <div className="truncate text-micro text-slate-400">{m.responsibility}</div>
+                <div className="text-[12px] font-medium text-slate-700 dark:text-slate-200">{m.name}</div>
+                <div className="truncate text-micro text-slate-400 dark:text-slate-500">{m.responsibility}</div>
               </div>
               <span className="ml-auto text-cap font-semibold" style={{ color: healthColor(m.health.score) }}>
                 {m.health.score}
@@ -301,7 +301,7 @@ function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; la
       </Row>
 
       {downViolations > 0 && (
-        <p className="text-cap leading-4 text-slate-400">
+        <p className="text-cap leading-4 text-slate-400 dark:text-slate-500">
           其中 {downViolations} 条为指向更上层的逆向依赖（本层模块主动引用上层）。
         </p>
       )}
@@ -320,7 +320,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
     <>
       <div>
         <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-bold text-slate-800">{sub.name}</h2>
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{sub.name}</h2>
           {/* M4-1.5：子模块补上修复入口（模块/层都有，此前独缺） */}
           <button
             onClick={() => onCreateTask(buildSubmoduleTask(parent, sub))}
@@ -329,12 +329,12 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
           >
             <Wrench size={10} /> 发起修复
           </button>
-          <Badge variant="outline" className="border-slate-200 text-slate-500">
+          <Badge variant="outline" className="border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
             {sub.id}
           </Badge>
         </div>
-        <p className="mt-1 text-[12px] leading-5 text-slate-500">{sub.responsibility}</p>
-        <p className="mt-1 text-[11px] text-slate-400">
+        <p className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-400">{sub.responsibility}</p>
+        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
           所属模块：{parent.name}（内部结构，无层概念）
         </p>
       </div>
@@ -344,19 +344,19 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
           <span className="text-[11px] font-semibold" style={{ color }}>
             {healthLabel(sub.health.score)} · {sub.health.score}/100
           </span>
-          <span className="text-cap text-slate-400">
+          <span className="text-cap text-slate-400 dark:text-slate-500">
             coupling {sub.health.coupling} · complexity {sub.health.complexity} · churn {sub.health.churn ?? 'n/a'}
           </span>
         </div>
-        {sub.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600">{sub.health.review_note}</p>}
+        {sub.health.review_note && <p className="mt-2 text-[12px] leading-5 text-slate-600 dark:text-slate-300">{sub.health.review_note}</p>}
       </div>
 
       <Row icon={<KeyRound size={12} />} label="关键入口">
         <div className="space-y-1.5">
           {sub.key_entries.slice(0, 6).map((k) => (
-            <div key={k.file + k.symbol} className="rounded-md bg-slate-50 px-2.5 py-1.5">
-              <div className="font-mono text-[11px] font-medium text-slate-700">{k.symbol}</div>
-              <div className="truncate font-mono text-micro text-slate-400">{k.file}</div>
+            <div key={k.file + k.symbol} className="rounded-md bg-slate-50 dark:bg-slate-950/70 px-2.5 py-1.5">
+              <div className="font-mono text-[11px] font-medium text-slate-700 dark:text-slate-200">{k.symbol}</div>
+              <div className="truncate font-mono text-micro text-slate-400 dark:text-slate-500">{k.file}</div>
             </div>
           ))}
         </div>
@@ -365,7 +365,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
       <Row icon={<FileCode2 size={12} />} label="文件归属">
         <div className="space-y-1">
           {sub.files.map((f) => (
-            <div key={f} className="truncate font-mono text-cap text-slate-500">{f}</div>
+            <div key={f} className="truncate font-mono text-cap text-slate-500 dark:text-slate-400">{f}</div>
           ))}
         </div>
       </Row>
@@ -373,18 +373,18 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
       <Row icon={<ArrowDownToLine size={12} />} label={`内部依赖（${deps.length}）`}>
         <div className="flex flex-wrap gap-1.5">
           {deps.map((d) => (
-            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">{d.name}</Badge>
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{d.name}</Badge>
           ))}
-          {deps.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+          {deps.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
 
       <Row icon={<ArrowUpFromLine size={12} />} label={`被内部依赖（${dependents.length}）`}>
         <div className="flex flex-wrap gap-1.5">
           {dependents.map((d) => (
-            <Badge key={d.id} variant="secondary" className="bg-slate-100 text-slate-600">{d.name}</Badge>
+            <Badge key={d.id} variant="secondary" className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{d.name}</Badge>
           ))}
-          {dependents.length === 0 && <p className="text-[11px] text-slate-400">（无）</p>}
+          {dependents.length === 0 && <p className="text-[11px] text-slate-400 dark:text-slate-500">（无）</p>}
         </div>
       </Row>
 
@@ -392,7 +392,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
         <Row icon={<Flag size={12} />} label="腐化标记">
           <div className="flex flex-wrap gap-1.5">
             {sub.health.decay_flags.map((f) => (
-              <Badge key={f} className="border-red-200 bg-red-50 font-normal text-red-600">{f}</Badge>
+              <Badge key={f} className="border-red-200 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">{f}</Badge>
             ))}
           </div>
         </Row>
@@ -401,7 +401,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
       <Separator />
 
       <Row icon={<Info size={12} />} label="说明">
-        <p className="text-[11px] leading-5 text-slate-400">
+        <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500">
           子模块健康为<b>展开时的派生评估</b>（父模块内部的实现质量），不回流父模块分、不写入主地图文件；
           LLM 独立评估仍只有模块级与架构级两级。生成者：{submap.generator}。
         </p>
@@ -425,8 +425,8 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
   const scopeModuleName = module?.name ?? parent?.name
 
   return (
-    <aside className="anim-panel-in flex h-full shrink-0 flex-col border-l border-slate-200 bg-white" style={{ width: width ?? 340 }}>
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+    <aside className="anim-panel-in flex h-full shrink-0 flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" style={{ width: width ?? 340 }}>
+      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
         <div className="flex gap-1">
           {/* M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页 */}
           {(
@@ -440,7 +440,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
               key={key as string}
               onClick={() => onTabChange(key as typeof tab)}
               className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] font-semibold transition-colors ${
-                tab === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'
+                tab === key ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600'
               }`}
             >
               {icon}
@@ -448,7 +448,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             </button>
           ))}
         </div>
-        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+        <button onClick={onClose} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
           <X size={16} />
         </button>
       </div>
@@ -468,9 +468,9 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             占位保留一个版本期： muscle memory 的迁移提示长在原页签位置上（方案 3.3/评审🟡3） */}
         {tab === 'chat' && (
           <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
-            <MessagesSquare size={22} className="text-slate-300" />
-            <p className="text-[12px] font-semibold text-slate-700">对话已迁至「任务对话」</p>
-            <p className="max-w-[240px] text-[11px] leading-4 text-slate-400">
+            <MessagesSquare size={22} className="text-slate-300 dark:text-slate-600" />
+            <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">对话已迁至「任务对话」</p>
+            <p className="max-w-[240px] text-[11px] leading-4 text-slate-400 dark:text-slate-500">
               当前选中{module ? '模块' : layer ? '架构层' : '对象'}的上下文会自动带过去
             </p>
             {onChatAbout && (module || layer || parent) && (
@@ -490,7 +490,7 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
               </button>
             )}
             {!module && !layer && !parent && (
-              <p className="text-micro text-slate-300">在地图上选中模块或层后，可带上下文前往</p>
+              <p className="text-micro text-slate-300 dark:text-slate-600">在地图上选中模块或层后，可带上下文前往</p>
             )}
           </div>
         )}
@@ -500,14 +500,14 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} onCreateTask={onCreateTask} />
         )}
         {tab === 'detail' && !module && !layer && !sub && selection?.kind === 'submodule' && (
-          <p className="pt-8 text-center text-[12px] leading-5 text-slate-400">
+          <p className="pt-8 text-center text-[12px] leading-5 text-slate-400 dark:text-slate-500">
             子模块数据不存在或仍在加载中，请稍候再点击。
           </p>
         )}
         {/* M4-1 详情空选态 = 地图级摘要（设计师要求：禁止空白，三态规范最高频面板落地） */}
         {tab === 'detail' && !module && !layer && !sub && selection?.kind !== 'submodule' && (
           <div className="space-y-3 pt-2">
-            <p className="text-[11px] font-semibold text-slate-400">地图概览</p>
+            <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">地图概览</p>
             <div className="grid grid-cols-2 gap-2">
               {[
                 ['模块', `${map.modules.length}`],
@@ -515,18 +515,18 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
                 ['架构健康分', `${map.health.score}`],
                 ['耦合度', map.health.coupling],
               ].map(([k, v]) => (
-                <div key={k} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <p className="text-micro text-slate-400">{k}</p>
-                  <p className="text-[15px] font-bold text-slate-700">{v}</p>
+                <div key={k} className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 px-3 py-2">
+                  <p className="text-micro text-slate-400 dark:text-slate-500">{k}</p>
+                  <p className="text-[15px] font-bold text-slate-700 dark:text-slate-200">{v}</p>
                 </div>
               ))}
             </div>
             {map.health.review_note && (
-              <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">
+              <p className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
                 {map.health.review_note}
               </p>
             )}
-            <p className="text-cap leading-5 text-slate-400">
+            <p className="text-cap leading-5 text-slate-400 dark:text-slate-500">
               点击画布中的模块卡片、层标签或展开的子模块查看详情；选中模块后顶部工具栏可展开内部结构。
             </p>
           </div>

@@ -64,15 +64,15 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
   }
 
   return (
-    <div className="anim-drawer-in fixed inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l border-slate-200 bg-white shadow-xl">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-        <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
+    <div className="anim-drawer-in fixed inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl">
+      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+        <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800 dark:text-slate-100">
           <Wrench size={14} className="text-blue-500" /> 发起任务
-          <span className="rounded-full bg-blue-50 px-1.5 py-px text-micro font-semibold text-blue-500">
+          <span className="rounded-full bg-blue-50 dark:bg-blue-950/40 px-1.5 py-px text-micro font-semibold text-blue-500">
             {{ module: '模块', concern: '问题', layer: '层', manual: '手动' }[draft.source]}
           </span>
         </span>
-        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+        <button onClick={onClose} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
           <X size={16} />
         </button>
       </div>
@@ -85,47 +85,47 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             {showContext ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
           {showContext && (
-            <div className="mt-2 space-y-1 text-cap leading-4 text-slate-500">
+            <div className="mt-2 space-y-1 text-cap leading-4 text-slate-500 dark:text-slate-400">
               <p>
                 模块 {selected.length} 个 · 职责/健康度/边界 · 相关违规边 {violationCount} 条
               </p>
               {violationCount > 0 && <p className="text-red-500">包含 direction_violation 证据，agent 修复后需消除</p>}
-              <p className="text-slate-400">执行前 agent 会就模糊点向你提问澄清，请留意任务页的通知</p>
+              <p className="text-slate-400 dark:text-slate-500">执行前 agent 会就模糊点向你提问澄清，请留意任务页的通知</p>
             </div>
           )}
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">任务标题</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">任务标题</label>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="修复任务"
-            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 outline-none focus:border-blue-300"
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[12px] text-slate-700 dark:text-slate-200 outline-none focus:border-blue-300"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">需求描述</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">需求描述</label>
           <textarea
             rows={5}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300"
+            className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:border-blue-300"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">影响模块（从地图选择）</label>
-          <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 p-2.5">
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">影响模块（从地图选择）</label>
+          <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 p-2.5">
             {map.modules.map((m) => (
               <span key={m.id} className="flex items-center gap-0.5">
                 <button
                   onClick={() => toggleModule(m.id)}
                   className={`rounded-full border px-2.5 py-1 text-cap font-medium transition-colors ${
                     selected.includes(m.id)
-                      ? 'border-blue-300 bg-blue-50 text-blue-700'
-                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                      ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                   }`}
                 >
                   {m.name}
@@ -133,7 +133,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
                 {onLocateModule && (
                   <button
                     onClick={() => onLocateModule(m.id)}
-                    className="rounded-full p-0.5 text-slate-300 hover:text-blue-500"
+                    className="rounded-full p-0.5 text-slate-300 dark:text-slate-600 hover:text-blue-500"
                     title="在画布中定位该模块"
                   >
                     <Crosshair size={9} />
@@ -145,25 +145,25 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">验收标准</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">验收标准</label>
           <textarea
             rows={3}
             value={acceptance}
             onChange={(e) => setAcceptance(e.target.value)}
-            className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300"
+            className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:border-blue-300"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-semibold text-slate-500">审批模式</label>
+          <label className="mb-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">审批模式</label>
           {/* 改进#7：监督档——计划时风险预评估，低危直通、高危才停审批关 */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5">
+          <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5">
             {(['supervised', 'auto', 'manual'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTrust(t)}
                 className={`flex-1 rounded-md py-1.5 text-[11px] font-semibold transition-colors ${
-                  trust === t ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                  trust === t ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                 }`}
                 title={t === 'supervised' ? '风险预评估：低危自动过计划关，执行后停 Diff/报告两道人工关（推荐）' : t === 'auto' ? '三道关全跳过，全程留痕' : '计划/Diff/报告三道关逐个人审'}
               >
@@ -173,24 +173,24 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
           </div>
           {/* ui-test P1：监督档的自动通过语义必须在提交前告知，不能事后才在评审轮回里看到 */}
           {trust === 'supervised' && (
-            <p className="mt-1 text-[10px] leading-4 text-slate-400">
+            <p className="mt-1 text-[10px] leading-4 text-slate-400 dark:text-slate-500">
               提交后先做风险预评估：低危自动通过任务书并立即执行，完成后停在 Diff 关等你审；高危会停下来等你批准。
             </p>
           )}
           {trust === 'auto' && (
-            <p className="mt-1 text-[10px] leading-4 text-slate-400">提交后立即执行，三道关全跳过，全程留痕可回溯。</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-400 dark:text-slate-500">提交后立即执行，三道关全跳过，全程留痕可回溯。</p>
           )}
           {trust === 'manual' && (
-            <p className="mt-1 text-[10px] leading-4 text-slate-400">提交后停在任务书审批，批准后按 需求矩阵 → 方案设计 → 实施 逐阶段评审。</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-400 dark:text-slate-500">提交后停在任务书审批，批准后按 需求矩阵 → 方案设计 → 实施 逐阶段评审。</p>
           )}
         </div>
       </div>
 
-      <div className="border-t border-slate-100 p-3">
+      <div className="border-t border-slate-100 dark:border-slate-800 p-3">
         {created ? (
           /* S1-5：创建成功不自动消失——引导用户去任务页签跟踪审批（此前链路断在面板静默关闭） */
           <div className="space-y-2">
-            <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-700">
+            <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 text-[12px] font-semibold text-emerald-700">
               <Check size={13} /> 任务已创建{trust === 'manual' ? '，等待计划审批' : trust === 'supervised' ? '，监督模式：执行完成后将停在 Diff 审批关' : '，自动模式直通执行'}
             </p>
             <button
@@ -203,7 +203,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             >
               <ArrowRight size={13} /> 前往任务页签跟踪
             </button>
-            <button onClick={onClose} className="w-full py-0.5 text-cap text-slate-400 hover:text-slate-600">
+            <button onClick={onClose} className="w-full py-0.5 text-cap text-slate-400 dark:text-slate-500 hover:text-slate-600">
               留在画布
             </button>
           </div>
@@ -211,7 +211,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
           <>
             {agentReady === false && (
               /* M2 降级（R6）：agent 缺失时提交按钮禁用的原因必须可见 */
-              <p className="mb-2 flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-1.5 text-cap font-semibold text-amber-700">
+              <p className="mb-2 flex items-center gap-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-cap font-semibold text-amber-700">
                 未检测到执行 agent——任务需要本地 CLI agent。请先安装（顶部横幅有一键复制安装命令）或在设置中配置。
               </p>
             )}
@@ -225,7 +225,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
             </button>
           </>
         )}
-        {!backendRepo && !created && <p className="mt-1.5 text-center text-cap text-slate-400">需要本地后端在线</p>}
+        {!backendRepo && !created && <p className="mt-1.5 text-center text-cap text-slate-400 dark:text-slate-500">需要本地后端在线</p>}
       </div>
     </div>
   )

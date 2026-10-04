@@ -127,14 +127,14 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-[15px] font-bold text-slate-800">{scopeName ? `${scopeName} 的问题` : '问题清单'}</h2>
-        <p className="mt-1 text-[11px] text-slate-400">
+        <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{scopeName ? `${scopeName} 的问题` : '问题清单'}</h2>
+        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
           {scopeName ? `选区收敛 · 该模块 ${issues.length} 项` : `共 ${issues.length} 项`} · 按严重度排序，同档按影响面（被依赖数）排序
         </p>
       </div>
 
       {issues.length === 0 && (
-        <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2.5 text-[12px] text-emerald-700">
+        <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2.5 text-[12px] text-emerald-700">
           <Info size={13} /> 当前地图没有检出问题，保持健康。
         </p>
       )}
@@ -144,7 +144,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
           <div
             key={issue.key}
             className={`rounded-lg border p-3 transition-colors ${
-              issue.moduleId ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/40' : 'border-red-200 bg-red-50/40'
+              issue.moduleId ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/40' : 'border-red-200 bg-red-50/40 dark:bg-red-950/30'
             }`}
             style={issue.moduleId ? { borderColor: '#e2e8f0' } : undefined}
             onClick={() => issue.moduleId && onLocate(issue.moduleId!)}
@@ -154,7 +154,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
               {issue.scope === 'arch' ? (
                 <span className="text-[11px] font-bold text-red-600">架构级</span>
               ) : (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
                   {issue.moduleName}
                   <span
                     className="h-1.5 w-1.5 rounded-full"
@@ -162,12 +162,12 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
                   />
                 </span>
               )}
-              <span className="ml-auto text-micro text-slate-400">影响 {issue.impact} 模块</span>
+              <span className="ml-auto text-micro text-slate-400 dark:text-slate-500">影响 {issue.impact} 模块</span>
             </div>
 
-            <p className="mt-1.5 text-[12px] leading-5 text-slate-700">{issue.finding}</p>
+            <p className="mt-1.5 text-[12px] leading-5 text-slate-700 dark:text-slate-200">{issue.finding}</p>
 
-            <p className="mt-1 flex items-start gap-1 text-[11px] leading-5 text-slate-500">
+            <p className="mt-1 flex items-start gap-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
               <ArrowRight size={11} className="mt-1 shrink-0 text-emerald-600" />
               {issue.suggestion}
             </p>
@@ -207,7 +207,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
                     })
                   }
                 }}
-                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-micro font-bold text-blue-600 hover:bg-blue-100"
+                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-bold text-blue-600 hover:bg-blue-100"
                 title="指哪打哪：以该问题为上下文发起修复任务"
               >
                 <Wrench size={9} /> 修复
@@ -217,7 +217,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
         ))}
       </div>
 
-      <p className="flex items-start gap-1.5 text-cap leading-4 text-slate-400">
+      <p className="flex items-start gap-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
         <Info size={11} className="mt-0.5 shrink-0" />
         严重度来自 LLM 问题提名（concerns）；影响面为确定性统计（被依赖数）。旧版地图数据无 concerns 字段时，本列表由腐化标记与评审意见兜底生成。
       </p>

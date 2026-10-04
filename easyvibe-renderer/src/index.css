@@ -214,3 +214,37 @@ input, textarea {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ===== 深蓝暗黑模式（2026-10-04）===== */
+/* 基底：html.dark 挂 Tailwind class 策略；这里兜 CSS 侧无法带 dark: 的部位 */
+.dark body {
+  background-color: rgb(2 6 23); /* slate-950 深蓝黑 */
+  color: rgb(226 232 240);
+}
+/* 液态玻璃在暗色下加深底色、保持模糊 */
+.dark .glass {
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+/* React Flow 原生控件视觉对齐（暗色） */
+.dark .react-flow__controls button {
+  background: rgb(15 23 42);
+  border-bottom: 1px solid rgb(51 65 85);
+  color: rgb(148 163 184);
+  fill: rgb(148 163 184);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.dark .react-flow__controls button:hover {
+  background: rgb(30 41 59);
+  color: rgb(226 232 240);
+}
+.dark .react-flow__minimap {
+  background: rgb(15 23 42) !important;
+  border-radius: 8px;
+  border: 1px solid rgb(51 65 85);
+}
+/* 暗色下连线标签可读性 */
+.dark .react-flow__edge-textbg {
+  fill: rgb(15 23 42);
+}

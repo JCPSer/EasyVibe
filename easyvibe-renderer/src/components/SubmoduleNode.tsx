@@ -27,7 +27,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
   if (data.loading || !data.sub) {
     return (
       <div
-        className="flex h-full w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-[11px] text-slate-400"
+        className="flex h-full w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-950/70 text-[11px] text-slate-400 dark:text-slate-500"
         style={{ width: SUB_W, height: SUB_H }}
       >
         <Loader2 size={13} className="animate-spin" /> 分析中…
@@ -40,7 +40,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
 
   return (
     <div
-      className="rounded-lg border bg-white shadow-sm"
+      className="rounded-lg border bg-white dark:bg-slate-900 shadow-sm"
       style={{
         width: SUB_W,
         height: SUB_H,
@@ -60,8 +60,8 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-[12px] font-semibold leading-4 text-slate-800">{sub.name}</div>
-          <div className="mt-0.5 line-clamp-2 text-micro leading-3.5 text-slate-500">{sub.responsibility}</div>
+          <div className="truncate text-[12px] font-semibold leading-4 text-slate-800 dark:text-slate-100">{sub.name}</div>
+          <div className="mt-0.5 line-clamp-2 text-micro leading-3.5 text-slate-500 dark:text-slate-400">{sub.responsibility}</div>
         </div>
         <span
           className="shrink-0 rounded-full px-1.5 py-0.5 text-micro font-bold"
@@ -72,7 +72,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
         </span>
       </div>
 
-      <div className="mt-1.5 flex items-center gap-2 text-micro text-slate-400">
+      <div className="mt-1.5 flex items-center gap-2 text-micro text-slate-400 dark:text-slate-500">
         <span className="flex items-center gap-0.5">
           <FileCode2 size={9} /> {sub.files.length} 文件
         </span>

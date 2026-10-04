@@ -57,7 +57,7 @@ const ST_META: Record<string, { label: string; cls: string }> = {
   A: { label: 'A', cls: 'bg-emerald-100 text-emerald-700' },
   D: { label: 'D', cls: 'bg-red-100 text-red-600' },
   R: { label: 'R', cls: 'bg-indigo-100 text-indigo-700' },
-  '?': { label: '?', cls: 'bg-slate-100 text-slate-500' },
+  '?': { label: '?', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' },
 }
 
 export function GitPage({
@@ -299,7 +299,7 @@ export function GitPage({
   }
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
   }
 
   const freshMeta =
@@ -312,30 +312,30 @@ export function GitPage({
     <div className="flex h-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-[15px] font-bold text-slate-800">Git 工作树</h2>
-          <p className="text-[11px] text-slate-400">提交前看见架构代价，提交时绑定任务留痕，提交后联动复检。</p>
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Git 工作树</h2>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">提交前看见架构代价，提交时绑定任务留痕，提交后联动复检。</p>
         </div>
 
         {/* 状态条 */}
-        <div className="mb-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
-          <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-bold text-slate-800">
-            <GitBranch size={12} className="text-slate-400" />
+        <div className="mb-3 flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5">
+          <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-2.5 py-1 text-[12px] font-bold text-slate-800 dark:text-slate-100">
+            <GitBranch size={12} className="text-slate-400 dark:text-slate-500" />
             {status?.branch ?? '—'}
           </span>
           {status?.upstream && (
             <span className="tnum flex items-center gap-1.5 text-[12px]">
               <span className="flex items-center gap-0.5 font-bold text-emerald-500"><ArrowUpFromLine size={11} />{status.ahead}</span>
               <span className="flex items-center gap-0.5 font-bold text-amber-500"><ArrowDownToLine size={11} />{status.behind}</span>
-              <span className="text-cap text-slate-300">与 {status.upstream}</span>
+              <span className="text-cap text-slate-300 dark:text-slate-600">与 {status.upstream}</span>
             </span>
           )}
           <span className="flex gap-1.5">
-            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-cap font-semibold text-slate-500"><b className="text-amber-600">{totals.M}</b> 修改</span>
-            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-cap font-semibold text-slate-500"><b className="text-emerald-600">{totals.A + totals['?']}</b> 新增</span>
-            <span className="tnum rounded-full bg-slate-100 px-2 py-0.5 text-cap font-semibold text-slate-500"><b className="text-red-500">{totals.D}</b> 删除</span>
-            <span className="tnum rounded-full bg-blue-50 px-2 py-0.5 text-cap font-semibold text-blue-600">影响 <b>{groups.filter((g) => g.id !== '_other').length}</b> 个模块</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-amber-600">{totals.M}</b> 修改</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-emerald-600">{totals.A + totals['?']}</b> 新增</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-red-500">{totals.D}</b> 删除</span>
+            <span className="tnum rounded-full bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-cap font-semibold text-blue-600">影响 <b>{groups.filter((g) => g.id !== '_other').length}</b> 个模块</span>
           </span>
-          <span className="flex items-center gap-1.5 rounded-full border border-slate-100 px-2 py-0.5 text-cap font-semibold" style={{ color: freshMeta.color }}>
+          <span className="flex items-center gap-1.5 rounded-full border border-slate-100 dark:border-slate-800 px-2 py-0.5 text-cap font-semibold" style={{ color: freshMeta.color }}>
             <i className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: freshMeta.color }} />
             {freshMeta.label}
           </span>
@@ -343,7 +343,7 @@ export function GitPage({
             <button
               onClick={() => sync('pull')}
               disabled={!!busy}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
             >
               {busy === 'pull' ? <Loader2 size={11} className="animate-spin" /> : `拉取 ↓${status?.behind ?? 0}`}
             </button>
@@ -358,7 +358,7 @@ export function GitPage({
         </div>
 
         {gitError && (
-          <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-700">
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-[12px] text-amber-700">
             <AlertTriangle size={14} className="shrink-0" />
             Git 状态不可用：{gitError}（该仓库可能不是 git 仓库）
           </div>
@@ -366,16 +366,16 @@ export function GitPage({
 
         <div className="grid grid-cols-5 gap-3">
           {/* 左列：未提交变更 · 提交前预检 */}
-          <div className="col-span-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <span className="text-[13px] font-bold text-slate-700">未提交变更 · 提交前预检</span>
-              <span className="text-micro text-slate-300">模块色点 = 当前健康分</span>
+          <div className="col-span-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">未提交变更 · 提交前预检</span>
+              <span className="text-micro text-slate-300 dark:text-slate-600">模块色点 = 当前健康分</span>
               <div className="ml-auto flex items-center gap-1.5">
                 <input
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="过滤文件…"
-                  className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-cap text-slate-600 focus:border-blue-300 focus:outline-none"
+                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap text-slate-600 dark:text-slate-300 focus:border-blue-300 focus:outline-none"
                 />
                 {/* 重审 P2：全部撤销（此前误改一堆只能逐个点）——两步确认，红色警示语义 */}
                 {status && status.files.length > 0 &&
@@ -401,7 +401,7 @@ export function GitPage({
                   ))}
                 <button
                   onClick={load}
-                  className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-600"
                   title="刷新"
                 >
                   <RefreshCw size={11} />
@@ -416,7 +416,7 @@ export function GitPage({
 
             {/* 红线警示 */}
             {redline.length > 0 && (
-              <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+              <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5">
                 <AlertTriangle size={15} className="shrink-0 text-amber-500" />
                 <p className="min-w-0 flex-1 text-[11px] leading-4 text-amber-700">
                   <b>红线警示：</b>
@@ -426,13 +426,13 @@ export function GitPage({
                 <button
                   onClick={startPatrol}
                   disabled={patroling}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 disabled:opacity-40"
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 disabled:opacity-40"
                 >
                   {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 全量巡检
                 </button>
                 <button
                   onClick={onOpenReview}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100"
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100"
                 >
                   <ShieldCheck size={10} /> 发起评审
                 </button>
@@ -455,28 +455,28 @@ export function GitPage({
                           return n
                         })
                       }
-                      className="flex w-full items-center gap-2 bg-slate-50/50 px-4 py-2.5 text-left hover:bg-slate-50"
+                      className="flex w-full items-center gap-2 bg-slate-50/50 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/70"
                     >
                       {score !== null && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: healthColor(score) }} />}
-                      <span className="text-[12px] font-bold text-slate-700">{g.name}</span>
-                      <span className="text-micro text-slate-300">{g.files.length} 个文件</span>
+                      <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{g.name}</span>
+                      <span className="text-micro text-slate-300 dark:text-slate-600">{g.files.length} 个文件</span>
                       {score !== null && (
                         <span className="tnum text-cap font-bold" style={{ color: healthColor(score) }}>{score}</span>
                       )}
                       <span className="tnum ml-auto text-cap font-bold text-emerald-600">+{g.adds}</span>
                       <span className="tnum text-cap font-bold text-red-500">−{g.dels}</span>
-                      <span className="text-micro text-slate-300">{isCollapsed ? '▸' : '▾'}</span>
+                      <span className="text-micro text-slate-300 dark:text-slate-600">{isCollapsed ? '▸' : '▾'}</span>
                     </button>
                     {!isCollapsed &&
                       g.files.map((f) => {
                         const a = attribOf(f.path)
                         const st = ST_META[f.status] ?? ST_META['?']
                         return (
-                          <div key={f.path} className="group flex items-center gap-2.5 py-[7px] pl-8 pr-4 hover:bg-slate-50/60">
+                          <div key={f.path} className="group flex items-center gap-2.5 py-[7px] pl-8 pr-4 hover:bg-slate-50/60 dark:bg-slate-900/60">
                             <span className={`flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[5px] text-micro font-extrabold ${st.cls}`}>
                               {st.label}
                             </span>
-                            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-600">
+                            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-600 dark:text-slate-300">
                               {f.orig ? `${f.orig} → ${f.path}` : f.path}
                             </span>
                             {a.kind === 'task' && (
@@ -485,7 +485,7 @@ export function GitPage({
                               </span>
                             )}
                             {a.kind === 'ev' && (
-                              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-px text-micro font-semibold text-slate-500">巡检写回</span>
+                              <span className="shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-px text-micro font-semibold text-slate-500 dark:text-slate-400">巡检写回</span>
                             )}
                             <span className="tnum w-[72px] shrink-0 text-right text-micro font-bold">
                               <i className="not-italic text-emerald-600">+{f.adds ?? 0}</i>{' '}
@@ -515,49 +515,49 @@ export function GitPage({
                 )
               })}
               {(!status || status.files.length === 0) && !gitError && (
-                <p className="py-10 text-center text-[12px] text-slate-300">工作树干净，没有未提交的变更。</p>
+                <p className="py-10 text-center text-[12px] text-slate-300 dark:text-slate-600">工作树干净，没有未提交的变更。</p>
               )}
             </div>
 
-            <div className="flex gap-4 border-t border-slate-100 px-4 py-2.5 text-cap text-slate-400">
-              <span>共影响 <b className="text-slate-600">{groups.filter((g) => g.id !== '_other').length}</b> 个模块 · <b className="tnum text-slate-600">+{totals.adds} −{totals.dels}</b></span>
-              <span>未映射文件 <b className="text-slate-600">{groups.find((g) => g.id === '_other')?.files.length ?? 0}</b> 个</span>
-              <span className="ml-auto">对比基线：<b className="text-slate-600">HEAD</b></span>
+            <div className="flex gap-4 border-t border-slate-100 dark:border-slate-800 px-4 py-2.5 text-cap text-slate-400 dark:text-slate-500">
+              <span>共影响 <b className="text-slate-600 dark:text-slate-300">{groups.filter((g) => g.id !== '_other').length}</b> 个模块 · <b className="tnum text-slate-600 dark:text-slate-300">+{totals.adds} −{totals.dels}</b></span>
+              <span>未映射文件 <b className="text-slate-600 dark:text-slate-300">{groups.find((g) => g.id === '_other')?.files.length ?? 0}</b> 个</span>
+              <span className="ml-auto">对比基线：<b className="text-slate-600 dark:text-slate-300">HEAD</b></span>
             </div>
 
             {/* 提交框 */}
-            <div className="border-t border-slate-100">
+            <div className="border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2 px-4 pt-2.5">
-                <span className="text-[11px] font-bold text-slate-500">提交说明</span>
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">提交说明</span>
                 <button
                   onClick={generateMessage}
                   disabled={generating || !status || status.files.length === 0}
-                  className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-micro font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                  className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                 >
                   {generating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                   {generating ? '生成中…' : dominantTask ? `从任务上下文生成` : 'AI 生成'}
                 </button>
                 {dominantTask && (
-                  <span className="text-micro text-slate-300">已关联任务 · footer 随提交写入，历史可反查</span>
+                  <span className="text-micro text-slate-300 dark:text-slate-600">已关联任务 · footer 随提交写入，历史可反查</span>
                 )}
               </div>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="输入提交说明…（如 fix(payment): 修复退款金额计算异常）"
-                className="h-14 w-full resize-none px-4 pt-2 text-[12px] text-slate-700 outline-none"
+                className="h-14 w-full resize-none px-4 pt-2 text-[12px] text-slate-700 dark:text-slate-200 outline-none"
               />
-              <div className="flex items-center gap-3 border-t border-slate-50 bg-slate-50/40 px-4 py-2.5">
-                <span className="text-cap text-slate-400">
-                  将提交 <b className="tnum text-slate-600">{status?.files.length ?? 0}</b> 个文件 · 影响模块{' '}
+              <div className="flex items-center gap-3 border-t border-slate-50 bg-slate-50/40 dark:bg-slate-900/40 px-4 py-2.5">
+                <span className="text-cap text-slate-400 dark:text-slate-500">
+                  将提交 <b className="tnum text-slate-600 dark:text-slate-300">{status?.files.length ?? 0}</b> 个文件 · 影响模块{' '}
                   <b className="text-blue-600">{groups.filter((g) => g.id !== '_other').slice(0, 3).map((g) => g.name).join('、') || '—'}</b>
                 </span>
-                <label className="ml-auto flex items-center gap-1.5 text-micro text-slate-400">
+                <label className="ml-auto flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
                   <input type="checkbox" checked={patrolAfter} onChange={(e) => setPatrolAfter(e.target.checked)} className="accent-blue-600" />
                   提交后触发全量巡检（消耗 LLM token）
                 </label>
                 {redline.length > 0 && (
-                  <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-micro font-semibold text-amber-600">
+                  <span className="flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-semibold text-amber-600">
                     <AlertTriangle size={9} /> 含红线模块 · 仍可提交
                   </span>
                 )}
@@ -679,10 +679,10 @@ function EvolutionChart({
   const maxT = Math.max(now, ...allT)
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-        <span className="text-[13px] font-bold text-slate-700">架构演进对照</span>
-        <span className="text-micro text-slate-300">健康分趋势 × 提交时点</span>
+    <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+      <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">架构演进对照</span>
+        <span className="text-micro text-slate-300 dark:text-slate-600">健康分趋势 × 提交时点</span>
       </div>
       {series.length > 0 && allT.length > 0 ? (
         <div className="px-3 pb-1 pt-2">
@@ -722,11 +722,11 @@ function EvolutionChart({
                 {s.name}
               </span>
             ))}
-            <span className="ml-auto flex items-center gap-1 text-micro text-slate-300">│ 虚线 = 提交时点</span>
+            <span className="ml-auto flex items-center gap-1 text-micro text-slate-300 dark:text-slate-600">│ 虚线 = 提交时点</span>
           </div>
         </div>
       ) : (
-        <p className="py-8 text-center text-cap text-slate-300">受影响模块暂无巡检历史（跑一次巡检后绘制对照）</p>
+        <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">受影响模块暂无巡检历史（跑一次巡检后绘制对照）</p>
       )}
     </div>
   )
@@ -782,17 +782,17 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
   const avatarColor = (s: string) => AV_COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length]
 
   return (
-    <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-        <span className="text-[13px] font-bold text-slate-700">最近提交</span>
-        <span className="text-micro text-slate-300">与任务联动（footer 反查为 P1）</span>
+    <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+      <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">最近提交</span>
+        <span className="text-micro text-slate-300 dark:text-slate-600">与任务联动（footer 反查为 P1）</span>
       </div>
       <div className="px-4 pt-2.5">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="搜索提交 / 模块 / 作者…"
-          className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-cap text-slate-600 focus:border-blue-300 focus:outline-none"
+          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-cap text-slate-600 dark:text-slate-300 focus:border-blue-300 focus:outline-none"
         />
       </div>
       <div className="py-1.5">
@@ -800,22 +800,22 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
           const mods = modsOf(c.files)
           const open = expanded === c.hash
           return (
-            <div key={c.hash} className={`px-4 py-2.5 ${open ? 'bg-blue-50/40' : 'hover:bg-slate-50/60'}`}>
+            <div key={c.hash} className={`px-4 py-2.5 ${open ? 'bg-blue-50/40' : 'hover:bg-slate-50/60 dark:bg-slate-900/60'}`}>
               {/* 整行可点：展开提交详情（此前纯展示，用户反馈） */}
               <button onClick={() => toggle(c.hash)} className="flex w-full items-start gap-2 text-left" title={open ? '收起详情' : '查看提交详情'}>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12px] font-bold text-slate-700">{c.subject}</p>
-                  <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400">
-                    <span className="mono rounded bg-slate-100 px-1 py-px text-micro text-slate-500">{c.short}</span>
+                  <p className="truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{c.subject}</p>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
+                    <span className="mono rounded bg-slate-100 dark:bg-slate-800 px-1 py-px text-micro text-slate-500 dark:text-slate-400">{c.short}</span>
                     <span className="truncate">{c.author}</span>
                     <span className="shrink-0">{relTime(new Date(c.at * 1000).toISOString())}</span>
                   </p>
                   {mods.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {mods.slice(0, 3).map((m) => (
-                        <span key={m} className="rounded-full bg-slate-100 px-1.5 py-px text-micro font-semibold text-slate-500">{m}</span>
+                        <span key={m} className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-px text-micro font-semibold text-slate-500 dark:text-slate-400">{m}</span>
                       ))}
-                      {mods.length > 3 && <span className="rounded-full border border-dashed border-slate-200 px-1.5 py-px text-micro text-slate-300">+{mods.length - 3}</span>}
+                      {mods.length > 3 && <span className="rounded-full border border-dashed border-slate-200 dark:border-slate-700 px-1.5 py-px text-micro text-slate-300 dark:text-slate-600">+{mods.length - 3}</span>}
                     </div>
                   )}
                 </div>
@@ -827,36 +827,36 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
                     {c.author.slice(0, 2).toUpperCase()}
                   </span>
                 </div>
-                <span className={`mt-1 shrink-0 self-start text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`}>
+                <span className={`mt-1 shrink-0 self-start text-slate-300 dark:text-slate-600 transition-transform ${open ? 'rotate-90' : ''}`}>
                   <ChevronRight size={12} />
                 </span>
               </button>
               {open && (
                 <div className="ml-1 mt-2 border-l-2 border-blue-100 pl-3">
-                  {detailLoading && <p className="py-1 text-micro text-slate-400">加载详情…</p>}
+                  {detailLoading && <p className="py-1 text-micro text-slate-400 dark:text-slate-500">加载详情…</p>}
                   {!detailLoading && detail && (
                     <>
-                      {detail.body && <p className="mb-1.5 whitespace-pre-wrap text-[11px] leading-4 text-slate-500">{detail.body}</p>}
+                      {detail.body && <p className="mb-1.5 whitespace-pre-wrap text-[11px] leading-4 text-slate-500 dark:text-slate-400">{detail.body}</p>}
                       {detail.files.length > 0 ? (
                         <div className="space-y-0.5">
                           {detail.files.slice(0, 12).map((f) => (
                             <div key={f.path} className="flex items-center gap-2 text-micro">
-                              <span className="min-w-0 flex-1 truncate font-mono text-slate-600">{f.path}</span>
+                              <span className="min-w-0 flex-1 truncate font-mono text-slate-600 dark:text-slate-300">{f.path}</span>
                               <span className="tnum shrink-0 font-semibold text-emerald-600">+{f.adds}</span>
                               <span className="tnum shrink-0 font-semibold text-red-400">−{f.dels}</span>
                             </div>
                           ))}
-                          {detail.files.length > 12 && <p className="text-micro text-slate-300">…共 {detail.files.length} 个文件</p>}
+                          {detail.files.length > 12 && <p className="text-micro text-slate-300 dark:text-slate-600">…共 {detail.files.length} 个文件</p>}
                         </div>
                       ) : (
-                        <p className="text-micro text-slate-400">无文件变更（merge/空提交）</p>
+                        <p className="text-micro text-slate-400 dark:text-slate-500">无文件变更（merge/空提交）</p>
                       )}
                     </>
                   )}
                   <div className="mt-1.5 flex items-center gap-2">
                     <button
                       onClick={() => void navigator.clipboard?.writeText(c.hash)}
-                      className="flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      className="flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600"
                       title="复制完整 hash"
                     >
                       <Copy size={9} /> 复制 hash
@@ -867,10 +867,10 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
             </div>
           )
         })}
-        {rows.length === 0 && <p className="py-8 text-center text-cap text-slate-300">没有匹配的提交。</p>}
+        {rows.length === 0 && <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">没有匹配的提交。</p>}
       </div>
-      <div className="flex border-t border-slate-100 px-4 py-2 text-micro text-slate-400">
-        <span>共 <b className="tnum text-slate-600">{commits.length}</b> 条提交</span>
+      <div className="flex border-t border-slate-100 dark:border-slate-800 px-4 py-2 text-micro text-slate-400 dark:text-slate-500">
+        <span>共 <b className="tnum text-slate-600 dark:text-slate-300">{commits.length}</b> 条提交</span>
       </div>
     </div>
   )

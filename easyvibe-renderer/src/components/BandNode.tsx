@@ -27,7 +27,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
       {/* 层标签列：可交互 */}
       <button
         onClick={() => onSelect(layer.id)}
-        className="flex h-full flex-col rounded-lg border bg-white/95 text-left shadow-sm transition-colors hover:border-blue-300"
+        className="flex h-full flex-col rounded-lg border bg-white/95 dark:bg-slate-900/95 text-left shadow-sm transition-colors hover:border-blue-300"
         style={{
           width: 190,
           marginTop: 10,
@@ -42,7 +42,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
         title="点击选中该层"
       >
         {/* 改进#5：层序徽标 L0/L1…——分层"可数可辨"，远看知道几层、谁在上谁在下 */}
-        <div className="flex items-center gap-1.5 text-slate-700">
+        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
           <span
             className="rounded px-1 py-px font-mono text-micro font-bold"
             style={{ background: `${color}22`, color }}
@@ -51,13 +51,13 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
           </span>
           <Boxes size={15} strokeWidth={1.8} />
           <span className="text-[13px] font-bold tracking-wide">{layer.name}</span>
-          <ChevronRight size={13} className="ml-auto text-slate-300" />
+          <ChevronRight size={13} className="ml-auto text-slate-300 dark:text-slate-600" />
         </div>
         {/* 层健康色条：整层体温一眼可见 */}
-        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
           <div className="h-full rounded-full" style={{ width: `${stats.avgScore}%`, background: color }} />
         </div>
-        <div className="mt-1 text-micro leading-4 text-slate-400">{layer.description}</div>
+        <div className="mt-1 text-micro leading-4 text-slate-400 dark:text-slate-500">{layer.description}</div>
 
         {/* 层聚合健康 */}
         <div className="mt-auto flex items-center gap-1.5 pt-2">
@@ -65,7 +65,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
           <span className="text-micro font-semibold" style={{ color }}>
             {stats.avgScore}
           </span>
-          <span className="text-micro text-slate-400">
+          <span className="text-micro text-slate-400 dark:text-slate-500">
             · {stats.count} 模块{stats.violations > 0 && ` · ${stats.violations} 逆向`}
           </span>
         </div>

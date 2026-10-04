@@ -14,12 +14,12 @@ interface Props {
 export function PlaceholderPage({ title, description, action, icon: Icon = Construction }: Props) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-500">
         <Icon size={22} />
       </span>
-      <h2 className="text-[15px] font-bold text-slate-700">{title}</h2>
-      <p className="max-w-md text-[12px] leading-6 text-slate-400">{description}</p>
-      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-micro font-semibold text-slate-400">规划中</span>
+      <h2 className="text-[15px] font-bold text-slate-700 dark:text-slate-200">{title}</h2>
+      <p className="max-w-md text-[12px] leading-6 text-slate-400 dark:text-slate-500">{description}</p>
+      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-micro font-semibold text-slate-400 dark:text-slate-500">规划中</span>
       {action && (
         <button
           onClick={action.onClick}

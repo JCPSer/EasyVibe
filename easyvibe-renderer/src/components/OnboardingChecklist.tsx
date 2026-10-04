@@ -23,22 +23,22 @@ export function OnboardingChecklist({
 
   return (
     // 宽度收敛在右栏（w-64）以内：2026-10-04 实弹——w-72 溢出压住任务对话输入框的发送按钮
-    <div className="pointer-events-auto w-60 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur">
+    <div className="pointer-events-auto w-60 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 shadow-xl backdrop-blur">
       <button
         onClick={() => setCollapsed((v) => !v)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
         aria-expanded={!collapsed}
       >
-        <span className="text-[12px] font-bold text-slate-700">{title}</span>
-        <span className="tnum rounded-full bg-slate-100 px-1.5 text-micro font-bold text-slate-500">
+        <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{title}</span>
+        <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 text-micro font-bold text-slate-500 dark:text-slate-400">
           {done}/{total}
         </span>
         <span className="ml-auto flex items-center gap-0.5">
-          {collapsed ? <ChevronUp size={13} className="text-slate-300" /> : <ChevronDown size={13} className="text-slate-300" />}
+          {collapsed ? <ChevronUp size={13} className="text-slate-300 dark:text-slate-600" /> : <ChevronDown size={13} className="text-slate-300 dark:text-slate-600" />}
         </span>
       </button>
       {/* 进度条：完成度可视（Linear 式"还差几步"张力） */}
-      <div className="h-0.5 bg-slate-100">
+      <div className="h-0.5 bg-slate-100 dark:bg-slate-800">
         <div className="h-full bg-blue-500 transition-[width] duration-500" style={{ width: `${(done / total) * 100}%` }} />
       </div>
       {!collapsed && (
@@ -47,22 +47,22 @@ export function OnboardingChecklist({
             const it = items[k]
             const isDone = state.checklist[k] === 'done'
             return (
-              <li key={k} className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+              <li key={k} className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/70">
                 {isDone ? (
                   <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-500" />
                 ) : (
-                  <span className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-slate-300" />
+                  <span className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-slate-300 dark:border-slate-600" />
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className={`text-[12px] font-semibold leading-4 ${isDone ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                  <p className={`text-[12px] font-semibold leading-4 ${isDone ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-700 dark:text-slate-200'}`}>
                     {it.label}
                   </p>
-                  {!isDone && <p className="mt-0.5 text-[10.5px] leading-4 text-slate-400">{it.hint}</p>}
+                  {!isDone && <p className="mt-0.5 text-[10.5px] leading-4 text-slate-400 dark:text-slate-500">{it.hint}</p>}
                 </div>
                 {!isDone && (
                   <button
                     onClick={() => onGo(k)}
-                    className="shrink-0 rounded-md border border-slate-200 px-1.5 py-0.5 text-micro font-semibold text-slate-400 opacity-0 transition-opacity hover:border-blue-300 hover:text-blue-600 group-hover:opacity-100"
+                    className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-micro font-semibold text-slate-400 dark:text-slate-500 opacity-0 transition-opacity hover:border-blue-300 hover:text-blue-600 group-hover:opacity-100"
                   >
                     带我去
                   </button>
@@ -73,7 +73,7 @@ export function OnboardingChecklist({
         </ul>
       )}
       <div className="flex justify-end border-t border-slate-50 px-2 py-1">
-        <button onClick={onDismiss} className="flex items-center gap-0.5 text-micro text-slate-300 hover:text-slate-500" title="关闭（可从顶栏 ? 重新打开）">
+        <button onClick={onDismiss} className="flex items-center gap-0.5 text-micro text-slate-300 dark:text-slate-600 hover:text-slate-500" title="关闭（可从顶栏 ? 重新打开）">
           <X size={10} /> 收起不再提示
         </button>
       </div>

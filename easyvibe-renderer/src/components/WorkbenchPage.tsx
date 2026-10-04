@@ -259,27 +259,27 @@ export function WorkbenchPage({
   return (
     <div className="flex h-full flex-col">
       {/* v0.2 分工显式化：与「任务」页（流程视角）互指——用户此前反馈两页分工不明、很突兀 */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-3 py-1.5">
-        <MessagesSquare size={12} className="shrink-0 text-slate-400" />
-        <p className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-1.5">
+        <MessagesSquare size={12} className="shrink-0 text-slate-400 dark:text-slate-500" />
+        <p className="min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400">
           这里以对话孵化任务；任务流程与门禁进度 → 看「任务」页
         </p>
         <button
           onClick={() => onNavigate('tasks')}
-          className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+          className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
         >
           <ClipboardList size={10} /> 去任务页
         </button>
       </div>
       <div className="flex min-h-0 flex-1">
       {/* 左栏：会话列表（三态行 + 待审批角标） */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700">会话</span>
+      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">会话</span>
           <button
             onClick={createConv}
             disabled={!backendRepo}
-            className="flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-cap font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+            className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
             <Plus size={10} /> 新建会话
           </button>
@@ -290,7 +290,7 @@ export function WorkbenchPage({
               <button
                 onClick={() => setActiveConv(c.id)}
                 className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left ${
-                  c.id === activeConv ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-slate-50'
+                  c.id === activeConv ? 'bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-200' : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
                 }`}
               >
                 {/* AionUI 三态：⚠待审批 > 🌀运行中 > 闲时 */}
@@ -311,10 +311,10 @@ export function WorkbenchPage({
                       if (e.key === 'Escape') setRenamingId(null)
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white px-1 py-px text-[12px] outline-none"
+                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white dark:bg-slate-900 px-1 py-px text-[12px] outline-none"
                   />
                 ) : (
-                  <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === activeConv ? 'font-bold text-blue-700' : 'text-slate-600'}`}>
+                  <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === activeConv ? 'font-bold text-blue-700' : 'text-slate-600 dark:text-slate-300'}`}>
                     {c.title ?? '未命名会话'}
                   </span>
                 )}
@@ -343,7 +343,7 @@ export function WorkbenchPage({
                     >
                       确认
                     </button>
-                    <button onClick={() => setConfirmDelId(null)} className="rounded p-0.5 text-slate-400 hover:text-slate-600" title="取消">
+                    <button onClick={() => setConfirmDelId(null)} className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600" title="取消">
                       <X size={10} />
                     </button>
                   </>
@@ -354,14 +354,14 @@ export function WorkbenchPage({
                         setRenamingId(c.id)
                         setRenameVal(c.title ?? '')
                       }}
-                      className="rounded p-0.5 text-slate-300 hover:text-blue-500"
+                      className="rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-blue-500"
                       title="重命名"
                     >
                       <Pencil size={10} />
                     </button>
                     <button
                       onClick={() => setConfirmDelId(c.id)}
-                      className="rounded p-0.5 text-slate-300 hover:text-red-500"
+                      className="rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-red-500"
                       title="删除会话"
                     >
                       <Trash2 size={10} />
@@ -371,17 +371,17 @@ export function WorkbenchPage({
               </span>
             </div>
           ))}
-          {convs.length === 0 && <p className="px-2 py-4 text-center text-[11px] text-slate-400">还没有会话</p>}
+          {convs.length === 0 && <p className="px-2 py-4 text-center text-[11px] text-slate-400 dark:text-slate-500">还没有会话</p>}
         </div>
       </aside>
 
       {/* 中栏：对话流（计划进度条 + 内联审批 + 对话） */}
       <div className="flex min-w-0 flex-1 flex-col">
         {activeTask && (
-          <div className="border-b border-slate-100 bg-white px-4 py-2.5">
+          <div className="border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5">
             <div className="flex items-center justify-between">
-              <p className="truncate text-[12px] font-semibold text-slate-600">{activeTask.title}</p>
-              <span className="shrink-0 text-micro text-slate-400">{STATUS_LABEL[activeTask.status] ?? activeTask.status}</span>
+              <p className="truncate text-[12px] font-semibold text-slate-600 dark:text-slate-300">{activeTask.title}</p>
+              <span className="shrink-0 text-micro text-slate-400 dark:text-slate-500">{STATUS_LABEL[activeTask.status] ?? activeTask.status}</span>
             </div>
             {/* 计划进度条：harness 五阶段迷你管道（v4 P2 对齐——与任务页同构同判定，消除语言分裂） */}
             <div className="mt-1.5">
@@ -404,36 +404,36 @@ export function WorkbenchPage({
       </div>
 
       {/* 右栏：影响面（diff 按模块聚合） */}
-      <aside className="flex w-64 shrink-0 flex-col border-l border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-3 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700">影响面</span>
-          <p className="mt-0.5 text-micro text-slate-400">{diffTaskId ? '来自该会话最近任务的变更' : '任务执行后此处显示模块影响'}</p>
+      <aside className="flex w-64 shrink-0 flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">影响面</span>
+          <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">{diffTaskId ? '来自该会话最近任务的变更' : '任务执行后此处显示模块影响'}</p>
         </div>
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3">
           {impact.length === 0 && (
-            <p className="py-8 text-center text-[11px] leading-5 text-slate-400">
+            <p className="py-8 text-center text-[11px] leading-5 text-slate-400 dark:text-slate-500">
               暂无变更数据
               <br />
               <span className="text-micro">从对话「转为任务」开始一次修复</span>
             </p>
           )}
           {impact.map((im) => (
-            <div key={im.name} className="rounded-lg border border-slate-100 p-2.5">
+            <div key={im.name} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2.5">
               <div className="flex items-center justify-between">
-                <span className="truncate text-[12px] font-semibold text-slate-700">{im.name}</span>
-                <span className="tnum shrink-0 text-micro text-slate-400">{im.files} 文件</span>
+                <span className="truncate text-[12px] font-semibold text-slate-700 dark:text-slate-200">{im.name}</span>
+                <span className="tnum shrink-0 text-micro text-slate-400 dark:text-slate-500">{im.files} 文件</span>
               </div>
-              <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <span className="bg-emerald-500" style={{ width: `${(im.adds / maxImpact) * 100}%` }} />
                 <span className="bg-red-400" style={{ width: `${(im.dels / maxImpact) * 100}%` }} />
               </div>
-              <p className="tnum mt-1 text-micro text-slate-500">
+              <p className="tnum mt-1 text-micro text-slate-500 dark:text-slate-400">
                 <span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span>
               </p>
             </div>
           ))}
           {impact.length > 0 && diffTaskId && (
-            <p className="flex items-center gap-1 pt-1 text-micro text-slate-300">
+            <p className="flex items-center gap-1 pt-1 text-micro text-slate-300 dark:text-slate-600">
               <GitBranch size={9} /> 任务 {diffTaskId.slice(-8)}
             </p>
           )}

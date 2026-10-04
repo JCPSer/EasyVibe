@@ -46,15 +46,15 @@ export function TaskPage({
   return (
     <div className="flex h-full flex-col">
       {/* 页头：标题 + 视图切换 + 新建（看板第一顺位） */}
-      <div className="flex items-center gap-3 border-b border-slate-100 bg-white px-4 py-2.5">
-        <h2 className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800">
-          <ClipboardList size={15} className="text-slate-500" /> 任务
+      <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5">
+        <h2 className="flex items-center gap-1.5 text-[14px] font-bold text-slate-800 dark:text-slate-100">
+          <ClipboardList size={15} className="text-slate-500 dark:text-slate-400" /> 任务
         </h2>
-        <div className="flex rounded-lg bg-slate-100 p-0.5">
+        <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
           <button
             onClick={() => setView('board')}
             className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
-              view === 'board' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              view === 'board' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
             }`}
           >
             <LayoutGrid size={11} /> 看板
@@ -62,7 +62,7 @@ export function TaskPage({
           <button
             onClick={() => setView('pipeline')}
             className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
-              view === 'pipeline' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              view === 'pipeline' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
             }`}
           >
             <Rows3 size={11} /> 流水线
@@ -70,19 +70,19 @@ export function TaskPage({
           <button
             onClick={() => setView('governance')}
             className={`flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-bold transition-colors ${
-              view === 'governance' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              view === 'governance' ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
             }`}
           >
             <Table2 size={11} /> 治理
           </button>
         </div>
-        <p className="hidden text-[10px] text-slate-400 lg:block">
+        <p className="hidden text-[10px] text-slate-400 dark:text-slate-500 lg:block">
           {view === 'board' ? '全部任务的并行全景，拖拽即处分，点卡看单个任务全程' : view === 'pipeline' ? '一个任务走 harness 五阶段的全程' : '全部任务的历史、失败与返工链'}
         </p>
         {onGoChat && (
           <button
             onClick={onGoChat}
-            className="ml-1 flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+            className="ml-1 flex shrink-0 items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
             title="任务从对话孵化：去「任务对话」页与 agent 聊出任务"
           >
             <MessagesSquare size={10} /> 去任务对话

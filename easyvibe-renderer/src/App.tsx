@@ -37,6 +37,7 @@ import { ViewsPanel } from '@/components/ViewsPanel'
 import { SuggestPanel } from '@/components/SuggestPanel'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import type { TaskDraft } from '@/lib/taskContext'
@@ -305,8 +306,8 @@ function buildFlow(
 function Legend({ violations }: { violations: number }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-[11px] text-slate-600 shadow-sm backdrop-blur">
-      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600">
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300 shadow-sm backdrop-blur">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600">
         <Info size={11} /> 图例{open ? ' ▴' : ' ▾'}
       </button>
       {open && (
@@ -344,7 +345,7 @@ function FilterButton({ active, onClick, label, activeClass }: { active: boolean
     <button
       onClick={onClick}
       className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-        active ? activeClass : 'border-transparent text-slate-500 hover:bg-slate-100'
+        active ? activeClass : 'border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70'
       }`}
     >
       {label}
@@ -377,12 +378,12 @@ function ModuleToolbar({
   onChat?: () => void
 }) {
   return (
-    <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
-      <span className="mr-1 max-w-[180px] truncate text-[12px] font-bold text-slate-700">{moduleName}</span>
+    <div className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
+      <span className="mr-1 max-w-[180px] truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{moduleName}</span>
       {onChat && (
         <button
           onClick={onChat}
-          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 hover:bg-slate-100"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70"
           title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
         >
           <MessagesSquare size={12} />
@@ -392,7 +393,7 @@ function ModuleToolbar({
       <button
         onClick={onToggleExpand}
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-          expanded ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-transparent text-slate-600 hover:bg-slate-100'
+          expanded ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-600' : 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70'
         }`}
       >
         {expanded ? <FoldVertical size={12} /> : <UnfoldVertical size={12} />}
@@ -401,7 +402,7 @@ function ModuleToolbar({
       <button
         onClick={onToggleSolo}
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-          solo ? 'border-indigo-300 bg-indigo-50 text-indigo-600' : 'border-transparent text-slate-500 hover:bg-slate-100'
+          solo ? 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600' : 'border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70'
         }`}
       >
         <Focus size={12} />
@@ -419,10 +420,10 @@ function ModuleToolbar({
         }
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           inducing
-            ? 'cursor-wait border-amber-300 bg-amber-50 text-amber-700'
+            ? 'cursor-wait border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700'
             : backendActive
-              ? 'border-transparent text-slate-600 hover:bg-slate-100'
-              : 'cursor-not-allowed border-transparent text-slate-300'
+              ? 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70'
+              : 'cursor-not-allowed border-transparent text-slate-300 dark:text-slate-600'
         }`}
       >
         <RefreshCw size={12} className={inducing ? 'animate-spin' : ''} />
@@ -460,34 +461,34 @@ function GrowthPanel({
           : '初始化'
 
   return (
-    <div className="flex w-[460px] items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur">
+    <div className="flex w-[460px] items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-2.5 shadow-sm backdrop-blur">
       <button
         onClick={onPause}
         disabled={growth.done}
-        className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+        className="rounded-full p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-700 disabled:opacity-30"
         title={growth.playing ? '暂停' : '继续'}
       >
         {growth.playing ? <Pause size={14} /> : <Play size={14} />}
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between">
-          <span className="truncate text-[12px] font-semibold text-slate-700">
+          <span className="truncate text-[12px] font-semibold text-slate-700 dark:text-slate-200">
             <Sparkles size={11} className="mr-1 inline text-blue-500" />
             {status}
           </span>
-          <span className="text-micro tabular-nums text-slate-400">{pct}%</span>
+          <span className="text-micro tabular-nums text-slate-400 dark:text-slate-500">{pct}%</span>
         </div>
-        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
           <div
             className={`h-full rounded-full transition-all duration-500 ${growth.done ? 'bg-emerald-500' : 'bg-blue-500'}`}
             style={{ width: `${pct}%` }}
           />
         </div>
       </div>
-      <button onClick={onRestart} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="重播">
+      <button onClick={onRestart} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title="重播">
         <RotateCcw size={13} />
       </button>
-      <button onClick={onExit} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="退出演示">
+      <button onClick={onExit} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title="退出演示">
         <X size={14} />
       </button>
     </div>
@@ -962,7 +963,7 @@ function Canvas({
   const selModule = toolbarModuleId ? map.modules.find((m) => m.id === toolbarModuleId) : undefined
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-slate-50">
+    <div className="flex h-full w-full overflow-hidden bg-slate-50 dark:bg-slate-950/70">
       {/* 中央画布 */}
       <div className="relative flex-1">
         {/* ui-test P2：xyflow 的 <Background> 在 store transform 未就绪的更新周期里把
@@ -1035,12 +1036,12 @@ function Canvas({
                 onExit={() => setGrowth(null)}
               />
             ) : (
-              <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
+              <div className="flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-2 py-1.5 shadow-sm backdrop-blur">
                 {/* 真人测试#1：聚焦常驻指示——任何时刻看得见、一键退得出（Esc 同效） */}
                 {filters.solo && selModule && (
                   <button
                     onClick={() => setFilters((f) => ({ ...f, solo: false }))}
-                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
+                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
                     title="退出聚焦（Esc）"
                   >
                     <Focus size={10} />
@@ -1051,18 +1052,18 @@ function Canvas({
                   active={filters.violationsOnly}
                   onClick={() => toggleFilter('violationsOnly')}
                   label="只看违规"
-                  activeClass="border-red-300 bg-red-50 text-red-600"
+                  activeClass="border-red-300 bg-red-50 dark:bg-red-950/40 text-red-600"
                 />
                 <FilterButton
                   active={filters.issuesOnly}
                   onClick={() => toggleFilter('issuesOnly')}
                   label="问题视图"
-                  activeClass="border-amber-300 bg-amber-50 text-amber-700"
+                  activeClass="border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700"
                 />
                 {(filters.violationsOnly || filters.issuesOnly) && (
                   <button
                     onClick={() => setFilters({ violationsOnly: false, issuesOnly: false, solo: filters.solo })}
-                    className="rounded-full px-2 py-1 text-cap text-slate-400 hover:text-slate-600"
+                    className="rounded-full px-2 py-1 text-cap text-slate-400 dark:text-slate-500 hover:text-slate-600"
                   >
                     重置
                   </button>
@@ -1075,25 +1076,25 @@ function Canvas({
         {/* 头部信息条（M4-1：全局组件已移至应用壳顶栏，此处仅保留地图本地信息） */}
         <div className="pointer-events-none absolute left-0 top-0 z-10 w-full">
           <div className="px-5 py-3">
-            <div className="pointer-events-auto inline-block rounded-xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur">
+            <div className="pointer-events-auto inline-block rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-2.5 shadow-sm backdrop-blur">
               <div className="flex items-center gap-2">
                 <span className="text-micro font-bold uppercase tracking-widest text-blue-600">架构地图</span>
-                <span className="text-micro text-slate-300">|</span>
-                <h1 className="text-[13px] font-bold text-slate-800">{map.meta.repo}</h1>
+                <span className="text-micro text-slate-300 dark:text-slate-600">|</span>
+                <h1 className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{map.meta.repo}</h1>
                 {/* M4-1.5 叙事重排（陪审团）：健康分立为画布内主视觉——先给诊断，再给地图 */}
                 <button
                   onClick={() => {
                     setTab('issues')
                     onPanelOpenChange(true)
                   }}
-                  className="ml-3 flex items-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50 pl-1.5 pr-2 py-0.5 hover:border-blue-200 hover:bg-blue-50/60"
+                  className="ml-3 flex items-center gap-1.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 pl-1.5 pr-2 py-0.5 hover:border-blue-200 hover:bg-blue-50/60"
                   title="架构健康综合评分（点击在右栏查看全部问题）"
                 >
                   <span className="tnum text-[20px] font-black leading-6" style={{ color: healthColor(map.health.score) }}>
                     {map.health.score}
                   </span>
                   <span className="flex flex-col items-start leading-none">
-                    <span className="text-micro font-semibold text-slate-400">架构健康</span>
+                    <span className="text-micro font-semibold text-slate-400 dark:text-slate-500">架构健康</span>
                     {/* 评审 Y7：阈值与 healthColor/Legend 对齐——<60 红（Error）、60-74 amber（Warning），此前 70 分吃红色误报 */}
                     {map.health.score < 60 ? (
                       <span className="mt-0.5 text-micro font-semibold text-red-500">有问题 · 查看 →</span>
@@ -1108,14 +1109,14 @@ function Canvas({
                 className="mt-0.5 block max-w-[520px] text-left"
                 title={headerExpanded ? '收起简介' : '展开简介'}
               >
-                <p className={`text-[11px] text-slate-500 ${headerExpanded ? 'max-h-28 overflow-y-auto' : 'truncate'}`}>
+                <p className={`text-[11px] text-slate-500 dark:text-slate-400 ${headerExpanded ? 'max-h-28 overflow-y-auto' : 'truncate'}`}>
                   {map.meta.description}
                   <span className="ml-1 text-micro font-medium text-blue-400">
                     {headerExpanded ? '▲ 收起' : '▼ 展开'}
                   </span>
                 </p>
               </button>
-              <div className="mt-1 flex items-center gap-3 text-cap text-slate-400">
+              <div className="mt-1 flex items-center gap-3 text-cap text-slate-400 dark:text-slate-500">
                 <span className="flex items-center gap-1">
                   <GitBranch size={11} /> {map.meta.generator}
                 </span>
@@ -1141,7 +1142,7 @@ function Canvas({
                     <AlertTriangle size={9} />
                     地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
                     {freshness === 'stale' && backendRepo && (
-                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 px-1 text-micro hover:bg-white">
+                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 dark:bg-slate-900/70 px-1 text-micro hover:bg-white">
                         重新归纳
                       </button>
                     )}
@@ -1158,8 +1159,8 @@ function Canvas({
                   disabled={!!growth}
                   className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-40 ${
                     liveActivity && !growth
-                      ? 'border-red-300 bg-red-50 text-red-600 animate-pulse'
-                      : 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100'
+                      ? 'border-red-300 bg-red-50 dark:bg-red-950/40 text-red-600 animate-pulse'
+                      : 'border-blue-200 bg-blue-50 dark:bg-blue-950/40 text-blue-600 hover:bg-blue-100'
                   }`}
                   title={backendRepo ? '观看实时生长（直播 growth.log 事件）' : '回放归纳过程（静态 growth.log）'}
                 >
@@ -1177,7 +1178,7 @@ function Canvas({
         {/* 改进#4：右栏宽度拖拽手柄 */}
         <div
           onMouseDown={startPanelDrag}
-          className="w-1 shrink-0 cursor-col-resize bg-slate-100 transition-colors hover:bg-blue-300"
+          className="w-1 shrink-0 cursor-col-resize bg-slate-100 dark:bg-slate-800 transition-colors hover:bg-blue-300"
           title="拖拽调整面板宽度"
         />
         <div className="flex w-full shrink-0 flex-col" style={{ width: panelWidth }}>
@@ -1203,7 +1204,7 @@ function Canvas({
       ) : (
         <button
           onClick={() => panelOpen === false && onPanelOpenChange(true)}
-          className="flex w-9 shrink-0 flex-col items-center gap-2 border-l border-slate-200 bg-white py-4 text-slate-400 hover:text-blue-600"
+          className="flex w-9 shrink-0 flex-col items-center gap-2 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-4 text-slate-400 dark:text-slate-500 hover:text-blue-600"
           title="展开面板"
         >
           <PanelRightOpen size={15} />
@@ -1237,10 +1238,10 @@ class CanvasBoundary extends Component<{ children: React.ReactNode }, { err: Err
   render() {
     if (this.state.err) {
       return (
-        <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
-          <span className="font-semibold text-slate-700">页面渲染出错（已拦截白屏）</span>
-          <span className="max-w-[420px] text-center text-slate-400">{String(this.state.err).slice(0, 200)}</span>
-          <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-blue-600 hover:bg-slate-50" onClick={() => location.reload()}>
+        <div className="flex h-screen flex-col items-center justify-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
+          <span className="font-semibold text-slate-700 dark:text-slate-200">页面渲染出错（已拦截白屏）</span>
+          <span className="max-w-[420px] text-center text-slate-400 dark:text-slate-500">{String(this.state.err).slice(0, 200)}</span>
+          <button className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-blue-600 hover:bg-slate-50 dark:hover:bg-slate-800/70" onClick={() => location.reload()}>
             刷新恢复
           </button>
         </div>
@@ -1294,18 +1295,18 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
   }
   const concept = ONBOARDING_COPY.concepts[cardIdx]
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-[13px] text-slate-500">
+    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-[13px] text-slate-500 dark:text-slate-400">
       {/* 第 1 层：真实进度叙事（永远不让等待页只有 spinner） */}
       <Loader2 size={18} className="animate-spin text-blue-500" />
-      <span className="font-semibold text-slate-700">
+      <span className="font-semibold text-slate-700 dark:text-slate-200">
         正在归纳代码地图{prog ? `：${PHASE_LABEL[prog.phase] ?? prog.phase} ${prog.percent}%` : '…'}
       </span>
       {prog && (
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full rounded-full bg-blue-500 transition-[width] duration-500" style={{ width: `${prog.percent}%` }} />
         </div>
       )}
-      <span className="max-w-[420px] text-center text-[11px] leading-4 text-slate-400">
+      <span className="max-w-[420px] text-center text-[11px] leading-4 text-slate-400 dark:text-slate-500">
         {prog && prog.modulesTotal > 0
           ? `已归纳 ${prog.modulesDone}/${prog.modulesTotal} 个模块`
           : '后台 agent 执行中（通常数分钟，取决于仓库规模）'}
@@ -1313,10 +1314,10 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
       </span>
 
       {/* 第 2 层：概念卡片轮播（每张 ~20s 自动翻，可手动点；key 驱动翻页淡入——评审 G7） */}
-      <div className="w-full max-w-md rounded-xl border border-slate-100 bg-white/90 px-4 py-3 shadow-sm">
+      <div className="w-full max-w-md rounded-xl border border-slate-100 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 px-4 py-3 shadow-sm">
         <div key={cardIdx} className="anim-fade-in-fast">
         <div className="flex items-center justify-between">
-          <p className="text-[12px] font-bold text-slate-700">{concept.title}</p>
+          <p className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{concept.title}</p>
           <div className="flex gap-1">
             {ONBOARDING_COPY.concepts.map((c, i) => (
               <button
@@ -1328,24 +1329,24 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
             ))}
           </div>
         </div>
-        <p className="mt-1.5 text-[11.5px] leading-5 text-slate-500">{concept.body}</p>
+        <p className="mt-1.5 text-[11.5px] leading-5 text-slate-500 dark:text-slate-400">{concept.body}</p>
         </div>
       </div>
 
       {/* 第 3 层：提前参与——任务想法预填（归纳完成后带入任务对话） */}
       <div className="w-full max-w-md">
-        <p className="text-[11px] font-semibold text-slate-500">{ONBOARDING_COPY.waiting.ideaTitle}</p>
+        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{ONBOARDING_COPY.waiting.ideaTitle}</p>
         <div className="mt-1 flex gap-1.5">
           <input
             value={idea}
             onChange={(e) => { setIdea(e.target.value); setIdeaSaved(false) }}
             placeholder={ONBOARDING_COPY.waiting.ideaPlaceholder}
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[12px] outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
           />
           <button
             onClick={() => { saveTaskIdea(idea.trim()); setIdeaSaved(true) }}
             disabled={!idea.trim()}
-            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
+            className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
             {ONBOARDING_COPY.waiting.ideaButton}
           </button>
@@ -1399,7 +1400,7 @@ function MapGate({ repo, error, onRetry, agentReady }: { repo: string; error: st
 
   if (inducing === null) {
     return (
-      <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500">
+      <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
         <Loader2 size={16} className="animate-spin" /> 正在探测仓库状态…
       </div>
     )
@@ -1424,15 +1425,15 @@ function MapGate({ repo, error, onRetry, agentReady }: { repo: string; error: st
   }
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 text-[13px] text-slate-500">
-      <span className="font-semibold text-slate-700">{error ? '代码地图加载失败' : '该仓库尚未生成代码地图'}</span>
-      {error && <span className="max-w-[460px] text-center text-[11px] leading-4 text-slate-400">{String(error).slice(0, 200)}</span>}
-      {!error && <span className="text-[11px] text-slate-400">发起归纳后，EasyVibe 的 agent 会扫描仓库并生成架构地图（通常数分钟）</span>}
+    <div className="flex h-screen flex-col items-center justify-center gap-3 text-[13px] text-slate-500 dark:text-slate-400">
+      <span className="font-semibold text-slate-700 dark:text-slate-200">{error ? '代码地图加载失败' : '该仓库尚未生成代码地图'}</span>
+      {error && <span className="max-w-[460px] text-center text-[11px] leading-4 text-slate-400 dark:text-slate-500">{String(error).slice(0, 200)}</span>}
+      {!error && <span className="text-[11px] text-slate-400 dark:text-slate-500">发起归纳后，EasyVibe 的 agent 会扫描仓库并生成架构地图（通常数分钟）</span>}
       <div className="flex gap-2">
         {error && (
           <button
             onClick={onRetry}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70"
           >
             <RotateCcw size={12} /> 重试
           </button>
@@ -1554,6 +1555,22 @@ export default function App() {
 
   // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
   const [page, setPage] = useState<PageId>('map')
+  // 2026-10-04 暗黑模式：主题状态（localStorage 持久化，默认跟随系统）；html.dark 驱动 Tailwind class 策略
+  const [dark, setDark] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('ev.theme')
+      if (saved === 'dark' || saved === 'light') return saved === 'dark'
+      return window.matchMedia('(prefers-color-scheme: dark)').matches
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+    try {
+      window.localStorage.setItem('ev.theme', dark ? 'dark' : 'light')
+    } catch { /* 静默 */ }
+  }, [dark])
   // v0.2：地图页「就此对话」跨页上下文（消费即清；后写覆盖先写，竞态语义自然）
   const [pendingChatContext, setPendingChatContext] = useState<{ refId: string; refName: string; kind: 'module' | 'layer' } | null>(null)
   // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
@@ -1990,7 +2007,7 @@ export default function App() {
   }
   if (!map) {
     return (
-      <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500">
+      <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
         <Loader2 size={16} className="animate-spin" /> 正在加载代码地图…
       </div>
     )
@@ -2003,8 +2020,8 @@ export default function App() {
           onClick={() => setRepoPanelOpen((v) => !v)}
           className={
             backendOnline === false
-              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
-              : "flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 hover:border-blue-300"
+              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
+              : "flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[12px] font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-300"
           }
           title={backendOnline === false ? "后端不在线：当前为演示数据，点击看详情" : "切换/管理仓库"}
         >
@@ -2018,7 +2035,7 @@ export default function App() {
             <>
               <span className={`h-2 w-2 rounded-full ${backendOnline === null ? 'animate-pulse bg-slate-300' : 'bg-emerald-500'}`} />
               {backendOnline === null ? '连接后端中…' : backendRepo ?? '未选择仓库'}
-              <span className="text-slate-300">▾</span>
+              <span className="text-slate-300 dark:text-slate-600">▾</span>
             </>
           )}
         </button>
@@ -2026,29 +2043,29 @@ export default function App() {
           <>
             {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
             <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
-            <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 p-2 shadow-xl">
+            <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 dark:border-slate-700 p-2 shadow-xl">
             {backendOnline === false ? (
               /* 重审 P2：离线态的真相面板——不装成"尚未挂载"（那是在线零仓库的状态） */
               <div className="space-y-1.5 px-1.5 py-1.5">
                 <p className="flex items-center gap-1 text-[12px] font-bold text-amber-700">
                   <WifiOff size={12} /> 后端不在线
                 </p>
-                <p className="text-[11px] leading-4 text-slate-500">
+                <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
                   当前画布是内置演示数据（hover-client）。归纳 / 巡检 / 任务 / 仓库管理都需要本地后端在线。
                 </p>
-                <p className="text-[10px] leading-4 text-slate-400">
+                <p className="text-[10px] leading-4 text-slate-400 dark:text-slate-500">
                   应用启动后后端在冷加载？每 5 秒自动重连，恢复后此面板自动可用。
                 </p>
               </div>
             ) : (
               <>
-            <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400">已挂载仓库</p>
+            <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400 dark:text-slate-500">已挂载仓库</p>
             <div className="max-h-52 space-y-0.5 overflow-y-auto">
               {repos.map((r) => (
-                <div key={r.id} className="rounded-lg px-1.5 py-1 hover:bg-slate-50">
+                <div key={r.id} className="rounded-lg px-1.5 py-1 hover:bg-slate-50 dark:hover:bg-slate-800/70">
                   <div className="flex items-center gap-1.5">
                     <button
-                      className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700'}`}
+                      className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700 dark:text-slate-200'}`}
                       onClick={() => {
                         switchRepo(r.id)
                         setRepoPanelOpen(false)
@@ -2060,7 +2077,7 @@ export default function App() {
                     {confirmRemove === r.id ? (
                       <button
                         onClick={() => setConfirmRemove(null)}
-                        className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600"
+                        className="shrink-0 rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600"
                         title="取消"
                       >
                         <X size={12} />
@@ -2068,7 +2085,7 @@ export default function App() {
                     ) : (
                       <button
                         onClick={() => setConfirmRemove(confirmRemove === r.id ? null : r.id)}
-                        className="shrink-0 rounded p-0.5 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                        className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 hover:text-red-500"
                         title="移除仓库…"
                       >
                         <X size={12} />
@@ -2079,13 +2096,13 @@ export default function App() {
                       不再是无差别的 window.confirm（用户不知道数据去了哪） */}
                   {confirmRemove === r.id && (
                     <div className="mt-1 space-y-1 rounded-lg border border-red-100 bg-red-50/50 p-1.5">
-                      <p className="text-[10px] leading-4 text-slate-500">
+                      <p className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
                         正在运行的任务/归纳会被终止。本地数据怎么处理？
                       </p>
                       <div className="flex gap-1">
                         <button
                           onClick={() => void removeRepo(r.id, false)}
-                          className="flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                          className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600"
                           title="任务/会话/巡检历史留在本地库，重新添加仓库后可见"
                         >
                           移除，保留数据
@@ -2102,7 +2119,7 @@ export default function App() {
                   )}
                 </div>
               ))}
-              {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400">尚未挂载任何仓库</p>}
+              {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400 dark:text-slate-500">尚未挂载任何仓库</p>}
             </div>
             <button
               onClick={() => {
@@ -2127,7 +2144,7 @@ export default function App() {
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <button
           onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
           title="我的视图（对话沉淀的图资产）"
         >
           <LayoutGrid size={12} />
@@ -2136,7 +2153,7 @@ export default function App() {
         {backendRepo && (
           <button
             onClick={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
-            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100"
+            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100"
             title="AI 主动发现优化建议，逐条可发起修复"
           >
             <Lightbulb size={12} />
@@ -2148,7 +2165,7 @@ export default function App() {
             onClick={startPatrol}
             disabled={patrolling || agentState.found === false}
             className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-40 ${
-              patrolling ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              patrolling ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 hover:bg-emerald-100'
             }`}
             title={agentState.found === false ? '未检测到执行 agent——先安装或在设置中配置' : '巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史'}
           >
@@ -2158,19 +2175,21 @@ export default function App() {
         )}
         <button
           onClick={() => downloadHealthReport(map)}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70"
           title="导出架构健康报告（Markdown，零 token 成本）"
         >
           <FileDown size={12} />
           导出
         </button>
+        {/* 主题开关：亮=太阳 / 暗=月亮滑动拨块（2026-10-04） */}
+        <ThemeToggle dark={dark} onChange={setDark} />
         {/* 新手引导：帮助入口——重看欢迎页 + 重置上手指引（调研 C2：可随时召回） */}
         <button
           onClick={() => {
             setOnboarding(resetForReview())
             setWelcomeOpen(true)
           }}
-          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
+          className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
           title="重新查看新手引导（欢迎页 + 上手指引）"
         >
           <CircleHelp size={12} />
@@ -2178,7 +2197,7 @@ export default function App() {
         <button
           onClick={() => handlePageChange('settings')}
           className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
-            page === 'settings' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+            page === 'settings' ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
           }`}
           title="设置（LLM 服务 / 槽位绑定 / 高级）"
         >
@@ -2205,8 +2224,8 @@ export default function App() {
             agentReady={agentState.found !== false}
             guide={
               guideDismissed ? undefined : (
-                <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
-                  <p className="flex-1 text-[11px] leading-5 text-slate-600">
+                <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 dark:bg-blue-950/40 px-3 py-2">
+                  <p className="flex-1 text-[11px] leading-5 text-slate-600 dark:text-slate-300">
                     <span className="font-semibold text-blue-700">界面已整理：</span>
                     详情栏页签为 详情/问题；对话在左侧「任务对话」，任务在「任务」，视图与优化建议在顶栏。
                   </p>
@@ -2215,7 +2234,7 @@ export default function App() {
                       setGuideDismissed(true)
                       localStorage.setItem('ev.m4.guide', '1')
                     }}
-                    className="shrink-0 rounded-full bg-white px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
+                    className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
                   >
                     知道了
                   </button>
@@ -2315,7 +2334,7 @@ export default function App() {
             backendOnline === true && repos.length === 0 ? (
               <button
                 onClick={() => addRepo()}
-                className="flex shrink-0 items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
+                className="flex shrink-0 items-center gap-2 border-b border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
               >
                 <FolderOpen size={12} className="shrink-0 text-blue-500" />
                 <span className="text-[11px] font-bold text-blue-800">尚未打开任何仓库——当前画布是演示数据</span>
@@ -2327,7 +2346,7 @@ export default function App() {
             ) : backendOnline === true && agentState.found === false ? (
               /* M2 首跑引导（R5）：检测到可采用的 → 一键采用；全未安装 → 安装指引+一键复制 */
               agentState.detected.length > 0 ? (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5">
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
                   <Bot size={12} className="shrink-0 text-amber-500" />
                   <span className="text-[11px] font-bold text-amber-800">
                     检测到 {agentState.detected[0].command} 已安装
@@ -2344,7 +2363,7 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5">
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
                   <Bot size={12} className="shrink-0 text-amber-500" />
                   <span className="text-[11px] font-bold text-amber-800">未检测到执行 agent</span>
                   <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">
@@ -2361,7 +2380,7 @@ export default function App() {
             ) : attention && page !== 'tasks' ? (
               <button
                 onClick={() => handlePageChange('tasks')}
-                className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-left transition-colors hover:bg-amber-100"
+                className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5 text-left transition-colors hover:bg-amber-100"
               >
                 <span className="flex h-2 w-2 animate-pulse rounded-full bg-amber-500" />
                 <span className="text-[11px] font-bold text-amber-800">
@@ -2390,9 +2409,9 @@ export default function App() {
       {overlay === 'views' && (
         <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <span className="text-[13px] font-bold text-slate-700">我的视图</span>
-              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">我的视图</span>
+              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
                 <X size={15} />
               </button>
             </div>
@@ -2413,9 +2432,9 @@ export default function App() {
       {overlay === 'suggest' && (
         <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <span className="text-[13px] font-bold text-slate-700">智能优化建议</span>
-              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">智能优化建议</span>
+              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
                 <X size={15} />
               </button>
             </div>

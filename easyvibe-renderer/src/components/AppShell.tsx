@@ -90,13 +90,13 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
     })
   }
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
+    <div className="flex h-screen flex-col bg-slate-50 dark:bg-slate-950/70">
       {/* 自绘标题栏（multica/Electron hiddenInset 范式）：原生红绿灯悬浮左上（Overlay），
           前端留 76px 净空。拖拽双保险：data-tauri-drag-region（Tauri 原生命中测试，免 IPC）
           + 空白 mousedown → startDragging（权限已开）；双击空白 → 最大化/还原 */}
       <header
         data-tauri-drag-region
-        className="glass z-20 flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 px-3"
+        className="glass z-20 flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3"
         onMouseDown={(e) => {
           if (e.button !== 0) return
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
@@ -113,7 +113,7 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
           <TrafficLightsSpacer />
           <span className="flex shrink-0 items-center gap-1.5 pr-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-[11px] font-black text-white">EV</span>
-            <span className="text-[13px] font-bold tracking-tight text-slate-800">EasyVibe</span>
+            <span className="text-[13px] font-bold tracking-tight text-slate-800 dark:text-slate-100">EasyVibe</span>
           </span>
           {topBar}
         </div>
@@ -121,14 +121,14 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
       <div className="flex min-h-0 flex-1">
         {/* 左侧导航 */}
         <nav
-          className={`flex shrink-0 flex-col border-r border-slate-200 bg-white transition-all ${
+          className={`flex shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 transition-all ${
             collapsed ? 'w-12 items-center' : 'w-52'
           }`}
         >
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
             {NAV.map((g) => (
               <div key={g.group}>
-                {!collapsed && <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wider text-slate-300">{g.group}</p>}
+                {!collapsed && <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wider text-slate-300 dark:text-slate-600">{g.group}</p>}
                 {g.items.map((it) => {
                   const active = page === it.id
                   const badge = badges?.[it.id]
@@ -141,7 +141,7 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
                       onClick={() => onPageChange(it.id)}
                       title={collapsed ? it.label : undefined}
                       className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] transition-colors ${
-                        active ? 'border-r-2 border-blue-600 bg-blue-50/70 font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                        active ? 'border-r-2 border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 font-semibold text-blue-700' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-700'
                       } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
                     >
                       <it.icon size={15} className="shrink-0" />
@@ -162,12 +162,12 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
             ))}
           </div>
           {/* 底部：设置 + 折叠把手 */}
-          <div className={`border-t border-slate-100 py-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
+          <div className={`border-t border-slate-100 dark:border-slate-800 py-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
             <button
               onClick={() => onPageChange('settings')}
               title="设置"
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] ${
-                page === 'settings' ? 'font-semibold text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                page === 'settings' ? 'font-semibold text-blue-700' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-700'
               } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
             >
               <Settings size={15} className="shrink-0" />
@@ -176,7 +176,7 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
             <button
               onClick={toggleCollapsed}
               title={collapsed ? '展开导航' : '收起导航'}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 hover:text-slate-500 ${collapsed ? 'justify-center px-0' : ''}`}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 dark:text-slate-600 hover:text-slate-500 ${collapsed ? 'justify-center px-0' : ''}`}
             >
               {collapsed ? <PanelLeftOpen size={14} /> : (
                 <>
