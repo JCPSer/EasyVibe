@@ -193,3 +193,24 @@ button:active:not(:disabled) {
 button.lift:active:not(:disabled) {
   transform: translateY(-1px) scale(0.97);
 }
+
+/* 2026-10-04 实弹修复：标题栏/工具栏拖动变成文字选择、快拖选中主视图文字——
+   桌面 IDE 全局禁用选择，内容区按类白名单放开（输入框天然豁免需显式恢复） */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* 内容白名单：对话消息 / Markdown 渲染 / 文档与 diff 全文 / 模块详情文本 */
+.select-text, .select-text * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* 拖拽区域绝不进入选择态 */
+[data-tauri-drag-region] {
+  user-select: none;
+  -webkit-user-select: none;
+}

@@ -88,7 +88,7 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
         <div className="mt-1.5 max-h-64 overflow-y-auto rounded-md bg-slate-50 p-2">
           {full === null && !err && <p className="text-[10px] text-slate-400"><Loader2 size={10} className="mr-1 inline animate-spin" />加载全文…</p>}
           {err && <p className="text-[10px] text-red-500">全文加载失败</p>}
-          {full !== null && <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-slate-600">{full || '（空文档）'}</pre>}
+          {full !== null && <pre className="select-text whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-slate-600">{full || '（空文档）'}</pre>}
         </div>
       )}
     </div>
@@ -802,7 +802,7 @@ export function TaskWorkflowPage({
                         const el = e.currentTarget
                         setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 24)
                       }}
-                      className="mono min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-5 text-slate-300"
+                      className="select-text mono min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-5 text-slate-300"
                     >
                       {terminalLines(sel.sessionId ?? '').length === 0 ? (
                         <span className="text-slate-500">等待 agent 输出…（agent 启动可能需要 1-2 分钟）</span>
@@ -867,7 +867,7 @@ export function TaskWorkflowPage({
                     </div>
                     <div className="min-w-0 flex-1 overflow-auto bg-white p-3">
                       {activeDiff ? (
-                        <pre className="mono text-cap leading-4">
+                        <pre className="select-text mono text-cap leading-4">
                           {diffLines.slice(0, diffState.limit).map((line, i) => (
                             <div
                               key={i}

@@ -382,7 +382,7 @@ function ModuleToolbar({
       {onChat && (
         <button
           onClick={onChat}
-          className="flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 hover:bg-slate-100"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 hover:bg-slate-100"
           title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
         >
           <MessagesSquare size={12} />
@@ -391,7 +391,7 @@ function ModuleToolbar({
       )}
       <button
         onClick={onToggleExpand}
-        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+        className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           expanded ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-transparent text-slate-600 hover:bg-slate-100'
         }`}
       >
@@ -400,7 +400,7 @@ function ModuleToolbar({
       </button>
       <button
         onClick={onToggleSolo}
-        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+        className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           solo ? 'border-indigo-300 bg-indigo-50 text-indigo-600' : 'border-transparent text-slate-500 hover:bg-slate-100'
         }`}
       >
@@ -417,7 +417,7 @@ function ModuleToolbar({
               ? '归纳进行中，完成后自动恢复'
               : '重新归纳该仓库：spawn agent 按 v2.2 协议执行，全程直播'
         }
-        className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+        className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           inducing
             ? 'cursor-wait border-amber-300 bg-amber-50 text-amber-700'
             : backendActive

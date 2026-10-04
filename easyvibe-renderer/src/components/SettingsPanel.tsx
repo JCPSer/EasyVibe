@@ -732,20 +732,59 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   )
 }
 
-/// Harness 分区（2026-10-04 审计 P1 收口）：恢复默认（此前孤儿接口无入口）+
-/// 备份列表与恢复（此前 reset 有备份无恢复）。当前层恢复前自动留档 pre-restore-*，可反悔。
+/// Harness 分区（2026-10-04 审计 P1 收口 + 编辑能力）：恢复默认 / 备份列表与恢复 /
+/// 规则文件在线编辑（保存即热装载，chat 与任务执行立即生效）。
 function HarnessSection({ about, onVersionChange }: { about: { backend: string; harness: string } | null; onVersionChange: (v: string) => void }) {
   const [backups, setBackups] = useState<{ name: string; mtimeMs: number }[] | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // 规则文件编辑
+  const [files, setFiles] = useState<string[] | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [content, setContent] = useState('')
+  const [loaded, setLoaded] = useState('')
+  const [savingFile, setSavingFile] = useState(false)
   const load = useCallback(() => {
     fetch('/api/harness/backups')
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { backups?: { name: string; mtimeMs: number }[] } } | null) => setBackups(d?.data?.backups ?? []))
       .catch(() => setBackups([]))
+    fetch('/api/harness/files')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { files?: { path: string }[] } } | null) => setFiles((d?.data?.files ?? []).map((f) => f.path)))
+      .catch(() => setFiles([]))
   }, [])
   useEffect(load, [load])
+  const openFile = (path: string) => {
+    setEditing(path)
+    setContent('')
+    setLoaded('')
+    fetch(`/api/harness/file?path=${encodeURIComponent(path)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { content?: string } }) => {
+        setContent(d?.data?.content ?? '')
+        setLoaded(d?.data?.content ?? '')
+      })
+      .catch(() => toast('文件加载失败', 'error'))
+  }
+  const saveFile = () => {
+    if (!editing) return
+    setSavingFile(true)
+    fetch('/api/harness/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: editing, content }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { version?: string } }) => {
+        toast(`已保存并热装载（v${d?.data?.version ?? '?'}）`, 'info')
+        setLoaded(content)
+        if (d?.data?.version) onVersionChange(d.data.version)
+      })
+      .catch(() => toast('保存失败（路径防线或磁盘错误）', 'error'))
+      .finally(() => setSavingFile(false))
+  }
   const reset = () => {
     setBusy(true)
     fetch('/api/harness/reset', { method: 'POST' })
@@ -778,11 +817,71 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
   }
   return (
     <div className="space-y-3">
-      <div className="rounded-md border border-slate-200 bg-white p-4">
+      {/* 板块头（文生图设计 v1）：标题 + 副文案 + 当前版本徽章 */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-[15px] font-bold text-slate-800">Harness 工作流护栏</h3>
+          <p className="text-cap mt-0.5 text-slate-400">管理您的工作流护栏规则与备份——编辑即时生效，可随时回滚</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-micro font-bold text-blue-600">
+          当前版本 v{about?.harness ?? '…'}
+        </span>
+      </div>
+
+      {/* 规则文件编辑：保存即热装载（chat 与任务执行立即生效，无需重启）。
+          编辑器用深色代码主题（文生图设计 v1），与浅色的表单区形成"代码即资产"的视觉分层 */}
+      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 px-3 pt-2">
+          {files === null && <p className="text-cap py-1.5 text-slate-400">加载中…</p>}
+          {files?.map((f) => (
+            <button
+              key={f}
+              onClick={() => openFile(f)}
+              className={`mono rounded-t-md border-b-2 px-2.5 py-1.5 text-[10.5px] transition-colors ${
+                editing === f
+                  ? 'border-blue-500 bg-slate-50 font-semibold text-blue-700'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        {editing ? (
+          <div>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={16}
+              spellCheck={false}
+              className="mono select-text w-full resize-y bg-slate-900 p-3 text-[11px] leading-5 text-slate-200 outline-none transition-colors focus:ring-2 focus:ring-blue-500/30 focus:ring-inset"
+            />
+            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+              <p className="text-micro text-slate-300">
+                {content === loaded ? '未修改' : '● 有未保存修改'} · 保存后 chat 与任务执行立即生效；可用备份恢复回滚
+              </p>
+              <button
+                onClick={saveFile}
+                disabled={savingFile || content === loaded}
+                className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                {savingFile ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="px-3 py-6 text-center text-cap text-slate-300">点击上方文件名开始编辑</p>
+        )}
+      </div>
+
+      {/* 恢复出厂：琥珀警示卡（文生图设计 v1 的警告语义色） */}
+      <div className="rounded-md border border-amber-200 bg-amber-50/60 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[13px] font-bold text-slate-700">恢复出厂 Harness</div>
-            <p className="text-cap mt-0.5 text-slate-400">
+            <div className="flex items-center gap-1.5 text-[13px] font-bold text-amber-800">
+              <ShieldCheck size={13} className="text-amber-500" /> 恢复出厂 Harness
+            </div>
+            <p className="text-cap mt-0.5 text-amber-600/80">
               当前的自定义规则整体备份为 harness.backup-*，出厂底账全量重铺——可随时从下方备份恢复
             </p>
           </div>
@@ -798,7 +897,7 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
             <button
               onClick={() => setConfirmReset(true)}
               onMouseLeave={() => setConfirmReset(false)}
-              className="flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-3 py-1.5 text-micro font-semibold text-slate-500 hover:border-red-300 hover:text-red-500"
+              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100"
             >
               <RotateCcw size={11} /> 恢复默认
             </button>
@@ -809,7 +908,6 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
       <div className="rounded-md border border-slate-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-[13px] font-bold text-slate-700">历史备份</div>
-          <span className="text-micro text-slate-300">当前 v{about?.harness ?? '…'}</span>
         </div>
         {backups === null && <p className="text-cap py-2 text-slate-400">加载中…</p>}
         {backups?.length === 0 && <p className="text-cap py-2 text-slate-400">暂无备份（恢复默认后此处出现旧版本）</p>}

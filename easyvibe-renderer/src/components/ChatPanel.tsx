@@ -835,7 +835,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           ) : (
             <div key={i} className={`anim-msg-in group/msg flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
+                className={`select-text max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'
                 }`}
               >

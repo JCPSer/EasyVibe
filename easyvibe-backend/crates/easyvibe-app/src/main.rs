@@ -204,6 +204,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .route("/harness", get(get_harness))
+        .route("/harness/files", get(list_harness_files))
+        .route("/harness/file", get(get_harness_file).put(put_harness_file))
         .route("/harness/backups", get(list_harness_backups))
         .route("/harness/restore", axum::routing::post(restore_harness))
         .route("/agent/status", get(agent_status))
@@ -1073,6 +1075,75 @@ async fn reset_harness(State(st): State<AppState>) -> Result<Response, AppError>
     *st.harness.write().await = fresh;
     info!("[harness] 已恢复默认 v{}", version);
     Ok(Json(serde_json::json!({ "success": true, "data": { "version": version } })).into_response())
+}
+
+/// 规则文件可编辑化（2026-10-04：Harness 板块编辑能力）——列出 harness 目录全部文件（递归，相对路径）。
+async fn list_harness_files() -> Result<Response, AppError> {
+    let dir = task_exec::harness_dir();
+    let mut files: Vec<serde_json::Value> = vec![];
+    fn walk(base: &std::path::Path, cur: &std::path::Path, out: &mut Vec<serde_json::Value>) {
+        if let Ok(rd) = std::fs::read_dir(cur) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() { walk(base, &p, out) } else if let Ok(rel) = p.strip_prefix(base) {
+                    out.push(serde_json::json!({ "path": rel.to_string_lossy() }));
+                }
+            }
+        }
+    }
+    walk(&dir, &dir, &mut files);
+    files.sort_by_key(|f| f["path"].as_str().unwrap_or_default().to_string());
+    Ok(Json(serde_json::json!({ "success": true, "data": { "files": files } })).into_response())
+}
+
+/// harness 文件读取：canonicalize 越界防线（与 dev-doc 同纪律），只收 harness 目录内文件。
+async fn get_harness_file(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let rel = q.get("path").cloned().unwrap_or_default();
+    let dir = task_exec::harness_dir();
+    let full = dir.join(&rel);
+    let (Ok(canonical), Ok(dir_canon)) = (full.canonicalize(), dir.canonicalize()) else {
+        return Err(AppError(ApiError::NotFound("文件不存在".into())));
+    };
+    if !canonical.starts_with(&dir_canon) || !canonical.is_file() {
+        return Err(AppError(ApiError::NotFound("文件不存在（路径越界或非文件）".into())));
+    }
+    let content = std::fs::read_to_string(&canonical).map_err(|e| ApiError::Internal(format!("文件读取失败: {e}")))?;
+    Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel, "content": content } })).into_response())
+}
+
+/// harness 文件写入：同防线；写后热换单一事实源（chat 与 executor 立即生效，与 reset 同纪律）。
+async fn put_harness_file(
+    State(st): State<AppState>,
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let rel = body.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if rel.is_empty() {
+        return Err(AppError(ApiError::BadRequest("path 不能为空".into())));
+    }
+    let dir = task_exec::harness_dir();
+    let full = dir.join(&rel);
+    let dir_canon = dir.canonicalize().map_err(|e| ApiError::Internal(format!("harness 目录不可读: {e}")))?;
+    // 已存在：canonicalize 校验越界；不存在：校验相对路径本身不带越界段
+    if full.exists() {
+        let canonical = full.canonicalize().map_err(|_| ApiError::NotFound("文件不存在".into()))?;
+        if !canonical.starts_with(&dir_canon) || !canonical.is_file() {
+            return Err(AppError(ApiError::NotFound("文件不存在（路径越界或非文件）".into())));
+        }
+    } else if rel.split('/').any(|s| s == ".." || s.is_empty()) || rel.starts_with('/') {
+        return Err(AppError(ApiError::BadRequest("路径越界".into())));
+    }
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("目录创建失败: {e}")))?;
+    }
+    std::fs::write(&full, content).map_err(|e| ApiError::Internal(format!("文件写入失败: {e}")))?;
+    let fresh = task_exec::load_harness()?;
+    let version = fresh.manifest.version.clone();
+    *st.harness.write().await = fresh;
+    info!("[harness] 文件 {} 已更新并热装载（v{}）", rel, version);
+    Ok(Json(serde_json::json!({ "success": true, "data": { "path": rel, "version": version } })).into_response())
 }
 
 /// 备份列表（2026-10-04 审计 P1：reset 有备份无恢复入口的另一半）：
