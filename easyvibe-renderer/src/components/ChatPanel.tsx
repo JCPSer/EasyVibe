@@ -1089,7 +1089,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             rows={2}
             placeholder={backendRepo ? '问点什么…（@ 引用模块，Enter 发送，Shift+Enter 换行）' : '需要本地后端在线'}
             disabled={!backendRepo || sending}
-            className="w-full flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none focus:border-blue-300 disabled:opacity-50"
+            className="w-full flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700 outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
           />
         </div>
         {sending ? (

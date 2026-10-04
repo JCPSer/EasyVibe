@@ -1340,7 +1340,7 @@ function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] =
             value={idea}
             onChange={(e) => { setIdea(e.target.value); setIdeaSaved(false) }}
             placeholder={ONBOARDING_COPY.waiting.ideaPlaceholder}
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-blue-300"
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
           />
           <button
             onClick={() => { saveTaskIdea(idea.trim()); setIdeaSaved(true) }}
@@ -2388,7 +2388,7 @@ export default function App() {
       </CanvasBoundary>
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
       {overlay === 'views' && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
+        <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
               <span className="text-[13px] font-bold text-slate-700">我的视图</span>
@@ -2411,7 +2411,7 @@ export default function App() {
         </div>
       )}
       {overlay === 'suggest' && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
+        <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
           <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
               <span className="text-[13px] font-bold text-slate-700">智能优化建议</span>

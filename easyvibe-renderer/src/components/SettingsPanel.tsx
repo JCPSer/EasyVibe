@@ -350,7 +350,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   )
 
   return (
-    <div className={`${embedded ? 'h-full w-full' : 'fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 bg-white`}>
+    <div className={`${embedded ? 'h-full w-full' : 'anim-drawer-in fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 bg-white`}>
       {/* 分区导航（macOS 系统设置式左栏） */}
       <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 bg-slate-50/50 p-3">
         {SECTIONS.map((s) => (

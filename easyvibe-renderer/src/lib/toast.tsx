@@ -37,6 +37,15 @@ export function dismissToast(key: string) {
 
 export function ToastHost() {
   const [items, setItems] = useState<Toast[]>([])
+  // 出场动画：先标记 leaving（150ms 淡出上滑），到时真正移除——不再凭空消失
+  const [leaving, setLeaving] = useState<number[]>([])
+  const markLeaving = (id: number) => {
+    setLeaving((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    window.setTimeout(() => {
+      setItems((prev) => prev.filter((x) => x.id !== id))
+      setLeaving((prev) => prev.filter((x) => x !== id))
+    }, 160)
+  }
   useEffect(() => {
     const l = (t: Toast) => {
       // 撤销信令：同 key 删除
@@ -49,23 +58,23 @@ export function ToastHost() {
         const next = t.key ? prev.filter((x) => x.key !== t.key) : prev
         return [...next.slice(-2), t]
       })
-      if (!t.sticky) setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), t.action ? 12000 : 3200)
+      if (!t.sticky) setTimeout(() => markLeaving(t.id), t.action ? 12000 : 3200)
     }
     listeners.push(l)
     return () => {
       listeners = listeners.filter((x) => x !== l)
     }
   }, [])
-  const dismiss = (id: number) => setItems((prev) => prev.filter((x) => x.id !== id))
+  const dismiss = (id: number) => markLeaving(id)
   if (items.length === 0) return null
   return (
     <div className="pointer-events-none fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 flex-col items-center gap-1.5">
       {items.map((t) => (
         <div
           key={t.id}
-          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg ${
-            t.kind === 'error' ? 'bg-red-500' : 'bg-slate-800'
-          }`}
+          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg transition-all duration-200 ${
+            leaving.includes(t.id) ? 'translate-y-1 opacity-0' : 'anim-msg-in'
+          } ${t.kind === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}
         >
           {t.kind === 'error' ? <AlertCircle size={11} /> : <Info size={11} />}
           {t.msg}

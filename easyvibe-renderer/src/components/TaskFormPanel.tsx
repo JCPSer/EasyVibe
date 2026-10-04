@@ -64,7 +64,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l border-slate-200 bg-white shadow-xl">
+    <div className="anim-drawer-in fixed inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l border-slate-200 bg-white shadow-xl">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <span className="flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
           <Wrench size={14} className="text-blue-500" /> 发起任务

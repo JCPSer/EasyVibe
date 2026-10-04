@@ -166,3 +166,30 @@
   transform: translateY(-1px);
   box-shadow: 0 4px 12px -2px rgb(15 23 42 / 0.12);
 }
+
+/* 2026-10-04 实弹修复：文档级滚动泄漏——空白处滚轮会让整个应用上下位移。
+   桌面壳应用由内部各区域自管 overflow，根上直接锁死。 */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* 评审 Y4：微交互三件套之"按压反馈 + 流动过渡"——一次性给全部按钮物理确认。
+   说明：类级 Tailwind 过渡（transition-colors 等）优先级高于元素选择器，不冲突；
+   .lift 的 hover 浮起需与按压共存，单独合成 transform。 */
+button {
+  transition:
+    transform 100ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button.lift:active:not(:disabled) {
+  transform: translateY(-1px) scale(0.97);
+}

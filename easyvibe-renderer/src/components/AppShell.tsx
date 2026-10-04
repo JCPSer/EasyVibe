@@ -147,10 +147,10 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, chi
                       <it.icon size={15} className="shrink-0" />
                       {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>}
                       {alert ? (
-                        <span key="a" className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{alert}</span>
+                        <span key="a" className="anim-scale-in rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{alert}</span>
                       ) : null}
                       {info && !collapsed ? (
-                        <span key="i" className="flex items-center gap-1 rounded-full bg-blue-100 px-1.5 text-micro font-bold leading-4 text-blue-600">
+                        <span key="i" className="anim-scale-in flex items-center gap-1 rounded-full bg-blue-100 px-1.5 text-micro font-bold leading-4 text-blue-600">
                           <span className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
                           {info}
                         </span>
