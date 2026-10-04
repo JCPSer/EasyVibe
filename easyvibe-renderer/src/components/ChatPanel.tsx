@@ -6,7 +6,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy, MoreHorizontal} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -53,6 +53,9 @@ interface Props {
   onCreateTask: (draft: TaskDraft) => void
   /** M4-2 工作台嵌入模式：隐藏会话切换器（左侧栏自带）与部分头部按钮 */
   embedded?: boolean
+  /** 2026-10-04 右栏窄面板模式：头部压缩为一行（幽灵切换器 + 图标按钮 + 「…」收纳次要操作），
+      隐藏 token 统计与文字按钮组——宽栏全功能版见工作台 */
+  compact?: boolean
   /** M4-2：当前会话变化通知（工作台据此加载该会话的任务/影响面） */
   onConvChange?: (id: string | null) => void
   /** R3 B1：受控会话 id——传入后组件进入受控模式（工作台左栏驱动中栏联动），
@@ -79,7 +82,7 @@ interface ChatRestore {
 // 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
 // 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId, pendingDraft, pendingMention, defaultConvTitle }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, compact = false, onConvChange, activeConvId, pendingDraft, pendingMention, defaultConvTitle }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -119,6 +122,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     [activeConvId, onConvChange],
   )
   const [convMenuOpen, setConvMenuOpen] = useState(false)
+  // compact 模式的「…」收纳菜单
+  const [moreOpen, setMoreOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([])
@@ -456,7 +461,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   }
 
   // 手动压缩（§10a：压缩上下文按钮；自动阈值兜底之外的主动手段）
-  const compact = () => {
+  // 函数名 compressCtx——prop 有同名 narrow 语义冲突史，避免遮蔽（2026-10-04）
+  const compressCtx = () => {
     if (!backendRepo || compacting) return
     setCompacting(true)
     fetch(`/api/repos/${backendRepo}/chat/compact${convQ}`, { method: 'POST' })
@@ -613,12 +619,17 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
 
   return (
     <div className="flex h-full flex-col">
-      {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担） */}
+      {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担；
+          compact 模式幽灵化——去边框盒，hover 底色，窄栏不再顶着一张"大脸"） */}
       {!embedded && (
-        <div className="relative mb-2">
+        <div className={`relative ${compact ? 'mb-1' : 'mb-2'}`}>
           <button
             onClick={() => setConvMenuOpen((v) => !v)}
-            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-left hover:border-blue-300"
+            className={
+              compact
+                ? 'flex h-7 w-full items-center gap-1.5 rounded-lg px-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                : 'flex w-full items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-left hover:border-blue-300'
+            }
           >
             {currentConv?.runtime.state === 'running' ? (
               <Loader2 size={12} className="shrink-0 animate-spin text-amber-500" />
@@ -696,6 +707,71 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         </div>
       )}
 
+      {/* compact 窄栏：一行收尾——只留 新会话 + 「…」收纳（转为任务/导出清空/压缩/删会话），
+          token 统计收起（工作台全功能版才显示）；宽栏保持原完整按钮组 */}
+      {compact ? (
+        <div className="mb-1.5 flex items-center justify-end gap-0.5">
+          <button
+            onClick={createConv}
+            disabled={!backendRepo || sending}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300 disabled:opacity-40"
+            title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
+          >
+            <RotateCcw size={12} />
+          </button>
+          <div className="relative">
+            <button
+              onClick={() => setMoreOpen((v) => !v)}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
+              title="更多操作"
+            >
+              <MoreHorizontal size={13} />
+            </button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+                <div className="glass anim-scale-in absolute right-0 top-full z-40 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 p-1 shadow-xl">
+                  <button
+                    onClick={() => { setMoreOpen(false); upgradeToTask() }}
+                    disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                  >
+                    <Wrench size={11} /> 转为任务
+                  </button>
+                  <button
+                    onClick={() => { setMoreOpen(false); exportAndClear() }}
+                    disabled={!backendRepo || messages.length === 0}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                  >
+                    <Download size={11} /> 导出/清空
+                  </button>
+                  <button
+                    onClick={() => { setMoreOpen(false); compressCtx() }}
+                    disabled={!backendRepo || compacting}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                  >
+                    <Shrink size={11} /> {compacting ? '压缩中…' : '压缩上下文'}
+                  </button>
+                  {convId && (
+                    <button
+                      onClick={() => { setMoreOpen(false); deleteConv() }}
+                      disabled={!backendRepo}
+                      className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
+                    >
+                      <XIcon size={11} /> 删除会话
+                    </button>
+                  )}
+                  <div className="mt-0.5 border-t border-slate-100 dark:border-slate-800 px-2 pt-1">
+                    <p className="tnum truncate text-micro text-slate-300 dark:text-slate-600">
+                      累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="mb-2 flex items-center justify-between">
         <span className="tnum text-micro text-slate-400 dark:text-slate-500">
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
@@ -731,7 +807,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             转为任务
           </button>
           <button
-            onClick={compact}
+            onClick={compressCtx}
             disabled={!backendRepo || compacting}
             className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
             title="压缩上下文：早期历史折叠为结构化摘要（原文保留在库中可回放）"
@@ -754,6 +830,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           )}
         </div>
       </div>
+      )}
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto">
         {/* M4-2 内联审批卡：等待中的审批门（AionUI：选项即按钮，决策后原地留痕） */}

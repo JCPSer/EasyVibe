@@ -43,6 +43,7 @@ export function PanelChat({
       onCreateTask={onCreateTask}
       pendingMention={mentionState?.value ?? null}
       defaultConvTitle={mod ? `模块 · ${mod.name}` : null}
+      compact
     />
   )
 }
