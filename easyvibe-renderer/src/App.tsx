@@ -1007,6 +1007,10 @@ function Canvas({
   const onNodeClick = useCallback((_e: unknown, node: Node) => {
     if (growth) return // 生长回放期间禁用选中
     if (node.type === 'module' || node.type === 'moduleExpanded') {
+      // 2026-10-04 实弹交互：已选中模块再点一次 = 展开内部结构（再点头部/工具栏收起），
+      // 不用用户先选中再挪到工具栏找「展开内部结构」按钮
+      const alreadySelected = selection?.kind === 'module' && selection.id === node.id
+      if (node.type === 'module' && alreadySelected) toggleExpand(node.id)
       setSelection({ kind: 'module', id: node.id })
       setTab('detail')
       onPanelOpenChange(true)
@@ -1018,7 +1022,7 @@ function Canvas({
       setTab('detail')
       onPanelOpenChange(true)
     }
-  }, [growth])
+  }, [growth, selection, toggleExpand, setTab, onPanelOpenChange])
   const onPaneClick = useCallback(() => setSelection(null), [])
 
   const toggleFilter = (key: keyof Filters) => setFilters((f) => ({ ...f, [key]: !f[key] }))
