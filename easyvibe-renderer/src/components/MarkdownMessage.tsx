@@ -46,7 +46,9 @@ const MermaidBlock = memo(function MermaidBlock({ chart }: { chart: string }) {
 // 对话消息的 Markdown 渲染：GFM（表格/列表/粗体）+ mermaid 代码块
 export const MarkdownMessage = memo(function MarkdownMessage({ content }: { content: string }) {
   return (
-    <div className="text-[12px] leading-5 [&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-800 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-cap [&_h1]:text-[13px] [&_h1]:font-bold [&_h2]:text-[12px] [&_h2]:font-bold [&_li]:ml-3 [&_li]:list-disc [&_p]:my-1 [&_pre]:my-1 [&_strong]:font-semibold [&_table]:my-1 [&_td]:border [&_td]:border-slate-200 dark:[&_td]:border-slate-700 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-slate-200 dark:[&_th]:border-slate-700 [&_th]:bg-slate-50 dark:[&_th]:bg-slate-800 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:font-semibold">
+    <div className="text-[12px] leading-5 [&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-800 [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-cap [&_h1]:text-[13px] [&_h1]:font-bold [&_h2]:text-[12px] [&_h2]:font-bold [&_li]:ml-3 [&_li]:list-disc [&_p]:my-1 [&_pre]:my-1 [&_strong]:font-semibold [&_table]:my-1 [&_td]:border [&_td]:border-slate-200 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_td]:py-1 [&_td]:align-top [&_th]:border [&_th]:border-slate-200 dark:[&_th]:border-slate-700 [&_th]:bg-slate-50 dark:[&_th]:bg-slate-800 [&_th]:px-2 [&_th]:py-1 [&_th]:font-semibold [&_th]:whitespace-nowrap">
+      {/* 表格独立横向滚动容器：窄栏（右栏 340px）里宽表不再硬挤换行，表头保持单行 */}
+      <div className="-mx-1 overflow-x-auto px-1">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -62,6 +64,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: { cont
       >
         {content}
       </ReactMarkdown>
+      </div>
     </div>
   )
 })

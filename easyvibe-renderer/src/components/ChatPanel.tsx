@@ -6,7 +6,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
 import { onTaskEvent } from '@/lib/growthBus'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
-import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy, MoreHorizontal} from 'lucide-react'
+import { Send, Loader2, BookmarkPlus, Check, Crosshair, Shrink, RotateCcw, Wrench, Square, Paperclip, X as XIcon, Download, AtSign, ChevronDown, Plus, Pencil, CheckCircle2, AlertTriangle, Copy, MoreHorizontal, MessagesSquare} from 'lucide-react'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -620,14 +620,14 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   return (
     <div className="flex h-full flex-col">
       {/* M4-2 会话切换器（AionUI 模式：三态行 + 待审批角标；embedded 模式由工作台左栏承担；
-          compact 模式幽灵化——去边框盒，hover 底色，窄栏不再顶着一张"大脸"） */}
+          compact 模式幽灵化——去边框盒，hover 底色；且与操作图标合并为一行（设计师评审#1/#4）） */}
       {!embedded && (
-        <div className={`relative ${compact ? 'mb-1' : 'mb-2'}`}>
+        <div className={`relative ${compact ? 'mb-1.5 flex items-center gap-0.5' : 'mb-2'}`}>
           <button
             onClick={() => setConvMenuOpen((v) => !v)}
             className={
               compact
-                ? 'flex h-7 w-full items-center gap-1.5 rounded-lg px-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                ? 'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70'
                 : 'flex w-full items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-left hover:border-blue-300'
             }
           >
@@ -646,6 +646,75 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             )}
             <ChevronDown size={12} className="shrink-0 text-slate-400 dark:text-slate-500" />
           </button>
+          {/* compact 单行头部：切换器 + 新会话 + 「…」（设计师评审#1/#4/#5——
+              分组=价值操作/管理/危险，token 统计带标签作信息头） */}
+          {compact && (
+            <>
+              <button
+                onClick={createConv}
+                disabled={!backendRepo || sending}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300 disabled:opacity-40"
+                title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
+              >
+                <RotateCcw size={12} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setMoreOpen((v) => !v)}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
+                  title="更多操作"
+                >
+                  <MoreHorizontal size={13} />
+                </button>
+                {moreOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+                    <div className="glass anim-scale-in absolute right-0 top-full z-40 mt-1 w-48 rounded-xl border border-slate-200 dark:border-slate-700 p-1 shadow-xl">
+                      {/* 信息头：带标签的 token 统计（裸"9,026 / 864"格式退役） */}
+                      <p className="tnum flex items-baseline justify-between px-2 pb-1 pt-1.5 text-micro text-slate-400 dark:text-slate-500">
+                        <span>输入 {usage.promptTokens.toLocaleString()}</span>
+                        <span>输出 {usage.completionTokens.toLocaleString()}</span>
+                      </p>
+                      <button
+                        onClick={() => { setMoreOpen(false); upgradeToTask() }}
+                        disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                      >
+                        <Wrench size={11} /> 转为任务
+                      </button>
+                      <div className="mx-2 my-0.5 border-t border-slate-100 dark:border-slate-800" />
+                      <button
+                        onClick={() => { setMoreOpen(false); exportAndClear() }}
+                        disabled={!backendRepo || messages.length === 0}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                      >
+                        <Download size={11} /> 导出/清空
+                      </button>
+                      <button
+                        onClick={() => { setMoreOpen(false); compressCtx() }}
+                        disabled={!backendRepo || compacting}
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
+                      >
+                        <Shrink size={11} /> {compacting ? '压缩中…' : '压缩上下文'}
+                      </button>
+                      {convId && (
+                        <>
+                          <div className="mx-2 my-0.5 border-t border-slate-100 dark:border-slate-800" />
+                          <button
+                            onClick={() => { setMoreOpen(false); deleteConv() }}
+                            disabled={!backendRepo}
+                            className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
+                          >
+                            <XIcon size={11} /> 删除会话
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
           {convMenuOpen && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setConvMenuOpen(false)} />
@@ -707,71 +776,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         </div>
       )}
 
-      {/* compact 窄栏：一行收尾——只留 新会话 + 「…」收纳（转为任务/导出清空/压缩/删会话），
-          token 统计收起（工作台全功能版才显示）；宽栏保持原完整按钮组 */}
-      {compact ? (
-        <div className="mb-1.5 flex items-center justify-end gap-0.5">
-          <button
-            onClick={createConv}
-            disabled={!backendRepo || sending}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300 disabled:opacity-40"
-            title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
-          >
-            <RotateCcw size={12} />
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setMoreOpen((v) => !v)}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
-              title="更多操作"
-            >
-              <MoreHorizontal size={13} />
-            </button>
-            {moreOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
-                <div className="glass anim-scale-in absolute right-0 top-full z-40 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 p-1 shadow-xl">
-                  <button
-                    onClick={() => { setMoreOpen(false); upgradeToTask() }}
-                    disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
-                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                  >
-                    <Wrench size={11} /> 转为任务
-                  </button>
-                  <button
-                    onClick={() => { setMoreOpen(false); exportAndClear() }}
-                    disabled={!backendRepo || messages.length === 0}
-                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                  >
-                    <Download size={11} /> 导出/清空
-                  </button>
-                  <button
-                    onClick={() => { setMoreOpen(false); compressCtx() }}
-                    disabled={!backendRepo || compacting}
-                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800/70 disabled:opacity-40"
-                  >
-                    <Shrink size={11} /> {compacting ? '压缩中…' : '压缩上下文'}
-                  </button>
-                  {convId && (
-                    <button
-                      onClick={() => { setMoreOpen(false); deleteConv() }}
-                      disabled={!backendRepo}
-                      className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
-                    >
-                      <XIcon size={11} /> 删除会话
-                    </button>
-                  )}
-                  <div className="mt-0.5 border-t border-slate-100 dark:border-slate-800 px-2 pt-1">
-                    <p className="tnum truncate text-micro text-slate-300 dark:text-slate-600">
-                      累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
-                    </p>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      ) : (
       <div className="mb-2 flex items-center justify-between">
         <span className="tnum text-micro text-slate-400 dark:text-slate-500">
           会话已持久化 · 累计 {usage.promptTokens.toLocaleString()} / {usage.completionTokens.toLocaleString()} tokens
@@ -830,7 +834,6 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           )}
         </div>
       </div>
-      )}
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto">
         {/* M4-2 内联审批卡：等待中的审批门（AionUI：选项即按钮，决策后原地留痕） */}
@@ -908,15 +911,28 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           </div>
         )}
         {messages.length === 0 && pendingApprovals.length === 0 && (
-          <p className="pt-8 text-center text-[12px] leading-5 text-slate-400 dark:text-slate-500">
-            基于语义代码地图提问：
-            <br />
-            "评测提交流程是谁负责的？"
-            <br />
-            "哪些模块耦合最重？"
-            <br />
-            <span className="text-micro">（回答可存为视图，引用模块可定位到画布）</span>
-          </p>
+          /* 2026-10-04 设计师评审#8：空态邀请卡化——图标+一句主张+示例 chip 一处说完，
+             不再「居中灰字<br/>换行」像 API 文档页；示例不再常驻输入框上方 */
+          <div className="flex flex-col items-center gap-3 px-4 pt-12 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-950/40 dark:text-blue-400">
+              <MessagesSquare size={18} />
+            </span>
+            <div>
+              <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">基于语义代码地图提问</p>
+              <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">回答可存为视图，引用模块可定位到画布</p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {samplePrompts.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => { setInput(p); textareaRef.current?.focus() }}
+                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-400 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-600"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {messages.map((m, i) =>
           m.role === 'system' ? (
@@ -926,8 +942,12 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           ) : (
             <div key={i} className={`anim-msg-in group/msg flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`select-text max-w-[92%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
-                  m.role === 'user' ? 'bg-blue-600 text-white' : 'border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 text-slate-700 dark:text-slate-200'
+                className={`select-text max-w-[88%] rounded-lg px-3 py-2 text-[12px] leading-5 ${
+                  /* 2026-10-04 设计师评审#4/#11：用户气泡去饱和（blue-600 实底=与发送按钮同色抢层级，
+                     glass 菜单叠纯蓝发浊）；蓝=交互对象，灰/浅tint=内容容器——颜色宪法 */
+                  m.role === 'user'
+                    ? 'border border-blue-100 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-100'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 {m.images?.map((im, j) => (
@@ -936,7 +956,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 {m.mentions && m.mentions.length > 0 && (
                   <div className="mb-1 flex flex-wrap gap-1">
                     {m.mentions.map((mm) => (
-                      <span key={mm.id} className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-micro">
+                      <span key={mm.id} className="flex items-center gap-0.5 rounded-full bg-blue-100/80 px-1.5 py-0.5 text-micro text-blue-700 dark:bg-blue-900/50 dark:text-blue-200">
                         <AtSign size={8} />
                         {mm.name}
                       </span>
@@ -951,7 +971,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                 ) : (
                   <MarkdownMessage content={m.content} />
                 )}
-                {/* 审计 P2：消息单条复制（此前只能导出全文或手选）——悬停浮现，组内免打扰 */}
+                {/* 审计 P2：消息单条复制（此前只能导出全文或手选）——悬停浮现，组内免打扰。
+                    图标按钮化：9px 文字违字阶纪律（设计师评审#6），tooltip 承载说明 */}
                 <span className="mt-1 flex justify-end opacity-0 transition-opacity group-hover/msg:opacity-100">
                   <button
                     onClick={() => {
@@ -960,11 +981,14 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                         () => toast('复制失败（剪贴板不可用）', 'error'),
                       )
                     }}
-                    className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold ${
-                      m.role === 'user' ? 'text-white/70 hover:text-white' : 'text-slate-300 dark:text-slate-600 hover:text-slate-500'
+                    className={`rounded p-1 ${
+                      m.role === 'user'
+                        ? 'text-blue-300 hover:text-blue-600 dark:text-blue-700 dark:hover:text-blue-300'
+                        : 'text-slate-300 dark:text-slate-600 hover:text-slate-500'
                     }`}
+                    title="复制该条消息"
                   >
-                    <Copy size={9} /> 复制
+                    <Copy size={10} />
                   </button>
                 </span>
                 {(m.role === 'assistant' || m.role === 'user') && (m.refs.length > 0 || /```mermaid/.test(m.content)) && (
@@ -1094,7 +1118,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           ))}
         </div>
       )}
-      <div className="mt-3 flex items-end gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
+      <div className="mt-3 flex items-end gap-1.5 border-t border-slate-100 dark:border-slate-800 pt-3">
         <input
           ref={fileRef}
           type="file"
@@ -1102,10 +1126,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           className="hidden"
           onChange={(e) => addFiles(e.target.files)}
         />
+        {/* 回形针 ghost 化：次要动作不再与发送按钮同视觉重量（设计师评审#7） */}
         <button
           onClick={() => fileRef.current?.click()}
           disabled={!backendRepo || attachments.length >= 3}
-          className="rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 text-slate-400 dark:text-slate-500 transition-colors hover:text-blue-600 disabled:opacity-40"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300 disabled:opacity-40"
           title="添加附件（代码/日志/文档文本，≤50KB×3）——内容随消息一起发给 AI"
         >
           <Paperclip size={14} />
@@ -1131,20 +1156,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
               ))}
             </div>
           )}
-          {/* 新手引导（2026-10-04）：空对话时给示例 prompt（AionUi 式"活的引导"——点一下即进入真实工作流） */}
-          {messages.length === 0 && !sending && !suggest && (
-            <div className="mb-1.5 flex flex-wrap gap-1.5">
-              {samplePrompts.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setInput(p)}
-                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-400 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-600"
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 新手引导：空态示例 chip 已移至上方邀请卡（设计师评审#8），此处不再常驻 */}
           <textarea
             ref={textareaRef}
             value={input}
@@ -1178,7 +1190,8 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
               }
             }}
             rows={2}
-            placeholder={backendRepo ? '问点什么…（@ 引用模块，Enter 发送，Shift+Enter 换行）' : '需要本地后端在线'}
+            placeholder={backendRepo ? '问点什么，@ 可引用模块' : '需要本地后端在线'}
+            title="Enter 发送，Shift+Enter 换行"
             disabled={!backendRepo || sending}
             className="w-full flex-1 resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
           />
@@ -1186,16 +1199,23 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         {sending ? (
           <button
             onClick={() => abortRef.current?.abort()}
-            className="rounded-lg border border-red-200 dark:border-red-900/60 p-2.5 text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:hover:bg-red-950/40"
             title="停止等待本次回答"
           >
             <Square size={13} />
           </button>
         ) : (
+          /* 禁用态换材质而非变淡（设计师评审#7）：空输入=灰底灰字，有输入=实蓝——
+              状态对比由颜色承担，不再靠透明度 */
           <button
             onClick={send}
-            disabled={!backendRepo || !input.trim()}
-            className="rounded-lg bg-blue-600 p-2.5 text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
+            disabled={!backendRepo}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
+              input.trim() && backendRepo
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600'
+            }`}
+            title="发送（Enter）"
           >
             <Send size={14} />
           </button>

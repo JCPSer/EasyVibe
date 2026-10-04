@@ -466,9 +466,10 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
           />
         )}
         {/* 2026-10-04 对话页签实体化：就地全功能对话（PanelChat——多会话/@模块上下文/附件，
-            与工作台共享会话库）；选中模块自动钉 @，不再是有去无回的迁移占位 */}
+            与工作台共享会话库）；选中模块自动钉 @，不再是有去无回的迁移占位。
+            内边距与兄弟页签统一（p-4），不再用 -m-4 越狱——贴边/切页签跳动两个观感硬伤之源 */}
         {tab === 'chat' && (
-          <div className="-m-4 flex h-full min-h-0 flex-col">
+          <div className="flex h-full min-h-0 flex-col">
             <PanelChat
               backendRepo={backendRepo}
               map={map}
