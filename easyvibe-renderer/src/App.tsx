@@ -1132,15 +1132,20 @@ function Canvas({
                 {freshness && (
                   <span
                     className={`flex items-center gap-1 rounded-full px-1.5 py-px font-semibold ${
-                      freshness === 'stale' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                      freshness === 'stale' ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
                     }`}
                     title={`git 有 ${freshnessInfo.commitsSinceMap ?? '?'} 个提交在地图生成之后——对话/建议/健康分可能基于过时信息`}
                   >
                     <AlertTriangle size={9} />
                     地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
-                    {freshness === 'stale' && backendRepo && (
-                      <button onClick={startReinduce} className="ml-0.5 rounded-full bg-white/70 dark:bg-slate-900/70 px-1 text-micro hover:bg-white">
-                        重新归纳
+                    {/* 2026-10-04 实弹：只摆问题不给出路是死胡同——drifting/stale 两档都挂行动按钮 */}
+                    {backendRepo && !inducing && (
+                      <button
+                        onClick={startReinduce}
+                        className="ml-0.5 flex items-center gap-0.5 rounded-full bg-white/80 dark:bg-slate-800/80 px-1.5 py-px text-micro font-bold text-red-600 dark:text-amber-300 shadow-sm transition-colors hover:bg-white dark:hover:bg-slate-700"
+                        title="立即重新归纳：agent 按 v2.2 协议重跑，全程直播"
+                      >
+                        <RefreshCw size={8} /> 立即归纳
                       </button>
                     )}
                   </span>
