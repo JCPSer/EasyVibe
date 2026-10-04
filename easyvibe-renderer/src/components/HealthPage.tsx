@@ -150,7 +150,19 @@ export function HealthPage({
     if (!backendRepo || starting) return
     setStarting(true)
     try {
-      await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' })
+      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' })
+      // 单会话纪律：归纳/分析会话在跑时后端返回 409——以前这里静默吞掉，按钮"点了没反应"
+      if (!r.ok) {
+        const body = await r.json().catch(() => null)
+        const msg = String(body?.error ?? '')
+        if (r.status === 409 || body?.code === 'CONFLICT')
+          toast('已有归纳/分析会话在进行（单会话纪律）。等它结束后即可发起巡检，无需反复点击。')
+        else toast(msg || `巡检启动失败（HTTP ${r.status}）`, 'error')
+        return
+      }
+      toast('巡检已开始，完成后看板会自动刷新。')
+    } catch {
+      toast('巡检启动失败（请确认后端在线后重试）。', 'error')
     } finally {
       setStarting(false)
       // R3 C1：巡检是分钟级 LLM 任务，1.5s 刷新必然空转——改由 patrol.finished 事件驱动刷新

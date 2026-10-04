@@ -866,8 +866,12 @@ function Canvas({
           let msg = '分析启动失败（请确认后端在线后重试）。'
           try {
             const body = await (e as Response)?.json?.()
-            if (body?.code === 'CONFLICT' || /conflict|活动会话/.test(String(body?.error ?? '')))
-              msg = '已有分析/归纳会话在进行（单会话纪律）。等它完成后会自动解锁，无需重复点击。'
+            if (body?.code === 'CONFLICT' || /conflict|活动会话/.test(String(body?.error ?? ''))) {
+              // 带上后端返回的会话名（如 ind-0），用户能分清是"归纳在跑"还是别的分析占坑
+              const m = /活动会话\s*([^\s，。]+)/.exec(String(body?.error ?? ''))
+              const who = m?.[1] ? `（当前会话：${m[1]}）` : ''
+              msg = `已有分析/归纳会话在进行${who}（单会话纪律）。等它完成后会自动解锁，无需重复点击。`
+            }
           } catch { /* 保持默认文案 */ }
           setSubmapErrors((prev) => ({ ...prev, [id]: msg }))
           setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
