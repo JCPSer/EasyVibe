@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, AlertTriangle, Plus, GitBranch, Pencil, Trash2, Check, X } from 'lucide-react'
+import { Loader2, AlertTriangle, Plus, GitBranch, Pencil, Trash2, Check, X, ClipboardList, MessagesSquare } from 'lucide-react'
 import { ChatPanel, type ConversationSummary } from '@/components/ChatPanel'
 import { StagePipeline } from '@/components/StagePipeline'
 import { onTaskEvent } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
 import type { TaskDraft } from '@/lib/taskContext'
 import type { CodeMap } from '@/types/map'
+import type { ChatAboutTarget } from '@/components/DetailPanel'
 
-// M4-2 开发工作台（卖点视图，按 ui-mockups/开发工作台原型.png 施工）：
+// v0.2 定位：「任务对话」——以对话为入口把任务聊出来（孵化视角）。
+// 与「任务」页（TaskPage：流程视角，看板+流水线）分工，顶部互指条显式化（方案 3.2）。
 // 左栏会话列表（AionUI 三态行：⚠待审批 > 🌀运行中 > 闲时）｜
 // 中栏对话流（复用 ChatPanel：计划进度条=任务三道关 + 内联审批卡）｜
 // 右栏影响面（该会话任务的 git diff 按模块聚合）。
@@ -36,11 +38,19 @@ export function WorkbenchPage({
   map,
   onCreateTask,
   onLocateModule,
+  pendingChatContext,
+  onConsumeChatContext,
+  onNavigate,
 }: {
   backendRepo: string | null
   map: CodeMap
   onCreateTask: (d: TaskDraft) => void
   onLocateModule: (id: string) => void
+  /** v0.2：地图页「💬 对话/就此对话」带入的上下文（消费即清，后写覆盖先写） */
+  pendingChatContext: ChatAboutTarget | null
+  onConsumeChatContext: () => void
+  /** v0.2：互指提示条跳「任务」页 */
+  onNavigate: (page: 'tasks') => void
 }) {
   const [convs, setConvs] = useState<ConversationSummary[]>([])
   const [activeConv, setActiveConv] = useState<string | null>(null)
@@ -50,6 +60,8 @@ export function WorkbenchPage({
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [diffStat, setDiffStat] = useState<string | null>(null)
   const [diffTaskId, setDiffTaskId] = useState<string | null>(null)
+  // v0.2：跨页预填载荷（convId+nonce 契约，ChatPanel 消费）——新建会话成功后装配
+  const [chatDraft, setChatDraft] = useState<{ convId: string; text: string; mention?: { id: string; name: string }; nonce: number } | null>(null)
 
   // 会话列表（含运行时摘要）
   const loadConvs = useCallback(() => {
@@ -98,6 +110,37 @@ export function WorkbenchPage({
     loadTasks()
   }, [loadConvs, loadTasks])
   useEffect(() => onTaskEvent(() => { loadConvs(); loadTasks() }), [loadConvs, loadTasks])
+
+  // v0.2 消费地图页带入的上下文：自动新建会话 → @模块芯片 + 预填文本（不自动发送——第一句是用户的权力）
+  useEffect(() => {
+    if (!pendingChatContext || !backendRepo) return
+    const ctx = pendingChatContext
+    onConsumeChatContext()
+    fetch(`/api/repos/${backendRepo}/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data: ConversationSummary }) => {
+        setActiveConv(d.data.id)
+        loadConvs()
+        const mention =
+          ctx.kind === 'module' && map.modules.some((m) => m.id === ctx.refId)
+            ? { id: ctx.refId, name: ctx.refName }
+            : undefined
+        setChatDraft({
+          convId: d.data.id,
+          text: mention
+            ? '请分析这个模块的现状、健康度问题与改进建议。'
+            : `请分析一下架构层「${ctx.refName}」的职责划分、层间依赖与改进建议。`,
+          mention,
+          nonce: Date.now(),
+        })
+      })
+      .catch(() => toast('带入上下文失败（新会话未创建）', 'error'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChatContext])
 
   const createConv = () => {
     if (!backendRepo) return
@@ -190,7 +233,21 @@ export function WorkbenchPage({
   const maxImpact = Math.max(1, ...impact.map((i) => i.adds + i.dels))
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      {/* v0.2 分工显式化：与「任务」页（流程视角）互指——用户此前反馈两页分工不明、很突兀 */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-3 py-1.5">
+        <MessagesSquare size={12} className="shrink-0 text-slate-400" />
+        <p className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
+          这里以对话孵化任务；任务流程与门禁进度 → 看「任务」页
+        </p>
+        <button
+          onClick={() => onNavigate('tasks')}
+          className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+        >
+          <ClipboardList size={10} /> 去任务页
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1">
       {/* 左栏：会话列表（三态行 + 待审批角标） */}
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
@@ -317,6 +374,7 @@ export function WorkbenchPage({
             onConvChange={setActiveConv}
             onLocateModule={onLocateModule}
             onCreateTask={onCreateTask}
+            pendingDraft={chatDraft}
           />
         </div>
       </div>
@@ -357,6 +415,7 @@ export function WorkbenchPage({
           )}
         </div>
       </aside>
+      </div>
     </div>
   )
 }

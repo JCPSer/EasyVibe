@@ -8,7 +8,7 @@ import {
   Waypoints,
   Radar,
   HeartPulse,
-  MonitorCog,
+  MessagesSquare,
   ClipboardList,
   History,
   BookOpen,
@@ -52,7 +52,7 @@ const NAV: { group: string; items: { id: PageId; label: string; icon: typeof Map
   {
     group: '工作区',
     items: [
-      { id: 'workbench', label: '开发工作台', icon: MonitorCog },
+      { id: 'workbench', label: '任务对话', icon: MessagesSquare },
       { id: 'tasks', label: '任务', icon: ClipboardList },
       { id: 'changes', label: '变更记录', icon: History },
       { id: 'git', label: 'Git', icon: GitBranch },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ClipboardList, LayoutGrid, Rows3, Plus, Table2 } from 'lucide-react'
+import { ClipboardList, LayoutGrid, Rows3, Plus, Table2, MessagesSquare } from 'lucide-react'
 import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
 import { TaskBoardPage } from '@/components/TaskBoardPage'
 import { TaskGovernancePage } from '@/components/TaskGovernancePage'
@@ -9,6 +9,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 // 任务页（v4 P1 施工 + P2 治理视图）：「任务」唯一入口，页内视图切换——
 // 看板（默认，并行全景）/ 流水线（单任务全程）/ 治理（历史/失败/返工链）。
 // 旧「任务编排」「任务工作流」两个页签删除，组件迁入本页。
+// v0.2 分工：本页 = 流程视角（任务走到哪一步）；孵化视角（对话聊出任务）在「任务对话」页。
 
 type View = 'board' | 'pipeline' | 'governance'
 
@@ -17,12 +18,15 @@ export function TaskPage({
   map,
   onCreateTask,
   externalFocus,
+  onGoChat,
 }: {
   backendRepo: string | null
   map: CodeMap
   onCreateTask: (d: TaskDraft) => void
   /** 表单"前往任务页签跟踪"传入：切流水线并选中该任务（nonce 区分多次） */
   externalFocus?: { id: string; nonce: number } | null
+  /** v0.2 互指条：跳「任务对话」页 */
+  onGoChat?: () => void
 }) {
   // v4 修订（用户裁定）：默认看板（多任务全景是首页心智），点卡跳流水线看单任务全程
   const [view, setView] = useState<View>('board')
@@ -75,6 +79,15 @@ export function TaskPage({
         <p className="hidden text-[10px] text-slate-400 lg:block">
           {view === 'board' ? '全部任务的并行全景，拖拽即处分，点卡看单个任务全程' : view === 'pipeline' ? '一个任务走 harness 五阶段的全程' : '全部任务的历史、失败与返工链'}
         </p>
+        {onGoChat && (
+          <button
+            onClick={onGoChat}
+            className="ml-1 flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-micro font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600"
+            title="任务从对话孵化：去「任务对话」页与 agent 聊出任务"
+          >
+            <MessagesSquare size={10} /> 去任务对话
+          </button>
+        )}
         <button
           onClick={() => onCreateTask({ title: '', description: '', modules: [], acceptance: '', source: 'manual', context: {} })}
           className="ml-auto flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"

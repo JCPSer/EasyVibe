@@ -6,13 +6,15 @@ import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
-import { ChatPanel } from '@/components/ChatPanel'
 
 export type Selection =
   | { kind: 'module' | 'layer'; id: string }
   | { kind: 'submodule'; parentId: string; subId: string }
   | null
 export type PanelTab = 'detail' | 'issues' | 'chat'
+
+/** v0.2：对话页签占位/详情视图「就此对话」的上抛回调——App 转换为跨页携带上下文跳「任务对话」 */
+export type ChatAboutTarget = { refId: string; refName: string; kind: 'module' | 'layer' }
 
 interface Props {
   map: CodeMap
@@ -25,6 +27,8 @@ interface Props {
   onLocateModule: (moduleId: string) => void
   /** S1-1：打开视图（多模块时画布 solo 聚焦） */
   onOpenView?: (ids: string[]) => void
+  /** v0.2：对话页签占位与详情视图的「就此对话」入口（携带当前选中对象） */
+  onChatAbout?: (target: ChatAboutTarget) => void
   onClose: () => void
   /** 改进#4：右栏可调宽（测试员 IA 反馈的非破坏性验证——宽度够不够先看数据） */
   width?: number
@@ -85,7 +89,7 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
   )
 }
 
-function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void; backendRepo: string | null }) {
+function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map: CodeMap; mod: Module; onCreateTask: (d: TaskDraft) => void; backendRepo: string | null; onChatAbout?: (target: ChatAboutTarget) => void }) {
   const color = healthColor(mod.health.score)
   const deps = mod.dependencies.map((id) => map.modules.find((m) => m.id === id)).filter(Boolean) as Module[]
   const dependents = dependentsOf(map, mod)
@@ -113,13 +117,25 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
           <span className="text-[11px] font-semibold" style={{ color }}>
             {healthLabel(mod.health.score)} · {mod.health.score}/100
           </span>
-          <button
-            onClick={() => onCreateTask(buildModuleTask(map, mod.id))}
-            className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
-            title="指哪打哪：以本模块为上下文发起修复任务"
-          >
-            <Wrench size={10} /> 发起修复
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* v0.2：对话入口（带模块上下文跳「任务对话」，@芯片+预填文本） */}
+            {onChatAbout && (
+              <button
+                onClick={() => onChatAbout({ refId: mod.id, refName: mod.name, kind: 'module' })}
+                className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-micro font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
+              >
+                <MessagesSquare size={10} /> 就此对话
+              </button>
+            )}
+            <button
+              onClick={() => onCreateTask(buildModuleTask(map, mod.id))}
+              className="flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
+              title="指哪打哪：以本模块为上下文发起修复任务"
+            >
+              <Wrench size={10} /> 发起修复
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-cap text-slate-400">
           coupling {mod.health.coupling} · complexity {mod.health.complexity} · churn {mod.health.churn ?? 'n/a'}
@@ -195,7 +211,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo }: { map: CodeMap; mod
   )
 }
 
-function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; onCreateTask: (d: TaskDraft) => void }) {
+function LayerView({ map, layer, onCreateTask, onChatAbout }: { map: CodeMap; layer: Layer; onCreateTask: (d: TaskDraft) => void; onChatAbout?: (target: ChatAboutTarget) => void }) {
   const mods = map.modules.filter((m) => m.layer === layer.id)
   const avg = Math.round(mods.reduce((s, m) => s + m.health.score, 0) / Math.max(mods.length, 1))
   const color = healthColor(avg)
@@ -225,13 +241,24 @@ function LayerView({ map, layer, onCreateTask }: { map: CodeMap; layer: Layer; o
           <span className="text-[11px] font-semibold" style={{ color }}>
             层健康（聚合） · <span className="tnum">{avg}</span>/100
           </span>
-          <button
-            onClick={() => onCreateTask(buildLayerTask(map, layer.id))}
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
-            title="指哪打哪：以本层为上下文发起治理任务"
-          >
-            <Wrench size={10} /> 发起治理
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onChatAbout && (
+              <button
+                onClick={() => onChatAbout({ refId: layer.id, refName: layer.name, kind: 'layer' })}
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-micro font-bold text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                title="就此层发起对话：跳转「任务对话」并自动带入层上下文"
+              >
+                <MessagesSquare size={10} /> 就此对话
+              </button>
+            )}
+            <button
+              onClick={() => onCreateTask(buildLayerTask(map, layer.id))}
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
+              title="指哪打哪：以本层为上下文发起治理任务"
+            >
+              <Wrench size={10} /> 发起治理
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-cap text-slate-400">
           {mods.length} 模块 · 逆向依赖 <span className="tnum">{violations.length}</span> 条
@@ -383,7 +410,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
   )
 }
 
-export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onClose, width }: Props) {
+export function DetailPanel({ map, selection, tab, onTabChange, submaps, backendRepo, onCreateTask, onLocateModule, onChatAbout, onClose, width }: Props) {
   const module = selection?.kind === 'module' ? map.modules.find((m) => m.id === selection.id) : undefined
   const layer = selection?.kind === 'layer' ? map.layers.find((l) => l.id === selection.id) : undefined
   const parent = selection?.kind === 'submodule' ? map.modules.find((m) => m.id === selection.parentId) : undefined
@@ -436,12 +463,38 @@ export function DetailPanel({ map, selection, tab, onTabChange, submaps, backend
             scopeName={scopeModuleName}
           />
         )}
-        {/* 常驻挂载 + CSS 隐藏：切页签不清空对话状态 */}
-        <div className={tab === 'chat' ? 'h-full' : 'hidden h-full'}>
-          <ChatPanel backendRepo={backendRepo} map={map} onLocateModule={onLocateModule} onCreateTask={onCreateTask} />
-        </div>
-        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} />}
-        {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} />}
+        {/* v0.2：对话已迁至「任务对话」页（全应用唯一 ChatPanel 实例）。
+            占位保留一个版本期： muscle memory 的迁移提示长在原页签位置上（方案 3.3/评审🟡3） */}
+        {tab === 'chat' && (
+          <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
+            <MessagesSquare size={22} className="text-slate-300" />
+            <p className="text-[12px] font-semibold text-slate-700">对话已迁至「任务对话」</p>
+            <p className="max-w-[240px] text-[11px] leading-4 text-slate-400">
+              当前选中{module ? '模块' : layer ? '架构层' : '对象'}的上下文会自动带过去
+            </p>
+            {onChatAbout && (module || layer || parent) && (
+              <button
+                onClick={() =>
+                  onChatAbout(
+                    module
+                      ? { refId: module.id, refName: module.name, kind: 'module' }
+                      : layer
+                        ? { refId: layer.id, refName: layer.name, kind: 'layer' }
+                        : { refId: parent!.id, refName: parent!.name, kind: 'module' },
+                  )
+                }
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-700"
+              >
+                <MessagesSquare size={12} /> 前往任务对话
+              </button>
+            )}
+            {!module && !layer && !parent && (
+              <p className="text-micro text-slate-300">在地图上选中模块或层后，可带上下文前往</p>
+            )}
+          </div>
+        )}
+        {tab === 'detail' && module && <ModuleView map={map} mod={module} onCreateTask={onCreateTask} backendRepo={backendRepo} onChatAbout={onChatAbout} />}
+        {tab === 'detail' && !module && layer && <LayerView map={map} layer={layer} onCreateTask={onCreateTask} onChatAbout={onChatAbout} />}
         {tab === 'detail' && !module && !layer && sub && parent && smLoaded && (
           <SubmoduleView parent={parent} sub={sub} submap={smLoaded} onCreateTask={onCreateTask} />
         )}

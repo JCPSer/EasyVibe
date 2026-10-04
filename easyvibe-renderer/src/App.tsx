@@ -13,7 +13,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug} from 'lucide-react'
+import { Activity, AlertTriangle, Bot, FolderOpen, GitBranch, Loader2, PanelRightOpen, UnfoldVertical, FoldVertical, RefreshCw, Focus, Play, Pause, RotateCcw, X, Sparkles, Settings, Lightbulb, WifiOff, FileDown, Plus, Info, LayoutGrid, Waypoints, BookOpen, ScrollText, Plug, MessagesSquare} from 'lucide-react'
 
 import type { CodeMap, GrowthEvent, SubMap } from '@/types/map'
 import { layoutMap, healthColor, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
@@ -359,6 +359,7 @@ function ModuleToolbar({
   onToggleExpand,
   onToggleSolo,
   onReinduce,
+  onChat,
 }: {
   moduleName: string
   expanded: boolean
@@ -368,10 +369,22 @@ function ModuleToolbar({
   onToggleExpand: () => void
   onToggleSolo: () => void
   onReinduce: () => void
+  /** v0.2：就此模块对话——带上下文跳「任务对话」页 */
+  onChat?: () => void
 }) {
   return (
     <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
       <span className="mr-1 max-w-[180px] truncate text-[12px] font-bold text-slate-700">{moduleName}</span>
+      {onChat && (
+        <button
+          onClick={onChat}
+          className="flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 hover:bg-slate-100"
+          title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
+        >
+          <MessagesSquare size={12} />
+          对话
+        </button>
+      )}
       <button
         onClick={onToggleExpand}
         className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
@@ -490,6 +503,7 @@ function Canvas({
   guide,
   onTaskCreated,
   agentReady,
+  onChatAbout,
 }: {
   map: CodeMap
   backendRepo: string | null
@@ -509,6 +523,9 @@ function Canvas({
   onTaskCreated: (taskId: string) => void
   /** M2 降级：agent 缺失（false）时任务表单禁止提交 */
   agentReady: boolean
+  /** v0.2：「就此对话」入口上抛（详情视图/模块工具栏/对话占位页签共用）——
+   * 壳层转为跨页携带上下文跳「任务对话」 */
+  onChatAbout?: (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => void
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
@@ -999,6 +1016,7 @@ function Canvas({
                 onToggleExpand={() => toggleExpand(selModule.id)}
                 onToggleSolo={() => toggleFilter('solo')}
                 onReinduce={startReinduce}
+                onChat={onChatAbout ? () => onChatAbout({ refId: selModule.id, refName: selModule.name, kind: 'module' }) : undefined}
               />
             </Panel>
           )}
@@ -1166,6 +1184,7 @@ function Canvas({
               onCreateTask={openTaskDraft}
               onLocateModule={focusModule}
               onOpenView={openView}
+              onChatAbout={onChatAbout}
               onClose={() => onPanelOpenChange(false)}
               width={panelWidth}
             />
@@ -1472,6 +1491,8 @@ export default function App() {
 
   // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
   const [page, setPage] = useState<PageId>('map')
+  // v0.2：地图页「就此对话」跨页上下文（消费即清；后写覆盖先写，竞态语义自然）
+  const [pendingChatContext, setPendingChatContext] = useState<{ refId: string; refName: string; kind: 'module' | 'layer' } | null>(null)
   // ui-test P1：表单创建成功 → 任务页流水线选中该任务（nonce 区分多次跳入）
   const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
@@ -1521,6 +1542,15 @@ export default function App() {
       saveUiPref('ui.page', p)
     },
     [saveUiPref],
+  )
+
+  // v0.2：「就此对话」统一收口——带上下文跳「任务对话」页（Canvas 工具栏/详情视图/占位页签共用）
+  const goChatAbout = useCallback(
+    (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => {
+      setPendingChatContext(target)
+      handlePageChange('workbench')
+    },
+    [handlePageChange],
   )
 
   // 每项目记忆：右栏宽度 / 面板开合随项目持久化（M4-1 状态持久化，防刷新丢位置）。
@@ -2050,7 +2080,7 @@ export default function App() {
                 <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
                   <p className="flex-1 text-[11px] leading-5 text-slate-600">
                     <span className="font-semibold text-blue-700">界面已整理：</span>
-                    页签瘦身为 详情/问题/对话；任务在左侧「工作区 · 任务」，视图与优化建议在顶栏。
+                    详情栏页签为 详情/问题；对话在左侧「任务对话」，任务在「任务」，视图与优化建议在顶栏。
                   </p>
                   <button
                     onClick={() => {
@@ -2068,18 +2098,33 @@ export default function App() {
               setTaskFocus({ id, nonce: Date.now() })
               handlePageChange('tasks')
             }}
+            onChatAbout={goChatAbout}
           />
         </ReactFlowProvider>
       </CanvasBoundary>
     ),
-    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
+    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
     settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
-    // P1/P2 页面：诚实占位（验收清单⑪：说明 + 里程碑 + 引导）
-    workbench: <WorkbenchPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onLocateModule={() => handlePageChange('map')} />,
+    // v0.2 P1：「任务对话」——对话孵化任务（会话=任务上位容器：计划进度条/内联审批/diff 影响面三栏）
+    workbench: (
+      <WorkbenchPage
+        backendRepo={backendRepo}
+        map={map}
+        onCreateTask={openTaskDraft}
+        onLocateModule={(id) => {
+          // v0.2 定位链路升级：选中聚焦 + 切页（此前只切页不选中，地图端找不回模块）
+          setViewRequest([id])
+          handlePageChange('map')
+        }}
+        pendingChatContext={pendingChatContext}
+        onConsumeChatContext={() => setPendingChatContext(null)}
+        onNavigate={(p) => handlePageChange(p)}
+      />
+    ),
     // v4 P1：任务编排/任务工作流两个旧页签删除，统一从「任务」页进入（视图切换）；
     // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
-    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
-    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} />,
+    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
+    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
     changes: (
       <ChangesPage
         backendRepo={backendRepo}

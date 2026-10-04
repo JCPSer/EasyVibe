@@ -57,6 +57,9 @@ interface Props {
   /** R3 B1：受控会话 id——传入后组件进入受控模式（工作台左栏驱动中栏联动），
    * 内部切换只经 onConvChange 上报父级；不传则维持内部自治 */
   activeConvId?: string | null
+  /** v0.2 跨页预填：携带目标会话 + nonce，会话匹配且未消费时写入输入框/mentions。
+   * 契约如此而非"挂载时写一次"的原因：本组件常驻挂载、切会话不重挂载（曾致跨会话串话） */
+  pendingDraft?: { convId: string; text: string; mention?: { id: string; name: string }; nonce: number } | null
 }
 
 interface ChatRestore {
@@ -71,7 +74,7 @@ interface ChatRestore {
 // 入口对话（F2 + M3-5 会话持久化 + M4-2 多会话）：服务端 SQLite 是会话事实源——
 // 多会话（每仓库 N 个，会话=任务的上位容器）+ 内联审批卡（AionUI 模式）+
 // 切换页签/刷新/后端重启均从库恢复（不再只活在前端 state）；支持手动压缩与 auto-compact 留痕
-export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId }: Props) {
+export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embedded, onConvChange, activeConvId, pendingDraft }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -171,7 +174,22 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     setDecided({})
     setRejectingApproval(null)
     setRejectNote('')
+    // v0.2 同批修复：切会话清空输入框与 @提及——消除"上一会话的半成品文本串到下一会话"
+    setInput('')
+    setMentions([])
+    setSuggest(null)
   }, [setConvId])
+
+  // v0.2 跨页预填消费：目标会话匹配且 nonce 未消费才写入（防跨会话串话；消费即弃）
+  const consumedDrafts = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    if (!pendingDraft || !convId) return
+    if (pendingDraft.convId !== convId || consumedDrafts.current.has(pendingDraft.nonce)) return
+    consumedDrafts.current.add(pendingDraft.nonce)
+    setInput(pendingDraft.text)
+    setMentions(pendingDraft.mention ? [pendingDraft.mention] : [])
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [pendingDraft, convId])
 
   const renameConv = useCallback(() => {
     if (!backendRepo || !convId || !renameVal.trim()) return
@@ -675,15 +693,19 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             <Shrink size={10} />
             {compacting ? '压缩中…' : '压缩上下文'}
           </button>
-          <button
-            onClick={createConv}
-            disabled={!backendRepo || sending}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-            title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
-          >
-            <RotateCcw size={10} />
-            新会话
-          </button>
+          {/* v0.2：embedded 模式隐藏"新会话"——会话创建统一走工作台左栏（列表即管理），
+              消除"预填/新会话落在哪"的双入口解释成本 */}
+          {!embedded && (
+            <button
+              onClick={createConv}
+              disabled={!backendRepo || sending}
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-micro text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              title="新会话：开一个全新的对话容器（旧会话保留在列表中）"
+            >
+              <RotateCcw size={10} />
+              新会话
+            </button>
+          )}
         </div>
       </div>
 
