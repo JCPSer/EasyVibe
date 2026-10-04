@@ -2180,14 +2180,22 @@ export default function App() {
         </button>
         {/* 主题开关：亮=太阳 / 暗=月亮滑动拨块（2026-10-04） */}
         <ThemeToggle dark={dark} onChange={setDark} />
-        {/* 新手引导：帮助入口——重看欢迎页 + 重置上手指引（调研 C2：可随时召回） */}
+        {/* 新手引导：帮助入口——重看欢迎页（再点关闭 = 开关语义，2026-10-04 实弹） + 重置上手指引 */}
         <button
           onClick={() => {
+            if (welcomeOpen) {
+              setWelcomeOpen(false)
+              return
+            }
             setOnboarding(resetForReview())
             setWelcomeOpen(true)
           }}
-          className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
-          title="重新查看新手引导（欢迎页 + 上手指引）"
+          className={`rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors ${
+            welcomeOpen
+              ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+          }`}
+          title="新手引导（欢迎页 + 上手指引）——再点关闭"
         >
           <CircleHelp size={12} />
         </button>

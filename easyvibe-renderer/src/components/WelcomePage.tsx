@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderOpen, Play, Sparkles, X } from 'lucide-react'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
 
 /** 首启欢迎工作台（调研定稿方案①：AionUi 式"首屏只做一件事"）。
  *  fullScreen 覆盖在应用之上；首启（hasRepo=false）主 CTA 是"添加仓库"，
- *  帮助菜单重看（hasRepo=true）主 CTA 变为"开始探索"。 */
+ *  帮助菜单重看（hasRepo=true）主 CTA 变为"开始探索"。
+ *  出口齐全（2026-10-04 实弹补）：Esc / 点遮罩 / X / 问号再点（壳层 toggle）都可关闭。 */
 export function WelcomePage({
   hasRepo,
   onAddRepo,
@@ -16,6 +17,14 @@ export function WelcomePage({
 }) {
   const [adding, setAdding] = useState(false)
   const { welcome, concepts } = ONBOARDING_COPY
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const primary = async () => {
     if (hasRepo) {
@@ -32,8 +41,14 @@ export function WelcomePage({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="欢迎使用 EasyVibe">
-      <div className="anim-scale-in glass w-full max-w-2xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-8 shadow-2xl">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="欢迎使用 EasyVibe"
+      onClick={onClose}
+    >
+      <div className="anim-scale-in glass w-full max-w-2xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <p className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-widest text-blue-500">
             <Sparkles size={12} /> {welcome.kicker}
