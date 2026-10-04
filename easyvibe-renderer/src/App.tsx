@@ -580,6 +580,20 @@ function Canvas({
   const [submapSessions, setSubmapSessions] = useState<Record<string, string>>({})
   // M4-1 诚实三态：分析错误原因（启动失败/会话失败/超时）按模块记录，UI 必须说人话
   const [submapErrors, setSubmapErrors] = useState<Record<string, string>>({})
+
+  // 2026-10-04 实弹「渲染问题」修复：切仓库必须清掉上一仓库的画布状态——selection 是
+  // keep-alive 的，旧仓库的模块 id 在新地图里不存在，nodeDim 的 neighborhood 判定会把
+  // 新地图全部模块压到 0.3 透明度（整图洗白像蒙了层纱）；展开子图/过滤同理属于旧仓库上下文
+  useEffect(() => {
+    setSelection(null)
+    setExpandedIds([])
+    setSubmaps({})
+    setSubmapErrors({})
+    setSubmapSessions({})
+    setFilters({ violationsOnly: false, issuesOnly: false, solo: false })
+    setGrowth(null)
+    setAgentLines({})
+  }, [backendRepo])
   const [freshnessInfo, setFreshnessInfo] = useState<{ commitsSinceMap?: number | null }>({})
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   // R3 B2：draft 序号——每次打开新表单 +1 作 key，强制重置组件实例，
@@ -2231,11 +2245,12 @@ export default function App() {
     </div>
   )
   const topBar = (
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="relative flex min-w-0 flex-1 items-center gap-2">
         {topCenter}
-        {/* 运行会话指示器：顶栏正中央细条状态丸（2026-10-04 定稿；空态不渲染，不占位） */}
+        {/* 运行会话指示器：顶栏正中绝对居中（relative 锚点——mx-auto 会被左右两簇不等宽顶偏，
+            2026-10-04 实弹「状态不居中」）。空态不渲染不占位；hover 详情卡经 z-50 浮于内容 */}
         {backendRepo && (
-          <div className="mx-auto shrink-0">
+          <div className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2">
             <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} />
           </div>
         )}
