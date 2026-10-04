@@ -81,7 +81,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
                     e.stopPropagation()
                     data.onAnalyze!()
                   }}
-                  className="flex items-center gap-0.5 rounded-full border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 font-semibold text-blue-600 hover:bg-blue-100"
+                  className="flex items-center gap-0.5 rounded-full border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 font-semibold text-blue-600 hover:bg-blue-100"
                   title="派 agent 深入扫描该模块的文件，生成内部结构子图（约 1-3 分钟）"
                 >
                   <Search size={9} /> 深入分析
@@ -93,7 +93,7 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
                     e.stopPropagation()
                     data.onRetry!()
                   }}
-                  className="flex items-center gap-0.5 rounded-full border border-red-200 bg-white dark:bg-slate-900 px-1.5 py-0.5 font-semibold hover:bg-red-50"
+                  className="flex items-center gap-0.5 rounded-full border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-1.5 py-0.5 font-semibold hover:bg-red-50 dark:hover:bg-red-950/40"
                   title="重新加载子图（若从未生成过，请用「深入分析」）"
                 >
                   <RotateCcw size={9} /> 重试

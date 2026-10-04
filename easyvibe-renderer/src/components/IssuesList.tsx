@@ -64,7 +64,7 @@ export function isIssueModule(mod: Module): boolean {
 function SeverityChip({ severity }: { severity: 'critical' | 'high' }) {
   const critical = severity === 'critical'
   return (
-    <Badge className={critical ? 'bg-red-100 font-normal text-red-700 hover:bg-red-100' : 'bg-amber-100 font-normal text-amber-700 hover:bg-amber-100'}>
+    <Badge className={critical ? 'bg-red-100 font-normal text-red-700 hover:bg-red-100' : 'bg-amber-100 font-normal text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40'}>
       {critical ? (
         <AlertOctagon size={10} className="mr-1" />
       ) : (
@@ -144,7 +144,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
           <div
             key={issue.key}
             className={`rounded-lg border p-3 transition-colors ${
-              issue.moduleId ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/40' : 'border-red-200 bg-red-50/40 dark:bg-red-950/30'
+              issue.moduleId ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/40' : 'border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30'
             }`}
             style={issue.moduleId ? { borderColor: '#e2e8f0' } : undefined}
             onClick={() => issue.moduleId && onLocate(issue.moduleId!)}
@@ -207,7 +207,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
                     })
                   }
                 }}
-                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-bold text-blue-600 hover:bg-blue-100"
+                className="ml-auto flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-bold text-blue-600 hover:bg-blue-100"
                 title="指哪打哪：以该问题为上下文发起修复任务"
               >
                 <Wrench size={9} /> 修复

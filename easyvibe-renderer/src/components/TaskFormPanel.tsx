@@ -124,7 +124,7 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
                   onClick={() => toggleModule(m.id)}
                   className={`rounded-full border px-2.5 py-1 text-cap font-medium transition-colors ${
                     selected.includes(m.id)
-                      ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
+                      ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
                       : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                   }`}
                 >

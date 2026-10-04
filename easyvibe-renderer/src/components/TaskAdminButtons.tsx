@@ -86,7 +86,7 @@ export function TaskAdminButtons({
         <button
           onClick={() => setConfirming('kill')}
           title="终止执行（agent 进程被停止，可重试）"
-          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-amber-50 hover:text-amber-600"
+          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-amber-50 dark:hover:bg-amber-950/40 hover:text-amber-600"
         >
           <Ban size={11} />
         </button>
@@ -106,7 +106,7 @@ export function TaskAdminButtons({
           onClick={() => void run('retry')}
           disabled={busy}
           title="就地重试（从失败处重新入队）"
-          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 disabled:opacity-40"
         >
           <RotateCcw size={11} />
         </button>
@@ -115,7 +115,7 @@ export function TaskAdminButtons({
         <button
           onClick={() => setConfirming('delete')}
           title="删除该任务（running 请先终止）"
-          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-red-50 hover:text-red-500"
+          className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
         >
           <Trash2 size={11} />
         </button>

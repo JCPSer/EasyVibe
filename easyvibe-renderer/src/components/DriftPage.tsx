@@ -238,7 +238,7 @@ export function DriftPage() {
                     <button
                       onClick={() => reinduce(r.repo.id)}
                       disabled={r.reinducing}
-                      className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                      className="rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                     >
                       {r.reinducing ? '归纳中…' : '重新归纳'}
                     </button>
@@ -263,7 +263,7 @@ export function DriftPage() {
 
       {/* 漂移横幅 */}
       {kpis.needReinduce > 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-3">
+        <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3">
           <AlertTriangle size={16} className="shrink-0 text-amber-500" />
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-bold text-amber-700">检测到仓库漂移</p>
@@ -274,7 +274,7 @@ export function DriftPage() {
           {/* 重审 P2：横幅"查看详情"此前是 span 假链接（点了没反应）——真按钮，滚动到上方排名表 */}
           <button
             onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            className="shrink-0 rounded-lg border border-amber-200 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100"
+            className="shrink-0 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40"
           >
             查看详情 ↑
           </button>

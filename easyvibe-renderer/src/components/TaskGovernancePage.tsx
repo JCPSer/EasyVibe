@@ -153,7 +153,7 @@ export function TaskGovernancePage({
         <div
           onClick={() => onOpenTask(t.id)}
           className={`flex cursor-pointer items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-[11px] transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
-            child ? 'bg-slate-50/50 dark:bg-slate-900/50' : ''
+            child ? 'bg-slate-50/50 dark:bg-slate-900/50 dark:bg-slate-900/50' : ''
           }`}
           style={{ paddingLeft: child ? undefined : undefined }}
         >
@@ -188,7 +188,7 @@ export function TaskGovernancePage({
                   context: { origin_task_id: t.id },
                 })
               }}
-              className="shrink-0 rounded-md border border-red-200 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50"
+              className="shrink-0 rounded-md border border-red-200 dark:border-red-900/60 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
             >
               <Copy size={9} className="mr-0.5 inline" /> 复制重提
             </button>

@@ -311,7 +311,7 @@ export function WorkbenchPage({
                       if (e.key === 'Escape') setRenamingId(null)
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white dark:bg-slate-900 px-1 py-px text-[12px] outline-none"
+                    className="min-w-0 flex-1 rounded border border-blue-200 dark:border-blue-900/60 bg-white dark:bg-slate-900 px-1 py-px text-[12px] outline-none"
                   />
                 ) : (
                   <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === activeConv ? 'font-bold text-blue-700' : 'text-slate-600 dark:text-slate-300'}`}>

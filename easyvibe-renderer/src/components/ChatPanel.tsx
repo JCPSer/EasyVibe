@@ -691,7 +691,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
             <button
               onClick={deleteConv}
               disabled={!backendRepo}
-              className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+              className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 disabled:opacity-40"
               title="删除当前会话"
             >
               <XIcon size={10} />
@@ -710,7 +710,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           <button
             onClick={upgradeToTask}
             disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
-            className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40"
+            className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 disabled:opacity-40"
             title="把本轮对话（已澄清的需求与引用模块）组织成修复任务"
           >
             <Wrench size={10} />
@@ -745,7 +745,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         {/* M4-2 内联审批卡：等待中的审批门（AionUI：选项即按钮，决策后原地留痕） */}
         {pendingApprovals.map((p) => (
           <div key={p.taskId + ':' + (p.gate ?? '')} className="anim-msg-in flex justify-start">
-            <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
+            <div className="max-w-[92%] rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
               <p className="flex items-center gap-1.5 text-[11px] font-semibold leading-4 text-amber-800">
                 <AlertTriangle size={11} />
                 审批请求 <span className="rounded-full bg-white/80 dark:bg-slate-900/80 px-1.5 text-micro font-bold text-amber-600">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
@@ -762,7 +762,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                     onChange={(e) => setRejectNote(e.target.value)}
                     rows={2}
                     placeholder="驳回理由（必填，留痕可追溯）"
-                    className="w-full resize-none rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-2 py-1.5 text-[11px] leading-4 text-slate-700 dark:text-slate-200 outline-none focus:border-red-400"
+                    className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-2 py-1.5 text-[11px] leading-4 text-slate-700 dark:text-slate-200 outline-none focus:border-red-400"
                   />
                   <div className="flex gap-2">
                     <button
@@ -796,7 +796,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                       setRejectingApproval(p)
                       setRejectNote('')
                     }}
-                    className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50"
+                    className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
                   >
                     驳回
                   </button>
@@ -882,7 +882,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                       <button
                         key={id}
                         onClick={() => onLocateModule(id)}
-                        className="flex items-center gap-0.5 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 font-mono text-micro text-blue-600 shadow-sm hover:bg-blue-50"
+                        className="flex items-center gap-0.5 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 font-mono text-micro text-blue-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40"
                         title="定位到画布"
                       >
                         <Crosshair size={9} />
@@ -901,7 +901,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                             if (e.key === 'Escape') setNamingIdx(null)
                           }}
                           placeholder="视图名…"
-                          className="w-36 rounded-full border border-emerald-300 bg-white dark:bg-slate-900 px-2 py-0.5 text-cap outline-none"
+                          className="w-36 rounded-full border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2 py-0.5 text-cap outline-none"
                         />
                         <button
                           onClick={() => saveAsView(i)}
@@ -918,7 +918,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                           setViewName(q.replace(/\s+/g, ' ').slice(0, 24))
                           setNamingIdx(i)
                         }}
-                        className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-100"
+                        className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-100"
                         title="把本回答（含流程图）存为可复用视图（.easyvibe/views/）"
                       >
                         {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
@@ -934,7 +934,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         {/* S1 grill-me 澄清卡：选择题形态，点选即回答 */}
         {clarify && (
           <div className="anim-msg-in flex justify-start">
-            <div className="max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
+            <div className="max-w-[92%] rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
               <p className="text-[11px] font-semibold leading-4 text-amber-800">
                 {clarify.question}
                 {clarify.why && (
@@ -949,7 +949,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
                   <button
                     key={o.label}
                     onClick={() => answerClarify(o.label, o.desc)}
-                    className="flex w-full flex-col items-start gap-0.5 rounded-md border border-amber-200 bg-white dark:bg-slate-900 px-2 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50"
+                    className="flex w-full flex-col items-start gap-0.5 rounded-md border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-900 px-2 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
                   >
                     <span className="text-[11px] font-medium leading-4 text-slate-700 dark:text-slate-200">{o.label}</span>
                     {o.desc && <span className="text-micro leading-4 text-slate-400 dark:text-slate-500">{o.desc}</span>}
@@ -1095,7 +1095,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         {sending ? (
           <button
             onClick={() => abortRef.current?.abort()}
-            className="rounded-lg border border-red-200 p-2.5 text-red-600 transition-colors hover:bg-red-50"
+            className="rounded-lg border border-red-200 dark:border-red-900/60 p-2.5 text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40"
             title="停止等待本次回答"
           >
             <Square size={13} />

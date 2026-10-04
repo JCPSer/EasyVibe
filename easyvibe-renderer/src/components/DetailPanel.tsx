@@ -192,7 +192,7 @@ function ModuleView({ map, mod, onCreateTask, backendRepo, onChatAbout }: { map:
         <Row icon={<Flag size={12} />} label="腐化标记">
           <div className="flex flex-wrap gap-1.5">
             {mod.health.decay_flags.map((f) => (
-              <Badge key={f} className="border-red-200 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">
+              <Badge key={f} className="border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">
                 {f}
               </Badge>
             ))}
@@ -392,7 +392,7 @@ function SubmoduleView({ parent, sub, submap, onCreateTask }: { parent: Module; 
         <Row icon={<Flag size={12} />} label="腐化标记">
           <div className="flex flex-wrap gap-1.5">
             {sub.health.decay_flags.map((f) => (
-              <Badge key={f} className="border-red-200 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">{f}</Badge>
+              <Badge key={f} className="border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 font-normal text-red-600">{f}</Badge>
             ))}
           </div>
         </Row>

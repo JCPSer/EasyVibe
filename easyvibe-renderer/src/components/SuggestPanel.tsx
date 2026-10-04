@@ -68,7 +68,7 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
           {loading && (
             <button
               onClick={stop}
-              className="flex items-center gap-1 rounded-full border border-red-200 px-2.5 py-1 text-cap font-semibold text-red-600 hover:bg-red-50"
+              className="flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/60 px-2.5 py-1 text-cap font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
               title="停止等待（后端 LLM 调用已发出，成本已发生；不再等待结果）"
             >
               停止

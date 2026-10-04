@@ -38,7 +38,7 @@ interface Approval {
 
 const TRUST_LABEL: Record<string, string> = { manual: '手动', auto: '自动', supervised: '监督' }
 const TRUST_CHIP: Record<string, string> = {
-  manual: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 border-blue-200',
+  manual: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 border-blue-200 dark:border-blue-900/60',
   auto: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700',
   supervised: 'bg-violet-50 text-violet-600 border-violet-200',
 }
@@ -187,7 +187,7 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
                 return (
                   <div
                     key={t.id}
-                    className={`rounded-xl border bg-white dark:bg-slate-900 ${selected === t.id ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200 dark:border-slate-700'}`}
+                    className={`rounded-xl border bg-white dark:bg-slate-900 ${selected === t.id ? 'border-blue-300 dark:border-blue-800 ring-1 ring-blue-100' : 'border-slate-200 dark:border-slate-700'}`}
                   >
                     <button
                       onClick={() => {

@@ -269,7 +269,7 @@ export function HealthPage({
                 {map && (
                   <button
                     onClick={() => onCreateTask(buildModuleTask(map, m.moduleId))}
-                    className="shrink-0 rounded-md p-1 text-slate-200 transition-colors hover:bg-blue-50 hover:text-blue-600 group-hover:text-slate-300"
+                    className="shrink-0 rounded-md p-1 text-slate-200 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 group-hover:text-slate-300"
                     title={`发起修复：${m.name ?? m.moduleId}`}
                   >
                     <Wrench size={11} />

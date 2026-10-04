@@ -281,7 +281,7 @@ export function TaskBoardPage({
       title="点击查看该任务的流水线全程"
       className={`rounded-xl border bg-white dark:bg-slate-900 p-3 transition-shadow ${
         dragId === t.id ? 'opacity-40' : ''
-      } ${failed ? 'border-red-200 bg-red-50/40 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'} cursor-pointer shadow-sm hover:shadow-md`}
+      } ${failed ? 'border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'} cursor-pointer shadow-sm hover:shadow-md`}
     >
       <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 text-[12px] font-bold leading-4 text-slate-700 dark:text-slate-200">{t.title}</span>
@@ -318,7 +318,7 @@ export function TaskBoardPage({
                 value={rejectNote}
                 onChange={(e) => setRejectNote(e.target.value)}
                 placeholder="打回意见（必填）"
-                className="min-w-0 flex-1 rounded-md border border-red-200 bg-red-50/50 px-2 py-1 text-[10px] outline-none focus:border-red-300"
+                className="min-w-0 flex-1 rounded-md border border-red-200 dark:border-red-900/60 bg-red-50/50 px-2 py-1 text-[10px] outline-none focus:border-red-300"
               />
               <button
                 onClick={() => decide(t, 'rejected')}
@@ -345,7 +345,7 @@ export function TaskBoardPage({
               </button>
               <button
                 onClick={() => setRejecting(t.id)}
-                className="flex items-center gap-0.5 rounded-md border border-red-200 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50"
+                className="flex items-center gap-0.5 rounded-md border border-red-200 dark:border-red-900/60 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
               >
                 <X size={9} /> 打回
               </button>
@@ -367,7 +367,7 @@ export function TaskBoardPage({
                 context: { origin_task_id: t.id },
               })
             }
-            className="flex items-center gap-0.5 rounded-md border border-red-200 px-1.5 py-0.5 font-bold text-red-500 hover:bg-red-50"
+            className="flex items-center gap-0.5 rounded-md border border-red-200 dark:border-red-900/60 px-1.5 py-0.5 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
           >
             <Copy size={9} /> 复制重提
           </button>

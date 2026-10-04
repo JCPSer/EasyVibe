@@ -74,7 +74,7 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
         ) : (
           <button
             onClick={() => setConfirmDel(true)}
-            className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 hover:text-red-500"
+            className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
             title="删除该产物文档"
             onMouseLeave={() => setConfirmDel(false)}
           >
@@ -245,7 +245,7 @@ function PhaseDocReview({
         {review && (
           <div
             className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
-              review.verdict === 'pass' ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+              review.verdict === 'pass' ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60' : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/60'
             }`}
           >
             <ShieldAlert size={11} className={review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
@@ -264,13 +264,13 @@ function PhaseDocReview({
           </p>
         )}
         {missing && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
+          <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
             未找到本阶段产物文档（agent 未按规范路径产出）。你可以打回要求重做，或通过进入下一阶段（实施时将无矩阵/方案可依）。
           </div>
         )}
         {loadErr && (
           /* 2026-10-03 实弹 bug：全文 404 曾静默空白——失败必须显式可见 */
-          <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/40 px-3 py-2.5 text-[12px] leading-5 text-red-600">
+          <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3 py-2.5 text-[12px] leading-5 text-red-600">
             产物文档全文加载失败（后端响应异常）。可重试；持续失败请打回重做。
             <button
               onClick={() => {
@@ -278,7 +278,7 @@ function PhaseDocReview({
                 setLoadErr(false)
                 setRetryTick((t) => t + 1)
               }}
-              className="ml-2 rounded-md border border-red-200 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
+              className="ml-2 rounded-md border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
             >
               重试
             </button>
@@ -303,7 +303,7 @@ function PhaseDocReview({
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               placeholder="打回意见（必填）——agent 将带着意见重做本阶段"
-              className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+              className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
             />
             <div className="flex gap-2">
               <button
@@ -330,7 +330,7 @@ function PhaseDocReview({
             <button
               onClick={() => setRejecting(true)}
               disabled={!!deciding}
-              className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+              className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
             >
               打回重做…
             </button>
@@ -661,7 +661,7 @@ export function TaskWorkflowPage({
               </div>
               {/* 合约红线：审批必见 */}
               {(sel.result?.contractViolations?.length ?? 0) > 0 && (
-                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/40 px-3 py-2">
+                <div className="mt-2 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3 py-2">
                   <p className="flex items-center gap-1 text-micro font-bold text-red-600">
                     <ShieldAlert size={10} /> 影响面合约：{sel.result!.contractViolations!.length} 个文件越出声明边界
                   </p>
@@ -696,7 +696,7 @@ export function TaskWorkflowPage({
                     {(() => {
                       const flagged = approvals.find((a) => a.decision === 'flagged' && a.note)
                       return flagged ? (
-                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-micro leading-4 text-amber-700">⚠ {flagged.note}</p>
+                        <p className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-micro leading-4 text-amber-700">⚠ {flagged.note}</p>
                       ) : null
                     })()}
                     <p className="mt-2 line-clamp-6 text-[12px] leading-5 text-slate-700 dark:text-slate-200">{sel.description}</p>
@@ -721,7 +721,7 @@ export function TaskWorkflowPage({
                       <button
                         onClick={() => setRejecting(true)}
                         disabled={!!deciding}
-                        className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
                       >
                         打回…
                       </button>
@@ -734,7 +734,7 @@ export function TaskWorkflowPage({
                           onChange={(e) => setRejectNote(e.target.value)}
                           rows={3}
                           placeholder="打回意见（必填）——将作为新任务的上下文"
-                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                          className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                         />
                         <div className="flex gap-2">
                           <button
@@ -833,8 +833,8 @@ export function TaskWorkflowPage({
                       <div
                         className={`mx-4 mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
                           sel.result.review.verdict === 'pass'
-                            ? 'border-emerald-200 bg-emerald-50/60'
-                            : 'border-amber-200 bg-amber-50/60'
+                            ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60'
+                            : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/60'
                         }`}
                       >
                         <ShieldAlert size={11} className={sel.result.review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
@@ -847,7 +847,7 @@ export function TaskWorkflowPage({
                       </div>
                     )}
                     <div className="flex min-h-0 flex-1">
-                    <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 p-2">
+                    <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-2">
                       <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                         <FileCode2 size={10} /> 文件（{files.length}）
                       </p>
@@ -907,7 +907,7 @@ export function TaskWorkflowPage({
                             onChange={(e) => setRejectNote(e.target.value)}
                             rows={2}
                             placeholder="打回意见（必填）——将作为新任务的上下文"
-                            className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                            className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                           />
                           <div className="flex gap-2">
                             <button
@@ -937,7 +937,7 @@ export function TaskWorkflowPage({
                               setRejectNote('')
                             }}
                             disabled={!!deciding}
-                            className="rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                            className="rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
                           >
                             打回…
                           </button>
@@ -994,7 +994,7 @@ export function TaskWorkflowPage({
                       <button
                         onClick={() => setRejecting(true)}
                         disabled={!!deciding}
-                        className="flex-1 rounded-lg border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+                        className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
                       >
                         打回…
                       </button>
@@ -1007,7 +1007,7 @@ export function TaskWorkflowPage({
                           onChange={(e) => setRejectNote(e.target.value)}
                           rows={3}
                           placeholder="打回意见（必填）"
-                          className="w-full resize-none rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
+                          className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                         />
                         <div className="flex gap-2">
                           <button
@@ -1028,7 +1028,7 @@ export function TaskWorkflowPage({
 
                 {/* done：归档摘要（迁入 TaskPanel 独有碎片：复检按钮 + archivedPath） */}
                 {stage === 'done' && (
-                  <div className="m-4 overflow-y-auto rounded-xl border border-emerald-200 bg-emerald-50/40 dark:bg-emerald-950/30 p-4">
+                  <div className="m-4 overflow-y-auto rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/30 p-4">
                     <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-emerald-600">
                       <CheckCircle2 size={10} /> 已归档 · 全程留痕
                     </p>
@@ -1069,7 +1069,7 @@ export function TaskWorkflowPage({
                         fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' }).catch(() => {})
                         toast('巡检已启动——稍后到健康看板验证改善', 'info')
                       }}
-                      className="mt-2 rounded-lg border border-emerald-300 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50"
+                      className="mt-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                     >
                       重新巡检验证改动效果
                     </button>

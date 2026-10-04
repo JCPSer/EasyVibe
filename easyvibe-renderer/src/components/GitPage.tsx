@@ -358,7 +358,7 @@ export function GitPage({
         </div>
 
         {gitError && (
-          <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-[12px] text-amber-700">
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-[12px] text-amber-700">
             <AlertTriangle size={14} className="shrink-0" />
             Git 状态不可用：{gitError}（该仓库可能不是 git 仓库）
           </div>
@@ -393,7 +393,7 @@ export function GitPage({
                   ) : (
                     <button
                       onClick={() => setConfirmDiscardAll(true)}
-                      className="flex items-center gap-0.5 rounded-lg border border-red-200 px-2 py-1 text-cap font-semibold text-red-500 hover:bg-red-50"
+                      className="flex items-center gap-0.5 rounded-lg border border-red-200 dark:border-red-900/60 px-2 py-1 text-cap font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
                       title="撤销全部未提交改动（含未跟踪文件，不可恢复）"
                     >
                       <Trash2 size={10} /> 全部撤销
@@ -416,7 +416,7 @@ export function GitPage({
 
             {/* 红线警示 */}
             {redline.length > 0 && (
-              <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5">
+              <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5">
                 <AlertTriangle size={15} className="shrink-0 text-amber-500" />
                 <p className="min-w-0 flex-1 text-[11px] leading-4 text-amber-700">
                   <b>红线警示：</b>
@@ -426,13 +426,13 @@ export function GitPage({
                 <button
                   onClick={startPatrol}
                   disabled={patroling}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 disabled:opacity-40"
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-40"
                 >
                   {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 全量巡检
                 </button>
                 <button
                   onClick={onOpenReview}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100"
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 >
                   <ShieldCheck size={10} /> 发起评审
                 </button>
@@ -455,7 +455,7 @@ export function GitPage({
                           return n
                         })
                       }
-                      className="flex w-full items-center gap-2 bg-slate-50/50 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/70"
+                      className="flex w-full items-center gap-2 bg-slate-50/50 dark:bg-slate-900/50 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/70"
                     >
                       {score !== null && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: healthColor(score) }} />}
                       <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{g.name}</span>
@@ -502,7 +502,7 @@ export function GitPage({
                             ) : (
                               <button
                                 onClick={() => setConfirmDiscard(f.path)}
-                                className="shrink-0 rounded p-0.5 text-slate-200 hover:bg-red-50 hover:text-red-500 group-hover:text-slate-300"
+                                className="shrink-0 rounded p-0.5 text-slate-200 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500 group-hover:text-slate-300"
                                 title="撤销改动"
                               >
                                 <Trash2 size={11} />
@@ -532,7 +532,7 @@ export function GitPage({
                 <button
                   onClick={generateMessage}
                   disabled={generating || !status || status.files.length === 0}
-                  className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                  className="flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                 >
                   {generating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                   {generating ? '生成中…' : dominantTask ? `从任务上下文生成` : 'AI 生成'}

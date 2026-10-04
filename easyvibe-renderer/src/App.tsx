@@ -393,7 +393,7 @@ function ModuleToolbar({
       <button
         onClick={onToggleExpand}
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-          expanded ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-600' : 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70'
+          expanded ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-600' : 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70'
         }`}
       >
         {expanded ? <FoldVertical size={12} /> : <UnfoldVertical size={12} />}
@@ -402,7 +402,7 @@ function ModuleToolbar({
       <button
         onClick={onToggleSolo}
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-          solo ? 'border-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600' : 'border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70'
+          solo ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600' : 'border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70'
         }`}
       >
         <Focus size={12} />
@@ -420,7 +420,7 @@ function ModuleToolbar({
         }
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           inducing
-            ? 'cursor-wait border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700'
+            ? 'cursor-wait border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700'
             : backendActive
               ? 'border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70'
               : 'cursor-not-allowed border-transparent text-slate-300 dark:text-slate-600'
@@ -509,6 +509,7 @@ function Canvas({
   onTaskCreated,
   agentReady,
   onChatAbout,
+  dark = false,
 }: {
   map: CodeMap
   backendRepo: string | null
@@ -531,6 +532,8 @@ function Canvas({
   /** v0.2：「就此对话」入口上抛（详情视图/模块工具栏/对话占位页签共用）——
    * 壳层转为跨页携带上下文跳「任务对话」 */
   onChatAbout?: (target: { refId: string; refName: string; kind: 'module' | 'layer' }) => void
+  /** 2026-10-04 暗黑模式：小地图底色/遮罩主题感知 */
+  dark?: boolean
 }) {
   const [selection, setSelection] = useState<Selection>(null)
   // M4-1 瘦身：右栏只留 详情/问题/对话 三页签（v3 定稿顺序）；建议/视图移至顶栏抽屉，任务移至工作区页
@@ -968,16 +971,10 @@ function Canvas({
       <div className="relative flex-1">
         {/* ui-test P2：xyflow 的 <Background> 在 store transform 未就绪的更新周期里把
             cx/cy/r/pattern x/y 算成 NaN（库内部行为，挂载时机绕不过）。
-            改用 CSS 径向渐变点阵：视觉等价、零 SVG、零 NaN。 */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-0"
-          style={{
-            backgroundImage: 'radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px)',
-            backgroundSize: '28px 28px',
-          }}
-        />
+            改用 CSS 径向渐变点阵：视觉等价、零 SVG、零 NaN（暗色点阵在 index.css 的 .bg-dots 里）。 */}
+        <div aria-hidden className="bg-dots pointer-events-none absolute inset-0 z-0" />
         <ReactFlow
+          colorMode={dark ? 'dark' : 'light'}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -995,13 +992,13 @@ function Canvas({
             position="bottom-right"
             pannable
             zoomable
-            bgColor="#f8fafc"
+            bgColor={dark ? '#0f172a' : '#f8fafc'}
             nodeColor={(n) =>
               n.type === 'module' || n.type === 'moduleExpanded'
                 ? healthColor((n.data as { module: { health: { score: number } } }).module.health.score)
                 : 'rgba(0,0,0,0)'
             }
-            maskColor="rgba(226,232,240,0.7)"
+            maskColor={dark ? 'rgba(2,6,23,0.72)' : 'rgba(226,232,240,0.7)'}
             style={{ width: 200, height: 130 }}
           />
           {/* 右上角：图例（M4-1.5 去挤：架构健康主视觉已入头部卡，原 ArchHealthCard 信息重复，撤下） */}
@@ -1041,7 +1038,7 @@ function Canvas({
                 {filters.solo && selModule && (
                   <button
                     onClick={() => setFilters((f) => ({ ...f, solo: false }))}
-                    className="flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
+                    className="flex items-center gap-1 rounded-full border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
                     title="退出聚焦（Esc）"
                   >
                     <Focus size={10} />
@@ -1058,7 +1055,7 @@ function Canvas({
                   active={filters.issuesOnly}
                   onClick={() => toggleFilter('issuesOnly')}
                   label="问题视图"
-                  activeClass="border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700"
+                  activeClass="border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700"
                 />
                 {(filters.violationsOnly || filters.issuesOnly) && (
                   <button
@@ -1160,7 +1157,7 @@ function Canvas({
                   className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-40 ${
                     liveActivity && !growth
                       ? 'border-red-300 bg-red-50 dark:bg-red-950/40 text-red-600 animate-pulse'
-                      : 'border-blue-200 bg-blue-50 dark:bg-blue-950/40 text-blue-600 hover:bg-blue-100'
+                      : 'border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 text-blue-600 hover:bg-blue-100'
                   }`}
                   title={backendRepo ? '观看实时生长（直播 growth.log 事件）' : '回放归纳过程（静态 growth.log）'}
                 >
@@ -2020,7 +2017,7 @@ export default function App() {
           onClick={() => setRepoPanelOpen((v) => !v)}
           className={
             backendOnline === false
-              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
+              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
               : "flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[12px] font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-300"
           }
           title={backendOnline === false ? "后端不在线：当前为演示数据，点击看详情" : "切换/管理仓库"}
@@ -2085,7 +2082,7 @@ export default function App() {
                     ) : (
                       <button
                         onClick={() => setConfirmRemove(confirmRemove === r.id ? null : r.id)}
-                        className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 hover:text-red-500"
+                        className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
                         title="移除仓库…"
                       >
                         <X size={12} />
@@ -2153,7 +2150,7 @@ export default function App() {
         {backendRepo && (
           <button
             onClick={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
-            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100"
+            className="flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
             title="AI 主动发现优化建议，逐条可发起修复"
           >
             <Lightbulb size={12} />
@@ -2165,7 +2162,7 @@ export default function App() {
             onClick={startPatrol}
             disabled={patrolling || agentState.found === false}
             className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-40 ${
-              patrolling ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-700' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 hover:bg-emerald-100'
+              patrolling ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700' : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 hover:bg-emerald-100'
             }`}
             title={agentState.found === false ? '未检测到执行 agent——先安装或在设置中配置' : '巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史'}
           >
@@ -2197,7 +2194,7 @@ export default function App() {
         <button
           onClick={() => handlePageChange('settings')}
           className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
-            page === 'settings' ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+            page === 'settings' ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
           }`}
           title="设置（LLM 服务 / 槽位绑定 / 高级）"
         >
@@ -2234,7 +2231,7 @@ export default function App() {
                       setGuideDismissed(true)
                       localStorage.setItem('ev.m4.guide', '1')
                     }}
-                    className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
+                    className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40"
                   >
                     知道了
                   </button>
@@ -2247,6 +2244,7 @@ export default function App() {
               handlePageChange('tasks')
             }}
             onChatAbout={goChatAbout}
+            dark={dark}
           />
         </ReactFlowProvider>
       </CanvasBoundary>
@@ -2334,7 +2332,7 @@ export default function App() {
             backendOnline === true && repos.length === 0 ? (
               <button
                 onClick={() => addRepo()}
-                className="flex shrink-0 items-center gap-2 border-b border-blue-200 bg-blue-50 dark:bg-blue-950/40 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
+                className="flex shrink-0 items-center gap-2 border-b border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
               >
                 <FolderOpen size={12} className="shrink-0 text-blue-500" />
                 <span className="text-[11px] font-bold text-blue-800">尚未打开任何仓库——当前画布是演示数据</span>
@@ -2346,7 +2344,7 @@ export default function App() {
             ) : backendOnline === true && agentState.found === false ? (
               /* M2 首跑引导（R5）：检测到可采用的 → 一键采用；全未安装 → 安装指引+一键复制 */
               agentState.detected.length > 0 ? (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
                   <Bot size={12} className="shrink-0 text-amber-500" />
                   <span className="text-[11px] font-bold text-amber-800">
                     检测到 {agentState.detected[0].command} 已安装
@@ -2358,12 +2356,12 @@ export default function App() {
                   >
                     采用 {agentState.detected[0].command} →
                   </button>
-                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100">
+                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 dark:border-amber-800 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40">
                     去设置
                   </button>
                 </div>
               ) : (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
+                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
                   <Bot size={12} className="shrink-0 text-amber-500" />
                   <span className="text-[11px] font-bold text-amber-800">未检测到执行 agent</span>
                   <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">
@@ -2372,7 +2370,7 @@ export default function App() {
                   <button onClick={copyInstallCmd} className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-amber-700">
                     复制 claude 安装命令
                   </button>
-                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100">
+                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 dark:border-amber-800 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40">
                     了解更多
                   </button>
                 </div>
@@ -2380,7 +2378,7 @@ export default function App() {
             ) : attention && page !== 'tasks' ? (
               <button
                 onClick={() => handlePageChange('tasks')}
-                className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5 text-left transition-colors hover:bg-amber-100"
+                className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5 text-left transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/40"
               >
                 <span className="flex h-2 w-2 animate-pulse rounded-full bg-amber-500" />
                 <span className="text-[11px] font-bold text-amber-800">

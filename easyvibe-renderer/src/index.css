@@ -260,3 +260,12 @@ input, textarea {
 .band-strip-b { background: rgba(241, 245, 249, 0.6); border-color: #e2e8f0; }
 .dark .band-strip-a { background: rgba(30, 41, 59, 0.4); border-color: rgb(30 41 59); }
 .dark .band-strip-b { background: rgba(15, 23, 42, 0.55); border-color: rgb(30 41 59); }
+
+/* 画布点阵：亮 slate-300 / 暗 slate-700（原 inline 渐变是暗色漏网） */
+.bg-dots {
+  background-image: radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px);
+  background-size: 28px 28px;
+}
+.dark .bg-dots {
+  background-image: radial-gradient(circle, #334155 1.2px, transparent 1.2px);
+}

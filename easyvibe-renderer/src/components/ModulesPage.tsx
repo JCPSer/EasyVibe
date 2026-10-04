@@ -106,7 +106,7 @@ export function ModulesPage({ map, onOpenMap, onCreateTask, onLocateModule }: { 
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     {m.health.decay_flags.slice(0, 3).map((f) => (
-                      <span key={f} className="rounded-full border border-red-200 bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-micro leading-4 text-red-600">
+                      <span key={f} className="rounded-full border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-micro leading-4 text-red-600">
                         {FLAG_LABEL[f] ?? f}
                       </span>
                     ))}

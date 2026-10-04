@@ -353,7 +353,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   return (
     <div className={`${embedded ? 'h-full w-full' : 'anim-drawer-in fixed inset-y-0 right-0 z-30 w-[460px] elev-3'} flex border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900`}>
       {/* 分区导航（macOS 系统设置式左栏） */}
-      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-3">
+      <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 dark:bg-slate-900/40 p-3">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -465,7 +465,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                       onClick={() => applyPreset(p)}
                       className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-cap font-semibold transition-colors ${
                         agentEdit?.preset === p.id
-                          ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
+                          ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700'
                           : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                       }`}
                     >
@@ -563,14 +563,14 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                           <button
                             onClick={() => void testService(s.id)}
                             disabled={testingSvc === s.id}
-                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-500 disabled:opacity-40"
+                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-500 disabled:opacity-40"
                             title="测试连接：用当前表单值 ping 服务端点（max_tokens=1）"
                           >
                             {testingSvc === s.id ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
                           </button>
                           <button
                             onClick={() => setConfirmDelete(s.id)}
-                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-red-50 hover:text-red-500"
+                            className="rounded-md p-1.5 text-slate-300 dark:text-slate-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
                             title={Object.values(slots).includes(s.id) ? '该服务被槽位绑定，不可删除' : '删除服务'}
                           >
                             <Trash2 size={13} />
@@ -876,7 +876,7 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
       </div>
 
       {/* 恢复出厂：琥珀警示卡（文生图设计 v1 的警告语义色） */}
-      <div className="rounded-md border border-amber-200 bg-amber-50/60 p-4">
+      <div className="rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 p-4">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-1.5 text-[13px] font-bold text-amber-800">
@@ -898,7 +898,7 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
             <button
               onClick={() => setConfirmReset(true)}
               onMouseLeave={() => setConfirmReset(false)}
-              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100"
+              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
             >
               <RotateCcw size={11} /> 恢复默认
             </button>

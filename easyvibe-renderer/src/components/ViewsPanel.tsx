@@ -174,7 +174,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
                       if (e.key === 'Enter') rename(v.slug)
                       if (e.key === 'Escape') setRenamingSlug(null)
                     }}
-                    className="min-w-0 flex-1 rounded border border-blue-200 bg-white dark:bg-slate-900 px-1.5 py-px text-[12px] outline-none focus:border-blue-400"
+                    className="min-w-0 flex-1 rounded border border-blue-200 dark:border-blue-900/60 bg-white dark:bg-slate-900 px-1.5 py-px text-[12px] outline-none focus:border-blue-400"
                   />
                   <button onClick={() => rename(v.slug)} className="shrink-0 rounded bg-blue-600 p-0.5 text-white" title="保存新名称">
                     <Check size={10} />
