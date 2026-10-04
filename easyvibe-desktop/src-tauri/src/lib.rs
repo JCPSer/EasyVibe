@@ -127,7 +127,7 @@ pub fn run() {
                     // 与前端失焦仿灯（x=12/32/52、header 居中）完全同位，聚焦/失焦零跳变。
                     #[cfg(target_os = "macos")]
                     let builder =
-                        builder.traffic_light_position(tauri::LogicalPosition::new(12.0, 16.0));
+                        builder.traffic_light_position(tauri::LogicalPosition::new(12.0, 18.0));
                     builder.build()
                 } else {
                     WebviewWindowBuilder::new(
