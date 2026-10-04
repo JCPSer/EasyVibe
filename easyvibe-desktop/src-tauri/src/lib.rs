@@ -123,11 +123,11 @@ pub fn run() {
                     // 2026-10-05 红绿灯纵向居中：系统默认把灯居中在 28pt 幻影子标题栏
                     // （灯心 14pt），我们的自绘 header 是 40px（中线 20pt）——灯偏上。
                     // wry 语义（读源码 + 实测定标）：容器高 = 按钮帧高(28) + y，灯心 = 容器中线。
-                    // 实测 y=28 → 灯心 29pt（过头压到底部分隔线）；目标 20pt → y=12，
+                    // 实测 y=28 → 灯心 29pt（过头压到底部分隔线）；目标 20pt → y=16（实弹迭代：y=12 仍偏高半档），
                     // 与前端失焦仿灯（x=12/32/52、header 居中）完全同位，聚焦/失焦零跳变。
                     #[cfg(target_os = "macos")]
                     let builder =
-                        builder.traffic_light_position(tauri::LogicalPosition::new(12.0, 12.0));
+                        builder.traffic_light_position(tauri::LogicalPosition::new(12.0, 16.0));
                     builder.build()
                 } else {
                     WebviewWindowBuilder::new(
