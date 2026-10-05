@@ -33,8 +33,8 @@ const FORBIDDEN: &[&str] = &[
     "crate::agent_conf",
     "crate::AppState",
     "crate::AppError",
-    "crate::start_",
-    "crate::analyze_submap_inner",
+    "crate::service::map::start_",
+    "crate::service::map::analyze_submap_inner",
     "crate::session_queue",
 ];
 

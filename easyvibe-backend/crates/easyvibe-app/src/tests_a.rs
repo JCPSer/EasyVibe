@@ -4,7 +4,7 @@ use crate::assets::*;
 use crate::router::*;
 use crate::routes::agent::*;
 use crate::map_concerns::*;
-use crate::routes::map::*;
+use crate::service::map::*;
 use crate::test_support::*;
 use tower::ServiceExt;
 

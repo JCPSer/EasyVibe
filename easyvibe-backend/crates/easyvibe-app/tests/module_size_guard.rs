@@ -59,17 +59,28 @@ fn god_files_stay_below_size_limits() {
     assert!(loc("main.rs") <= 900, "main.rs 超 900 行（god file 复发）: {}", loc("main.rs"));
     assert!(loc("task_exec.rs") <= 900, "task_exec.rs 超 900 行: {}", loc("task_exec.rs"));
     // 装配层其余文件
-    for f in ["state.rs", "map_concerns.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "pipeline.rs", "service.rs", "freshness.rs", "git.rs", "session_queue_routes.rs"] {
+    for f in ["state.rs", "map_concerns.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "pipeline.rs", "freshness.rs", "git.rs", "session_queue_routes.rs"] {
         assert!(loc(f) <= 700, "{f} 超 700 行: {}", loc(f));
     }
-    // 资源域
+    // 服务编排层（方案 R1：service/{mod,chat,task,map}.rs）
+    let service_dir = app_src().join("service");
+    for e in std::fs::read_dir(&service_dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().map(|x| x == "rs").unwrap_or(false) {
+            let name = format!("service/{}", p.file_name().unwrap().to_string_lossy());
+            let n = std::fs::read_to_string(&p).unwrap().lines().count();
+            let lim = if p.file_name().unwrap() == "mod.rs" { 300 } else { 600 };
+            assert!(n <= lim, "{name} 超 {lim} 行: {n}");
+        }
+    }
+    // 资源域：方案 R8 单轨下调 600 → 400（存量最大 settings 334，安全；map 下沉后远低于）
     let routes_dir = app_src().join("routes");
     for e in std::fs::read_dir(&routes_dir).unwrap() {
         let p = e.unwrap().path();
         if p.extension().map(|x| x == "rs").unwrap_or(false) {
             let name = format!("routes/{}", p.file_name().unwrap().to_string_lossy());
             let n = std::fs::read_to_string(&p).unwrap().lines().count();
-            let lim = if p.file_name().unwrap() == "mod.rs" { 300 } else { 600 };
+            let lim = if p.file_name().unwrap() == "mod.rs" { 300 } else { 400 };
             assert!(n <= lim, "{name} 超 {lim} 行: {n}");
         }
     }
@@ -111,14 +122,16 @@ fn route_modules_have_no_horizontal_deps() {
 }
 
 /// task_exec 子模块的逆向引用禁止子串（应用层/事件出口符号）。
+/// 方案 R7：map 编排下沉后 `crate::start_*` / `crate::analyze_submap_inner` 旧禁串失效，
+/// 改指新路径 `crate::service::map::…`（与 tests/arch_guard.rs 两处同步）。
 const TASK_ENGINE_FORBIDDEN: &[&str] = &[
     "crate::BusEvent",
     "crate::publish",
     "crate::agent_conf",
     "crate::AppState",
     "crate::AppError",
-    "crate::start_",
-    "crate::analyze_submap_inner",
+    "crate::service::map::start_",
+    "crate::service::map::analyze_submap_inner",
     "crate::session_queue",
 ];
 
@@ -237,4 +250,100 @@ fn router_route_list_is_frozen() {
     assert!(missing.is_empty() && extra.is_empty(),
         "route 清单漂移——缺失(404风险): {missing:?}；新增(意外暴露): {extra:?}");
     assert_eq!(actual.len(), frozen.len(), "route 数量不一致");
+}
+
+/// routes/*.rs 的纵向编排依赖禁止串（方案 R8①）——handler 只做 HTTP 边界，
+/// 数据库 / agent / 编排助手 / spawn 必须落 `crate::service`。
+/// 同时扫 `use` 行与函数体内限定路径：裸用 `easyvibe_db::…` 与 `use easyvibe_db::…` 都被子串命中。
+const ROUTES_FORBIDDEN_ORCH: &[&str] = &[
+    "easyvibe_db::",
+    "easyvibe_ai_agent::",
+    "crate::task_exec",
+    "crate::reinduce",
+    "crate::freshness",
+    "crate::map_concerns",
+    "crate::assets::resolve_text_asset",
+    "easyvibe_map::atomic_write",
+    "tokio::spawn",
+    ".start_induction(",
+    "session_manager.start_",
+    ".try_register(",
+];
+
+/// 存量违规文件白名单（LEGACY ratchet，方案 §六-2：本轮只锁 map.rs，其余文件先登记现值）。
+/// 键集必须与实际违规集**全等**：文件清干净后须摘牌，不得新增/改名蒙混。
+/// 值 = 冻结的违规串出现次数（只降不升）。
+const ROUTES_LEGACY_BUDGET: &[(&str, usize)] = &[
+    ("agent.rs", 3),
+    ("chat.rs", 2),
+    ("dev_docs.rs", 1),
+    ("repo.rs", 3),
+    ("sessions.rs", 5),
+    ("settings.rs", 6),
+    ("task.rs", 9),
+];
+
+/// routes/*.rs 文件集归属快照（照 componentGuard 归属快照范式，方案 R8④）。
+const ROUTES_FROZEN_FILES: &[&str] = &[
+    "agent.rs", "chat.rs", "dev_docs.rs", "map.rs", "mod.rs", "repo.rs", "sessions.rs", "settings.rs", "task.rs",
+];
+
+/// service/ 文件集归属快照（方案 R1 拆分为 {mod,chat,task,map}.rs）。
+const SERVICE_FROZEN_FILES: &[&str] = &["chat.rs", "map.rs", "mod.rs", "task.rs"];
+
+fn rs_files(dir: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "rs").unwrap_or(false))
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn routes_dependency_whitelist() {
+    let dir = app_src().join("routes");
+    let mut violating: Vec<String> = Vec::new();
+    for fname in rs_files(&dir) {
+        if fname == "mod.rs" { continue; }
+        let txt = std::fs::read_to_string(dir.join(&fname)).unwrap();
+        let count: usize = ROUTES_FORBIDDEN_ORCH.iter().map(|p| txt.matches(p).count()).sum();
+        if count == 0 { continue; }
+        violating.push(fname.clone());
+        match ROUTES_LEGACY_BUDGET.iter().find(|(f, _)| *f == fname) {
+            Some((_, budget)) => assert!(
+                count <= *budget,
+                "routes/{fname} 编排依赖从 {budget} 增至 {count}——handler 只做 HTTP 边界，编排须落 crate::service（R8①）"
+            ),
+            None => panic!(
+                "routes/{fname} 出现 {count} 处纵向编排依赖（{ROUTES_FORBIDDEN_ORCH:?}）——须下沉 crate::service / crate::state，不得新登记 LEGACY"
+            ),
+        }
+    }
+    let mut declared: Vec<String> = ROUTES_LEGACY_BUDGET.iter().map(|(f, _)| f.to_string()).collect();
+    declared.sort();
+    violating.sort();
+    assert_eq!(
+        violating, declared,
+        "LEGACY 棘轮漂移——实际违规集 {violating:?} != 登记集 {declared:?}（清干净须摘牌，新增文件不得蒙混进表）"
+    );
+}
+
+#[test]
+fn routes_file_set_is_frozen() {
+    let actual = rs_files(&app_src().join("routes"));
+    let mut expected: Vec<String> = ROUTES_FROZEN_FILES.iter().map(|s| s.to_string()).collect();
+    expected.sort();
+    assert_eq!(actual, expected, "routes/ 文件集漂移——新增/改名须登记快照（防换地址复活，R8④）");
+}
+
+#[test]
+fn service_file_set_is_frozen() {
+    let actual = rs_files(&app_src().join("service"));
+    let mut expected: Vec<String> = SERVICE_FROZEN_FILES.iter().map(|s| s.to_string()).collect();
+    expected.sort();
+    assert_eq!(actual, expected, "service/ 文件集漂移——须登记快照（R1/R8④）");
 }

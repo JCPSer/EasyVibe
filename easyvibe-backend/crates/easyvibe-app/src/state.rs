@@ -166,6 +166,22 @@ pub(crate) fn resolve_agent_command(cmd: &str) -> String {
     agent_conf::resolve_agent_command(cmd)
 }
 
+/// CLI agent 可执行预检：spawn 路径的鉴权由 claude 自身配置（~/.claude/settings.json 的 env
+/// 或进程环境变量）负责，与本进程的 EASYVIBE_LLM_API_KEY 无关——旧守卫把"DB 已配 key"
+/// 的合法场景误判为未配置（chat 直调走 DB，patrol/reinduce 走 CLI spawn，两条链路配置源不同）。
+/// 方案 R7：跨 patrol/reinduce/submap 复用，落 state（就近取 agent_command，减少横向依赖）。
+pub(crate) fn ensure_agent_available(st: &AppState) -> Result<(), ApiError> {
+    let cmd = &*st.agent_command;
+    let name = cmd.rsplit('/').next().unwrap_or(cmd);
+    let on_path = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
+        .unwrap_or(false);
+    if !on_path && !std::path::Path::new(cmd).is_file() {
+        return Err(ApiError::BadRequest(format!("未找到 CLI agent `{cmd}`——请先安装并加入 PATH")));
+    }
+    Ok(())
+}
+
 /// 生效配置解析：仓库行覆盖全局行；无设置时回退环境变量（开发期手段）。
 pub struct ResolvedLlm {
     pub base_url: String,
