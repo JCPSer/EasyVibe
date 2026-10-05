@@ -1,8 +1,8 @@
 // done：归档摘要（变更统计 + 归档路径复制 + 重新巡检验证入口）。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { CheckCircle2, Copy } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { absTime } from '@/lib/diffStat'
+import { toast } from '@/runtime/toast'
+import { absTime } from '@/shared/logic/diffStat'
 import type { TaskItem } from '../types'
 
 export function DoneStage({ sel, backendRepo, impact }: {

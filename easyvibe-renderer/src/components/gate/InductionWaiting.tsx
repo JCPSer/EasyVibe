@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
-import { loadTaskIdea, saveTaskIdea, prefersReducedMotion } from '@/lib/onboarding'
-import { inductionPhaseLabel } from '@/lib/inductionProgress'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
+import { loadTaskIdea, saveTaskIdea } from '@/lib/onboarding'
+import { prefersReducedMotion } from '@/runtime/motion'
+import { inductionPhaseLabel } from '@/shared/logic/inductionProgress'
 
 // 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
 export function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)

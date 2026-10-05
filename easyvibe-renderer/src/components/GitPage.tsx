@@ -3,10 +3,10 @@ import {
   AlertTriangle, ArrowDownToLine, ArrowUpFromLine, ChevronRight, Copy, GitBranch, Loader2, RefreshCw,
   ScanSearch, ShieldCheck, Sparkles, Trash2,
 } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/lib/diffStat'
-import { healthColor } from '@/lib/layout'
-import { onPatrolFinished } from '@/lib/growthBus'
+import { toast } from '@/runtime/toast'
+import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/shared/logic/diffStat'
+import { healthColor } from '@/shared/logic/layout'
+import { onPatrolFinished } from '@/runtime/growthBus'
 import type { CodeMap } from '@/types/map'
 
 // M4-4 Git 工作树（按 ui-mockups/Git工作树原型-v3.png 施工）：

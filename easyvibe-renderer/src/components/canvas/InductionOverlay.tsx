@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, X } from 'lucide-react'
-import { onSessionOutput } from '@/lib/growthBus'
-import { prefersReducedMotion } from '@/lib/onboarding'
+import { onSessionOutput } from '@/runtime/growthBus'
+import { prefersReducedMotion } from '@/runtime/motion'
 import {
   formatTickerLine,
   interpretInductionProgress,
   type InductionPhaseView,
   type InductionProgress,
-} from '@/lib/inductionProgress'
+} from '@/shared/logic/inductionProgress'
 
 // 归纳期间地图区域"原位过场"：罩层 + agent 实时输出行（ticker）+ 阶段进度卡（底部中央，
 // 接管 GrowthPanel"等待生长事件"的空态位置）/ 排队态卡。高频状态全部留在本组件内部

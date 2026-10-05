@@ -3,7 +3,7 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useEffect, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, ShieldAlert } from 'lucide-react'
-import { MarkdownMessage } from '@/components/MarkdownMessage'
+import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 
 /** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
  *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮

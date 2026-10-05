@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { ChevronDown, ChevronUp, Loader2, RotateCcw, UnfoldVertical, AlertTriangle, Search} from 'lucide-react'
 import type { Module } from '@/types/map'
-import { healthColor } from '@/lib/layout'
+import { healthColor } from '@/shared/logic/layout'
 
 export type ExpandedModuleNodeType = Node<
   {

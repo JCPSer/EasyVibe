@@ -2,9 +2,9 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, FileCode2, Hammer, Loader2, ShieldAlert } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { absTime } from '@/lib/diffStat'
-import { remediateTask, reviewTask } from '@/lib/taskAdmin'
+import { toast } from '@/runtime/toast'
+import { absTime } from '@/shared/logic/diffStat'
+import { remediateTask, reviewTask } from '@/components/taskworkflow/taskAdmin'
 import { pickActiveDiff, splitDiffFiles } from '../diffParse'
 import type { TaskItem } from '../types'
 

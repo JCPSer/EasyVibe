@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from '@/lib/toast'
-import type { TaskDraft } from '@/lib/taskContext'
+import { toast } from '@/runtime/toast'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
-import type { Selection } from '@/components/DetailPanel'
-import { buildTaskDraftFromChat } from '@/lib/chatUpgrade'
+import type { Selection } from '@/shared/contract/selection'
+import { buildTaskDraftFromChat } from '@/components/chat/chatUpgrade'
 import { Download, Loader2, MoreHorizontal, Pencil, Plus, Shrink, Wrench, X as XIcon } from 'lucide-react'
-import { type ChatMessage, type Clarify, type PendingApproval } from './chat/types'
-import { useConversations } from './chat/useConversations'
-import { QuickAskStream } from './chat/QuickAskStream'
-import { QuickAskComposer } from './chat/QuickAskComposer'
+import { type ChatMessage, type Clarify, type PendingApproval } from './types'
+import { useConversations } from './useConversations'
+import { QuickAskStream } from './QuickAskStream'
+import { QuickAskComposer } from './QuickAskComposer'
 
 // QuickAsk（2026-10-05 右栏对话 Redesign-A 检查器文档流）：
 // ContextBar（状态/会话/审批/上下文）+ ThreadStream + ComposerDock。

@@ -1,7 +1,7 @@
 // depsAnalysis 口径回归：算法与数字必须可复算（评审 B1 验收红线）
 import { describe, it, expect } from 'vitest'
 import type { CodeMap } from '@/types/map'
-import { tarjanSCC, couplingAnalysis, buildDepCards } from '@/lib/depsAnalysis'
+import { tarjanSCC, couplingAnalysis, buildDepCards } from '@/shared/logic/depsAnalysis'
 
 // 三层结构：a(L0 顶层) → b(L1) → c(L2)；另有 d 单例；
 // 环：m1 ↔ m2（同层 L1）；违规：c → a（底层调顶层）；高风险：a -strong-> h（h 55 分）

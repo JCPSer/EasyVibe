@@ -2,7 +2,7 @@
 // 拆自 QuickAsk.tsx（2026-10-05 防膨胀）。
 import { useRef } from 'react'
 import { AtSign, Paperclip, Send, Square, X as XIcon } from 'lucide-react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import type { CodeMap } from '@/types/map'
 
 export function QuickAskComposer({

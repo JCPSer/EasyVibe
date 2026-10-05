@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enqueue } from '@/lib/sessionQueue'
+import { enqueue } from '@/runtime/sessionQueue'
 
 // sessionQueue helper：POST /repos/{id}/session-queue 的契约消费
 // （docs/requirements-session-bubble-queue.md §5 + 评审 B4/S3）

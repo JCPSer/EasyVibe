@@ -1,5 +1,5 @@
 import { CheckCircle2 } from 'lucide-react'
-import { stageOf, STAGES } from '@/lib/taskStage'
+import { stageOf, STAGES } from '@/components/taskworkflow/taskStage'
 
 // 五阶段管道公共组件（v4 brief §8：两处五阶段渲染漂移的对策——判定只在 taskStage 一处，
 // 这里只负责画）。compact = 工作台迷你档（无 hint 行）；detail = 任务页标准档。

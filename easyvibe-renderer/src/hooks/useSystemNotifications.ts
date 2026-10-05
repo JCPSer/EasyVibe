@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
-import { onQueueChanged, onSessionEvent } from '@/lib/growthBus'
-import { sysNotify } from '@/lib/notify'
+import { onQueueChanged, onSessionEvent } from '@/runtime/growthBus'
+import { sysNotify } from '@/runtime/notify'
 
 /**
  * 系统级通知：窗口失焦/后台时送达通知中心（toast 只有前台可见）。

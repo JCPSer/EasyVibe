@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Copy, Loader2 } from 'lucide-react'
-import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
-import { absTime, toMs } from '@/lib/diffStat'
-import { stageOf, gateLabel } from '@/lib/taskStage'
-import { TaskAdminButtons } from '@/components/TaskAdminButtons'
-import type { TaskDraft } from '@/lib/taskContext'
+import { onPatrolFinished, onTaskEvent } from '@/runtime/growthBus'
+import { absTime, toMs } from '@/shared/logic/diffStat'
+import { stageOf, gateLabel } from '@/components/taskworkflow/taskStage'
+import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 治理视图（v4 P2）：历史检索 + 失败治理 + 返工链可见。
 // 看板管"现在"，治理管"全部"。返工链：origin_task_id 血缘沿链缩进渲染。

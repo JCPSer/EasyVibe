@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X, FileCode2, KeyRound, Flag, StickyNote, ArrowDownToLine, ArrowUpFromLine, Boxes, Info, Wrench, ListChecks, MessagesSquare, Gauge} from 'lucide-react'
-import { buildLayerTask, buildModuleTask, buildSubmoduleTask, type TaskDraft } from '@/lib/taskContext'
+import { buildLayerTask, buildModuleTask, buildSubmoduleTask, type TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap, Layer, Module, SubMap, SubModule } from '@/types/map'
-import { healthColor, healthLabel, dependentsOf } from '@/lib/layout'
-import { couplingAnalysis } from '@/lib/depsAnalysis'
+import { healthColor, healthLabel, dependentsOf } from '@/shared/logic/layout'
+import { couplingAnalysis } from '@/shared/logic/depsAnalysis'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
-import { PanelChat } from '@/components/PanelChat'
+import { PanelChat } from '@/components/chat/PanelChat'
 import { Waypoints } from 'lucide-react'
 
-export type Selection =
-  | { kind: 'module' | 'layer'; id: string }
-  | { kind: 'submodule'; parentId: string; subId: string }
-  | null
-export type PanelTab = 'detail' | 'issues' | 'chat'
-
-/** v0.2：对话页签占位/详情视图「就此对话」的上抛回调——App 转换为跨页携带上下文跳「任务对话」 */
-export type ChatAboutTarget = { refId: string; refName: string; kind: 'module' | 'layer' }
+// 共享契约类型（2026-10-05 下沉 renderer-shared/contract）：canvas 与 chat 两侧共用，
+// 定义在此会让 chat 域反向依赖 map-canvas，故统一改为从 shared 引入。
+import type { Selection, PanelTab } from '@/shared/contract/selection'
+import type { ChatAboutTarget } from '@/shared/contract/chat'
 
 interface Props {
   map: CodeMap

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTaskDraftFromChat } from '@/lib/chatUpgrade'
+import { buildTaskDraftFromChat } from '@/components/chat/chatUpgrade'
 
 describe('buildTaskDraftFromChat（对话→任务升级纯逻辑）', () => {
   it('空对话 / 无用户消息 → null（不产出草稿）', () => {

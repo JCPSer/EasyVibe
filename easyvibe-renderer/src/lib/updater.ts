@@ -2,7 +2,7 @@
 // 仅桌面端生效：纯浏览器（开发流）没有 __TAURI_INTERNALS__，整体 no-op。
 // 检查节奏：启动 5s 后首检 + 每小时轮询；并发检查 single-flight 合并（防重）。
 // 插件模块动态 import——浏览器构建不会触碰 Tauri 专属代码。
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 
 let inFlight: Promise<void> | null = null
 let started = false

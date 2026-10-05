@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench, Trash2, X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import { healthColor } from '@/lib/layout'
-import { absTime, toMs } from '@/lib/diffStat'
+import { healthColor } from '@/shared/logic/layout'
+import { absTime, toMs } from '@/shared/logic/diffStat'
 import { Select } from '@/components/ui/SelectMenu'
-import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
-import { onPatrolFinished } from '@/lib/growthBus'
-import { enqueue } from '@/lib/sessionQueue'
-import { toast } from '@/lib/toast'
+import { buildModuleTask, type TaskDraft } from '@/shared/logic/taskContext'
+import { onPatrolFinished } from '@/runtime/growthBus'
+import { enqueue } from '@/runtime/sessionQueue'
+import { toast } from '@/runtime/toast'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）

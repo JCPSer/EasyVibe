@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 
 export type AgentDetected = { command: string; path: string; version: string | null }
 export type AgentState = { found: boolean | null; detected: AgentDetected[] }

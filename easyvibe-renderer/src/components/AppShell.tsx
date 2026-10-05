@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { TrafficLightsSpacer, FakeTrafficLights } from '@/components/WindowControls'
-import { isTauriRuntime } from '@/lib/env'
+import { isTauriRuntime } from '@/runtime/env'
 import {
   GitBranch,
   Map as MapIcon,

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Crosshair, Wrench } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import { healthColor } from '@/lib/layout'
-import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
+import { healthColor } from '@/shared/logic/layout'
+import { buildModuleTask, type TaskDraft } from '@/shared/logic/taskContext'
 
 // M4-1.5 模块目录页（从占位转正）：以模块为行的表格视图——一览全部模块的职责、
 // 健康与文件归属；兼任画布的无障碍列表模式（画布是图形，目录是语义等价物）。

@@ -1,7 +1,7 @@
 // 管道回看：历史阶段产物的只读视图（0/1 → PhaseDocReview readonly + 重开入口；
 // 2/3/4 → 只读变更统计摘要）。拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { History } from 'lucide-react'
-import { STAGES } from '@/lib/taskStage'
+import { STAGES } from '@/components/taskworkflow/taskStage'
 import { PhaseDocReview } from './PhaseDocReview'
 import type { TaskItem } from './types'
 

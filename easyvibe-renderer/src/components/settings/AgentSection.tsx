@@ -2,7 +2,7 @@
 // 拆自 SettingsPanel.tsx（2026-10-05 防膨胀）。
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import { field } from './common'
 import { Field } from './controls'
 

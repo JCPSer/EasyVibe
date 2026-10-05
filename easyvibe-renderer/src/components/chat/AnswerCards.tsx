@@ -1,5 +1,5 @@
 import { Waypoints, ShieldCheck, Lightbulb, FileText } from 'lucide-react'
-import { MarkdownMessage } from '@/components/MarkdownMessage'
+import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 
 // M4-2 答案卡片三型（按 ui-mockups/对话面板原型.png 重画）：
 // 助手回答按章节（##/### 标题）拆分为卡片，按关键词定型——

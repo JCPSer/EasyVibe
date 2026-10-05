@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
-import { onQueueChanged, onSessionEvent } from '@/lib/growthBus'
-import { toast } from '@/lib/toast'
-import { absTime, toMs } from '@/lib/diffStat'
-import { formatElapsed, kindFromLabel } from '@/lib/sessionQueue'
+import { onQueueChanged, onSessionEvent } from '@/runtime/growthBus'
+import { toast } from '@/runtime/toast'
+import { absTime, toMs } from '@/shared/logic/diffStat'
+import { formatElapsed, kindFromLabel } from '@/runtime/sessionQueue'
 
 type QueueKind = 'patrol' | 'reinduce' | 'submap'
 

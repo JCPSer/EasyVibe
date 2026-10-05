@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from '@/lib/toast'
-import type { TaskDraft } from '@/lib/taskContext'
+import { toast } from '@/runtime/toast'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
-import { type ChatMessage, type Clarify, type PendingApproval } from './chat/types'
-import { useConversations } from './chat/useConversations'
-import { ConversationSwitcher } from './chat/ConversationSwitcher'
-import { HeaderActions } from './chat/HeaderActions'
-import { MessageStream } from './chat/MessageStream'
-import { ComposerDock } from './chat/ComposerDock'
+import { type ChatMessage, type Clarify, type PendingApproval } from './types'
+import { useConversations } from './useConversations'
+import { ConversationSwitcher } from './ConversationSwitcher'
+import { HeaderActions } from './HeaderActions'
+import { MessageStream } from './MessageStream'
+import { ComposerDock } from './ComposerDock'
 
 // M4-2 兼容：ConversationSummary 原从本文件导出，多个消费方沿用该路径
-export type { ConversationSummary } from './chat/types'
+export type { ConversationSummary } from './types'
 
 interface Props {
   backendRepo: string | null

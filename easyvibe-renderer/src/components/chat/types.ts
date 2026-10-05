@@ -1,6 +1,6 @@
 // 对话域共享类型（ChatPanel / QuickAsk 数据契约镜像的单一事实源）。
 // 拆自 ChatPanel.tsx / QuickAsk.tsx（2026-10-05 防膨胀）。
-import type { TaskDraft } from '@/lib/taskContext'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
 
 export interface ChatMessage {

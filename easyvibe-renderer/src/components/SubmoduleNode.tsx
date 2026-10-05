@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { Loader2, FileCode2 } from 'lucide-react'
 import type { SubModule } from '@/types/map'
-import { healthColor, healthLabel, SUB_W, SUB_H } from '@/lib/layout'
+import { healthColor, healthLabel, SUB_W, SUB_H } from '@/shared/logic/layout'
 
 // 腐化标记中文标签（与主图 ModuleNode 同表 + 子图内部专属）
 const SUB_FLAG_LABEL: Record<string, string> = {

@@ -1,7 +1,7 @@
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import { useState } from 'react'
 import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight, Crosshair} from 'lucide-react'
-import type { TaskDraft } from '@/lib/taskContext'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { Module } from '@/types/map'
 
 interface Props {

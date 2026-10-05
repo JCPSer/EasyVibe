@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime } from '@/lib/diffStat'
+import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime } from '@/shared/logic/diffStat'
 
 const SAMPLE = ` src/App.tsx                | 12 ++++++-------
  src/components/Node.tsx    |  5 ++---

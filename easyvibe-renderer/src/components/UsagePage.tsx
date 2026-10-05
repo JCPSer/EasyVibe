@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Gauge, Loader2, TriangleAlert, Lightbulb, ArrowRight } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import { healthColor } from '@/lib/layout'
+import { healthColor } from '@/shared/logic/layout'
 
 // 「用量」页（docs/llm-usage-page-design-v1.md U2/L1/L2 施工）：
 // KPI + 按日/按类型/按模型/按模块（治理账单 L1）+ 洞察卡（L2 腐化的代价）+ 逐会话明细。

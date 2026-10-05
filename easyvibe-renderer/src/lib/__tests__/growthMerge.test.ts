@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
+import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/shared/logic/growthMerge'
 import type { CodeMap, GrowthEvent } from '@/types/map'
 
 const baseMap = {

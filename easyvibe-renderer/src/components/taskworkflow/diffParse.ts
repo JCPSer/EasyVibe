@@ -1,6 +1,6 @@
 // TaskWorkflowPage 拆分产物：diff/影响面/时长 纯函数（可单测，无 React 依赖）。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
-import { toMs } from '@/lib/diffStat'
+import { toMs } from '@/shared/logic/diffStat'
 import type { TaskItem } from './types'
 
 /** diff 全文 → 变更文件列表（`diff --git a/x b/x` 与 `+++ b/x` 双形态） */

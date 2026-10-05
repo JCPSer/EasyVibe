@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SessionBubble } from '@/components/SessionBubble'
-import { formatElapsed, isEmptyState, kindFromLabel } from '@/lib/sessionQueue'
+import { formatElapsed, isEmptyState, kindFromLabel } from '@/runtime/sessionQueue'
 
 // SessionBubble 纯逻辑：时长计算 / 图标类型推断 / 空态渲染
 // （时长 ticker 与事件驱动刷新属 hooks 副作用，由实弹验证覆盖）

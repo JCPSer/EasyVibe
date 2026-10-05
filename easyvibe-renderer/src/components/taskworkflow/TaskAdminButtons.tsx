@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Ban, Hammer, RotateCcw, Trash2, X } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { deleteTask, killTask, remediateTask, retryTask } from '@/lib/taskAdmin'
+import { toast } from '@/runtime/toast'
+import { deleteTask, killTask, remediateTask, retryTask } from '@/components/taskworkflow/taskAdmin'
 
 // 任务管理按钮组（2026-10-03 现状重审 P0 + 复审闭环）：按任务状态自动出现——
 //   running              → 终止（两步确认；awaiting_approval 不在此列——它没在执行，

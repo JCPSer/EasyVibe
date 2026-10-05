@@ -1,8 +1,8 @@
 // 多会话状态与 CRUD（ChatPanel / QuickAsk 共用；对话消息流由各自壳持有）。
 // 拆自 ChatPanel.tsx / QuickAsk.tsx（2026-10-05 防膨胀）。
 import { useCallback, useEffect, useState } from 'react'
-import { toast } from '@/lib/toast'
-import { onTaskEvent } from '@/lib/growthBus'
+import { toast } from '@/runtime/toast'
+import { onTaskEvent } from '@/runtime/growthBus'
 import type { ChatRestore, ConversationSummary, PendingApproval } from './types'
 
 export function useConversations({

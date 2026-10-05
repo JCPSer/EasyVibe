@@ -4,7 +4,7 @@
 //   · 排队任务轮到执行（用户离开等排队时最需要）
 // 权限：首次调用请求一次；浏览器/插件缺失时静默降级为无操作。
 
-import { isTauriRuntime } from '@/lib/env'
+import { isTauriRuntime } from '@/runtime/env'
 
 let asked = false
 

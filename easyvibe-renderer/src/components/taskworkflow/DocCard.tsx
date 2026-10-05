@@ -2,7 +2,7 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useEffect, useState } from 'react'
 import { ChevronRight, Loader2, Trash2 } from 'lucide-react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 
 /** 产物文档卡（审计 P2：此前纯只读死胡同）——点击标题展开全文（拉 /dev-doc），
  *  再点收起；展开态本地缓存避免重复请求。删除两步确认（审计 P1：归档只进不出收口） */

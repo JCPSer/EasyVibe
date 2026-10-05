@@ -122,12 +122,3 @@ export function clearTaskIdea(): void {
     /* 同上 */
   }
 }
-
-/** 尊重系统减弱动效偏好（轮播/打字机全部降级为静态） */
-export function prefersReducedMotion(): boolean {
-  try {
-    return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
-}

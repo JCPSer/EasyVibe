@@ -2,10 +2,10 @@
 // 拆自 ChatPanel.tsx（2026-10-05 防膨胀）。
 import { useMemo, useState } from 'react'
 import { AlertTriangle, AtSign, BookmarkPlus, Check, CheckCircle2, Copy, Crosshair, Loader2, MessagesSquare } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { AnswerCards } from '@/components/AnswerCards'
-import { MarkdownMessage } from '@/components/MarkdownMessage'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { toast } from '@/runtime/toast'
+import { AnswerCards } from '@/components/chat/AnswerCards'
+import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 import { GATE_LABEL, type ChatMessage, type Clarify, type PendingApproval } from './types'
 import type { CodeMap } from '@/types/map'
 

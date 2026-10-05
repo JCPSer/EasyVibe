@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { onQueueChanged, onSessionEvent } from '@/lib/growthBus'
-import { kindFromLabel } from '@/lib/sessionQueue'
+import { onQueueChanged, onSessionEvent } from '@/runtime/growthBus'
+import { kindFromLabel } from '@/runtime/sessionQueue'
 
 // 跨页共享的"归纳进行中"状态（2026-10-05 实弹修复：漂移洞察点了归纳，
 // 地图头部因 inducing 只是本页局部态仍在放"立即归纳"，二次点击入队成重复归纳）。

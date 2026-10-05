@@ -13,10 +13,10 @@ import {
   ListTree,
   LayoutList,
 } from 'lucide-react'
-import { onQueueChanged, onSessionEvent, onSessionOutput } from '@/lib/growthBus'
-import { toast } from '@/lib/toast'
-import { toMs } from '@/lib/diffStat'
-import { formatElapsed, kindFromLabel, type SessionQueueKind } from '@/lib/sessionQueue'
+import { onQueueChanged, onSessionEvent, onSessionOutput } from '@/runtime/growthBus'
+import { toast } from '@/runtime/toast'
+import { toMs } from '@/shared/logic/diffStat'
+import { formatElapsed, kindFromLabel, type SessionQueueKind } from '@/runtime/sessionQueue'
 
 // 「运行」页（docs/runs-page-design-v1.md M2 完成体）：
 // 左栏三态会话列表（运行中/排队中/历史——历史为 agent_sessions 库表，重启后仍可回放）

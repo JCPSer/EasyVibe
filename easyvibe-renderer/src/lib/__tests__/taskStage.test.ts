@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stageOf } from '../taskStage'
+import { stageOf } from '../../components/taskworkflow/taskStage'
 
 // 五阶段映射（方案 v3 §4.1 验收 #6）：全 (status, gate) 组合覆盖。
 // 核心纪律：status 优先——failed 残留 gate 值不得制造假阶段（复审意见）。

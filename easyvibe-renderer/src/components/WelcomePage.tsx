@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { FolderOpen, Play, Sparkles, X } from 'lucide-react'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 
 /** 首启欢迎工作台（调研定稿方案①：AionUi 式"首屏只做一件事"）。
  *  fullScreen 覆盖在应用之上；首启（hasRepo=false）主 CTA 是"添加仓库"，

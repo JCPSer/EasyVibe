@@ -1,5 +1,5 @@
 import type { CodeMap } from '@/types/map'
-import type { TaskDraft } from '@/lib/taskContext'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 
 /** 全局任务表单浮层（地图/建议/工作区页共用） */

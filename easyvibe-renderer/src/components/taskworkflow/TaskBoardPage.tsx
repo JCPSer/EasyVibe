@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Loader2, X } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { onPatrolFinished, onTaskEvent } from '@/lib/growthBus'
-import { absTime, toMs } from '@/lib/diffStat'
-import { stageOf } from '@/lib/taskStage'
-import { TaskAdminButtons } from '@/components/TaskAdminButtons'
-import type { TaskDraft } from '@/lib/taskContext'
+import { toast } from '@/runtime/toast'
+import { onPatrolFinished, onTaskEvent } from '@/runtime/growthBus'
+import { absTime, toMs } from '@/shared/logic/diffStat'
+import { stageOf } from '@/components/taskworkflow/taskStage'
+import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 任务编排看板（方案 v3 §4.3 施工，取代旧「我的待办」列表）：
 // 五列 = 状态口径；拖拽只承载合法语义动作（与状态机一致，不造假）：

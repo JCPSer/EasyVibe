@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { QuickAsk } from '@/components/QuickAsk'
+import { QuickAsk } from '@/components/chat/QuickAsk'
 import type { CodeMap } from '@/types/map'
-import type { Selection } from '@/components/DetailPanel'
-import type { TaskDraft } from '@/lib/taskContext'
+import type { Selection } from '@/shared/contract/selection'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 右栏「对话」页签薄壳（2026-10-05 Redesign-A）：QuickAsk 检查器文档流的父级接线——
 // 选中模块/子模块时投递 @提及（nonce 一次性消费、同 id 去重）+ 新建会话默认标题带对象名。

@@ -49,7 +49,7 @@ function routeKeys(): string[] {
 }
 
 function wsEvents(): string[] {
-  const src = read('src/lib/ws.ts')
+  const src = read('src/runtime/ws.ts')
   return [...new Set([...src.matchAll(/msg\.name === '([^']+)'/g)].map((x) => x[1]))]
 }
 
@@ -85,7 +85,7 @@ describe('R8 防回胀守卫 · 断言组 1：LOC 上限（行数为权威）', 
       for (const f of ls(dir, ['.tsx'])) expect(loc(`${dir}/${f}`), `${dir}/${f}`).toBeLessThanOrEqual(300)
     }
     for (const f of ls('src/hooks', ['.ts'])) expect(loc(`src/hooks/${f}`), f).toBeLessThanOrEqual(300)
-    expect(loc('src/lib/ws.ts')).toBeLessThanOrEqual(300)
+    expect(loc('src/runtime/ws.ts')).toBeLessThanOrEqual(300)
     expect(loc('src/pages/routes.tsx')).toBeLessThanOrEqual(400)
   })
 })
@@ -114,7 +114,7 @@ describe('R8 防回胀守卫 · 断言组 2：反向/横向 import 禁止', () =
     const targets = [
       'src/hooks/useAgentState.ts', 'src/hooks/useOnboarding.ts', 'src/hooks/useBackendConnection.ts',
       'src/hooks/useTheme.ts', 'src/hooks/useAttention.ts', 'src/hooks/usePatrol.ts',
-      'src/hooks/useUiPrefs.ts', 'src/hooks/useSystemNotifications.ts', 'src/lib/ws.ts',
+      'src/hooks/useUiPrefs.ts', 'src/hooks/useSystemNotifications.ts', 'src/runtime/ws.ts',
     ]
     for (const t of targets) {
       const src = read(t)

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, AlertTriangle, Plus, GitBranch, Pencil, Trash2, Check, X, ClipboardList, MessagesSquare } from 'lucide-react'
-import { ChatPanel, type ConversationSummary } from '@/components/ChatPanel'
-import { StagePipeline } from '@/components/StagePipeline'
-import { onTaskEvent } from '@/lib/growthBus'
-import { toast } from '@/lib/toast'
-import type { TaskDraft } from '@/lib/taskContext'
+import { ChatPanel, type ConversationSummary } from '@/components/chat/ChatPanel'
+import { StagePipeline } from '@/components/taskworkflow/StagePipeline'
+import { onTaskEvent } from '@/runtime/growthBus'
+import { toast } from '@/runtime/toast'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
-import type { ChatAboutTarget } from '@/components/DetailPanel'
+import type { ChatAboutTarget } from '@/shared/contract/chat'
 
 // v0.2 定位：「任务对话」——以对话为入口把任务聊出来（孵化视角）。
 // 与「任务」页（TaskPage：流程视角，看板+流水线）分工，顶部互指条显式化（方案 3.2）。

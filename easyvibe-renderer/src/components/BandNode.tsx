@@ -2,8 +2,8 @@ import { memo } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Boxes, ChevronRight } from 'lucide-react'
 import type { Layer } from '@/types/map'
-import type { BandBox } from '@/lib/layout'
-import { healthColor } from '@/lib/layout'
+import type { BandBox } from '@/shared/logic/layout'
+import { healthColor } from '@/shared/logic/layout'
 
 export interface LayerStats {
   count: number

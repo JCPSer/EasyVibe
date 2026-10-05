@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { ClipboardList, LayoutGrid, Rows3, Plus, Table2, MessagesSquare } from 'lucide-react'
-import { TaskWorkflowPage } from '@/components/TaskWorkflowPage'
-import { TaskBoardPage } from '@/components/TaskBoardPage'
-import { TaskGovernancePage } from '@/components/TaskGovernancePage'
+import { TaskWorkflowPage } from '@/components/taskworkflow/TaskWorkflowPage'
+import { TaskBoardPage } from '@/components/taskworkflow/TaskBoardPage'
+import { TaskGovernancePage } from '@/components/taskworkflow/TaskGovernancePage'
 import type { CodeMap } from '@/types/map'
-import type { TaskDraft } from '@/lib/taskContext'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 任务页（v4 P1 施工 + P2 治理视图）：「任务」唯一入口，页内视图切换——
 // 看板（默认，并行全景）/ 流水线（单任务全程）/ 治理（历史/失败/返工链）。

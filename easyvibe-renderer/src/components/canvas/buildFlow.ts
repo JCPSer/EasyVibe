@@ -1,13 +1,13 @@
 import { MarkerType, Position, type Edge, type Node } from '@xyflow/react'
 import type { CodeMap, SubMap } from '@/types/map'
-import { layoutMap, NODE_W, NODE_H, SUB_W, SUB_H } from '@/lib/layout'
+import { layoutMap, NODE_W, NODE_H, SUB_W, SUB_H } from '@/shared/logic/layout'
 import type { ModuleNodeType } from '@/components/ModuleNode'
 import type { BandNodeType } from '@/components/BandNode'
 import type { ExpandedModuleNodeType } from '@/components/ExpandedModuleNode'
 import type { SubmoduleNodeType } from '@/components/SubmoduleNode'
-import type { Selection } from '@/components/DetailPanel'
+import type { Selection } from '@/shared/contract/selection'
 import { isIssueModule } from '@/components/IssuesList'
-import { couplingAnalysis } from '@/lib/depsAnalysis'
+import { couplingAnalysis } from '@/shared/logic/depsAnalysis'
 import type { Filters } from './types'
 
 export function buildFlow(

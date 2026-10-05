@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download, Pencil } from 'lucide-react'
-import { MarkdownMessage } from '@/components/MarkdownMessage'
+import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 
 interface ViewItem {
   slug: string

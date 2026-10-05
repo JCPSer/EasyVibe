@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CodeMap } from '@/types/map'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 
 export type Repo = { id: string; name: string }
 

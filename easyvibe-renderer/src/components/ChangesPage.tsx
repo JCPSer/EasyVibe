@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FileDiff, History, ShieldCheck } from 'lucide-react'
-import { onTaskEvent } from '@/lib/growthBus'
+import { onTaskEvent } from '@/runtime/growthBus'
 import { Select } from '@/components/ui/SelectMenu'
-import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/lib/diffStat'
+import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/shared/logic/diffStat'
 import type { CodeMap } from '@/types/map'
 
 // M4-3 变更记录整页（按 ui-mockups/变更记录原型.png 施工）：

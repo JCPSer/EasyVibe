@@ -7,10 +7,13 @@
 //   ② 体量上限：默认 ≤600；拆分前存量越线者进 LEGACY_FROZEN 锁现值（只降不升、禁止新增），
 //      拆分完成后从表内移除并回落 600。
 //   ③ 方向：顶层组件不得反向 import App / pages/routes；map-canvas 面板不得 import console-ui 的 *Page。
-//   ④ 子目录守卫（R13-B1 补齐）：本次 god 组件拆分产物落点 `components/chat|settings|taskworkflow/**`
+//   ④ 子目录守卫（R13-B1 补齐）：god 组件拆分产物落点 `components/chat|settings|taskworkflow/**`
 //      曾整体逃逸旧守卫（旧断言只扫单层）——拆后薄壳（≤600）背后的实现体可无提示回胀。
 //      故对三目录**递归**做「文件集快照双向全等 + LOC≤600 + 反向 import」，并以 KNOWN_SUBDIRS
 //      登记表锁死 `src/components/` 顶层子目录集合：新增目录不登记即失败（同① 的目录级版本）。
+//
+// 口径（2026-10-05 console-ui 按域拆分后更新）：chat/settings/taskworkflow 三域不再只是"拆分产物目录"，
+//   而是各自成 map 模块；顶层对话/设置/任务页面与 lib 已迁入对应域目录，故顶层清单与子目录清单同步变更。
 //
 // 口径：LOC = split('\n').length（文件以换行结尾时 = wc -l + 1，比 wc 口径大 1，勿混淆）；
 //       阈值 600 为全仓「职责域」统一上限（与后端 crate 子模块守卫一致）。
@@ -44,23 +47,20 @@ const lsRecursive = (subdir: string): string[] => {
   return out
 }
 
-// ---------------- 归属快照（来源：.easyvibe/map/map.json modules.*.files，2026-10-05） ----------------
+// ---------------- 归属快照（2026-10-05 按域拆分后重采） ----------------
 const CONSOLE_UI_COMPONENTS = [
   'AppShell', 'ChangesPage', 'DepsPage', 'DriftPage', 'GitPage', 'HealthPage', 'ModulesPage',
-  'OnboardingChecklist', 'PlaceholderPage', 'RunsPage', 'SessionBubble', 'SettingsPanel',
-  'StagePipeline', 'SuggestPanel', 'TaskAdminButtons', 'TaskBoardPage', 'TaskGovernancePage',
-  'TaskPage', 'TaskWorkflowPage', 'ThemeToggle', 'UsagePage', 'ViewsPanel', 'WelcomePage',
-  'WindowControls', 'WorkbenchPage',
+  'OnboardingChecklist', 'PlaceholderPage', 'RunsPage', 'SessionBubble', 'ThemeToggle',
+  'UsagePage', 'ViewsPanel', 'WelcomePage', 'WindowControls',
 ]
 const MAP_CANVAS_COMPONENTS = [
-  'ModuleNode', 'BandNode', 'SubmoduleNode', 'ExpandedModuleNode', 'DetailPanel', 'PanelChat',
-  'QuickAsk', 'AnswerCards', 'IssuesList', 'TaskFormPanel', 'ChatPanel', 'MarkdownMessage',
+  'ModuleNode', 'BandNode', 'SubmoduleNode', 'ExpandedModuleNode', 'DetailPanel', 'IssuesList',
+  'TaskFormPanel',
 ]
 
 const DEFAULT_CEILING = 600
 
 // LEGACY ratchet：拆分前存量 >600 的顶层组件锁当前值（只降不升、禁止新增）。
-// god 组件（TaskWorkflowPage/ChatPanel/SettingsPanel/QuickAsk）拆到 ≤600 后必须从本表删除。
 const LEGACY_FROZEN: Record<string, number> = {
   GitPage: 878,
   RunsPage: 667,
@@ -71,26 +71,31 @@ const ALL_COMPONENTS = [...CONSOLE_UI_COMPONENTS, ...MAP_CANVAS_COMPONENTS]
 const ceilingOf = (name: string) => LEGACY_FROZEN[name] ?? DEFAULT_CEILING
 const sorted = (a: string[]) => [...a].sort()
 
-// ---------------- 子目录守卫（B1 补齐，来源：本轮 god 组件拆分产物，2026-10-05） ----------------
-// 三目录合计 25 文件 / 3518 行：chat（map-canvas 对话壳）、settings / taskworkflow（console-ui）。
-// 旧守卫（本文件单层断言 + repoLayout R8 的 canvas/gate/shell/overlays）均不覆盖它们，
-// 导致拆后薄壳符合阈值、实现体却零保护。以下文件集为**双向全等快照**：增删文件必须同步改表。
+// ---------------- 子目录守卫（三域，2026-10-05 按域拆分后重采） ----------------
+// 三目录合计 42 文件：chat（对话域：面板/薄壳/工作台/升级）、settings（设置域）、
+// taskworkflow（任务工作流域：页面/阶段流水线/管理动作）。
+// 以下文件集为**双向全等快照**：增删文件必须同步改表。
 const GUARDED_SUBDIRS = ['chat', 'settings', 'taskworkflow']
 
 const SUBDIR_FILES: Record<string, string[]> = {
   chat: [
-    'chat/ComposerDock.tsx', 'chat/ConversationSwitcher.tsx', 'chat/HeaderActions.tsx',
-    'chat/MessageStream.tsx', 'chat/QuickAskComposer.tsx', 'chat/QuickAskStream.tsx',
-    'chat/types.ts', 'chat/useConversations.ts',
+    'chat/AnswerCards.tsx', 'chat/ChatPanel.tsx', 'chat/ComposerDock.tsx',
+    'chat/ConversationSwitcher.tsx', 'chat/HeaderActions.tsx', 'chat/MessageStream.tsx',
+    'chat/PanelChat.tsx', 'chat/QuickAsk.tsx', 'chat/QuickAskComposer.tsx', 'chat/QuickAskStream.tsx',
+    'chat/SuggestPanel.tsx', 'chat/WorkbenchPage.tsx', 'chat/chatUpgrade.ts', 'chat/types.ts',
+    'chat/useConversations.ts',
   ],
   settings: [
     'settings/AboutSection.tsx', 'settings/AdvancedSection.tsx', 'settings/AgentSection.tsx',
-    'settings/HarnessSection.tsx', 'settings/ServicesSection.tsx',
+    'settings/HarnessSection.tsx', 'settings/ServicesSection.tsx', 'settings/SettingsPanel.tsx',
     'settings/common.ts', 'settings/controls.tsx',
   ],
   taskworkflow: [
     'taskworkflow/DocCard.tsx', 'taskworkflow/PhaseDocReview.tsx', 'taskworkflow/StageLookback.tsx',
-    'taskworkflow/diffParse.ts', 'taskworkflow/types.ts',
+    'taskworkflow/StagePipeline.tsx', 'taskworkflow/TaskAdminButtons.tsx', 'taskworkflow/TaskBoardPage.tsx',
+    'taskworkflow/TaskGovernancePage.tsx', 'taskworkflow/TaskPage.tsx', 'taskworkflow/TaskWorkflowPage.tsx',
+    'taskworkflow/diffParse.ts', 'taskworkflow/taskAdmin.ts', 'taskworkflow/taskStage.ts',
+    'taskworkflow/types.ts',
     'taskworkflow/stages/AnalysisStage.tsx', 'taskworkflow/stages/DiffStage.tsx',
     'taskworkflow/stages/DoneStage.tsx', 'taskworkflow/stages/ErrorStage.tsx',
     'taskworkflow/stages/ReportStage.tsx', 'taskworkflow/stages/TerminalStage.tsx',
@@ -147,7 +152,7 @@ describe('防膨胀守卫 · 断言组 3：反向/横向 import 禁止', () => {
   })
 })
 
-describe('防膨胀守卫 · 断言组 4：拆分产物子目录（chat / settings / taskworkflow，B1 补齐）', () => {
+describe('防膨胀守卫 · 断言组 4：域子目录（chat / settings / taskworkflow）', () => {
   it('守卫子目录文件集快照双向全等（新增/删除文件必须显式登记，防换个地址复活）', () => {
     for (const dir of GUARDED_SUBDIRS) {
       expect(sorted(lsRecursive(dir)), `${dir}/**`).toEqual(sorted(SUBDIR_FILES[dir]))
@@ -170,7 +175,7 @@ describe('防膨胀守卫 · 断言组 4：拆分产物子目录（chat / settin
     }
   })
 
-  it('chat/**（map-canvas 对话壳）不得 import console-ui 的 *Page', () => {
+  it('chat/** 不得 import console-ui 的 *Page', () => {
     const rePage = /from ['"](?:@\/components\/[A-Za-z]*Page|(?:\.\.\/)+[A-Za-z]*Page)['"]/
     for (const rel of SUBDIR_FILES.chat) {
       expect(read(`src/components/${rel}`), `${rel} import console-ui *Page`).not.toMatch(rePage)

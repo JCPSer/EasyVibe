@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { PanelTab } from '@/components/DetailPanel'
+import type { PanelTab } from '@/shared/contract/selection'
 
 /**
  * 右栏页签与拖拽调宽（画布私有编排）。

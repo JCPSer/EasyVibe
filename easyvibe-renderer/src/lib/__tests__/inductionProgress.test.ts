@@ -6,7 +6,7 @@ import {
   inductionPhaseLabel,
   interpretInductionProgress,
   type InductionProgress,
-} from '@/lib/inductionProgress'
+} from '@/shared/logic/inductionProgress'
 
 const prog = (over: Partial<InductionProgress> = {}): InductionProgress => ({
   phase: 'scanning',

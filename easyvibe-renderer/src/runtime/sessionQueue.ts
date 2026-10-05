@@ -1,4 +1,4 @@
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 
 // 会话排队入队 helper（运行会话气泡 + 单会话排队，2026-10-04）：
 // 409（单会话纪律）的各入口统一走这里——POST /repos/{id}/session-queue 一次原子裁决：

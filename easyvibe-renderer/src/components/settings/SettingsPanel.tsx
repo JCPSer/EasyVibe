@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, X } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { SECTIONS, SLOTS, type SectionId, type Service } from './settings/common'
-import { AgentSection } from './settings/AgentSection'
-import { ServicesSection } from './settings/ServicesSection'
-import { HarnessSection } from './settings/HarnessSection'
-import { AdvancedSection } from './settings/AdvancedSection'
-import { AboutSection } from './settings/AboutSection'
+import { toast } from '@/runtime/toast'
+import { SECTIONS, SLOTS, type SectionId, type Service } from './common'
+import { AgentSection } from './AgentSection'
+import { ServicesSection } from './ServicesSection'
+import { HarnessSection } from './HarnessSection'
+import { AdvancedSection } from './AdvancedSection'
+import { AboutSection } from './AboutSection'
 
 interface Props {
   backendRepo: string | null

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { onTaskEvent } from '@/lib/growthBus'
+import { onTaskEvent } from '@/runtime/growthBus'
 
 export type Attention = { count: number; sample: string } | null
 

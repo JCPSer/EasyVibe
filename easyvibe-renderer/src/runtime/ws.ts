@@ -2,10 +2,10 @@
 // 10 类事件名 → growthBus 分发 / onclose 断线通知。
 // 与 growthBus（进程内分发层，13 个页面消费）分离：本文件只负责网络与协议翻译。
 // 闭包陷阱对策：所有时变值经回调/ref 注入，不捕获调用方 state 快照（沿用既有 serverVersionRef 口径）。
-import { dismissToast, toast } from '@/lib/toast'
-import { track } from '@/lib/analytics'
-import { sysNotify } from '@/lib/notify'
-import { pushTerminalLine } from '@/lib/terminalBuffer'
+import { dismissToast, toast } from '@/runtime/toast'
+import { track } from '@/runtime/analytics'
+import { sysNotify } from '@/runtime/notify'
+import { pushTerminalLine } from '@/runtime/terminalBuffer'
 import {
   emitFreshnessEvent,
   emitGrowthEvent,
@@ -15,7 +15,7 @@ import {
   emitSessionOutput,
   emitTaskEvent,
   notifyWsClosed,
-} from '@/lib/growthBus'
+} from '@/runtime/growthBus'
 
 export type ConnectWsOptions = {
   /** 当前仓库（ref 读取，规避 onopen/onmessage 闭包读初值） */

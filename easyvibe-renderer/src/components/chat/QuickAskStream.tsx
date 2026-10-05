@@ -2,9 +2,9 @@
 // 拆自 QuickAsk.tsx（2026-10-05 防膨胀）。
 import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, AtSign, BookmarkPlus, Check, Copy, Crosshair, Loader2, MessagesSquare } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { AnswerCards } from '@/components/AnswerCards'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { toast } from '@/runtime/toast'
+import { AnswerCards } from '@/components/chat/AnswerCards'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 import { GATE_LABEL, type ChatMessage, type Clarify, type PendingApproval } from './types'
 import type { CodeMap } from '@/types/map'
 

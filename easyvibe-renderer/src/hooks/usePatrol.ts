@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
-import { toast } from '@/lib/toast'
-import { enqueue } from '@/lib/sessionQueue'
+import { toast } from '@/runtime/toast'
+import { enqueue } from '@/runtime/sessionQueue'
 
 /** 巡检触发（M4-1 从 Canvas 上移：顶栏"巡检"按钮由壳层持有） */
 export function usePatrol(backendRepo: string | null) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SubMap } from '@/types/map'
-import { enqueue } from '@/lib/sessionQueue'
-import { onQueueChanged, onSessionEvent, onSessionOutput as onSessionOutputListener } from '@/lib/growthBus'
+import { enqueue } from '@/runtime/sessionQueue'
+import { onQueueChanged, onSessionEvent, onSessionOutput as onSessionOutputListener } from '@/runtime/growthBus'
 
 /**
  * 子图（模块内部结构）分析域：懒加载 / 深入分析 / 诚实三态错误 / agent 输出直播缓冲。

@@ -2,7 +2,7 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useEffect, useRef, useState } from 'react'
 import { Terminal, Unplug } from 'lucide-react'
-import { terminalLines } from '@/lib/terminalBuffer'
+import { terminalLines } from '@/runtime/terminalBuffer'
 import { taskDuration } from '../diffParse'
 import type { TaskItem } from '../types'
 

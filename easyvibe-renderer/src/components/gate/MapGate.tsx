@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Play, RotateCcw } from 'lucide-react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import { InductionWaiting } from './InductionWaiting'
 
 // P0 审查前端#1：地图加载守门员——区分三种真实状态，消灭"出错也转圈"死锁：

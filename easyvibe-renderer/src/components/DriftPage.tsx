@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, Coins, RefreshCw } from 'lucide-react'
-import { onFreshnessEvent } from '@/lib/growthBus'
-import { useRepoActivityMap } from '@/lib/useRepoActivity'
-import { relTime } from '@/lib/diffStat'
-import { toast } from '@/lib/toast'
+import { onFreshnessEvent } from '@/runtime/growthBus'
+import { useRepoActivityMap } from '@/runtime/useRepoActivity'
+import { relTime } from '@/shared/logic/diffStat'
+import { toast } from '@/runtime/toast'
 
 // M4-3 漂移洞察整页（按 ui-mockups/漂移洞察原型.png 施工）：
 // 跨仓库的保鲜仪表盘——KPI（需重归纳/平均落后提交/最近巡检）+ 仓库漂移排名

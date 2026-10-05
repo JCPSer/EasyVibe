@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { FileCode2 } from 'lucide-react'
 import type { Module } from '@/types/map'
-import { healthColor, healthLabel, NODE_W, NODE_H } from '@/lib/layout'
+import { healthColor, healthLabel, NODE_W, NODE_H } from '@/shared/logic/layout'
 // M4-1 真人测试 Bug#4：decay_flags 是内部英文 id，直接渲染用户看不懂——统一中文标签
 const FLAG_LABEL: Record<string, string> = {
   god_module: '上帝模块',

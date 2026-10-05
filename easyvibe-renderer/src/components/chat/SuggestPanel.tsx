@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { Loader2, Wrench, RefreshCw, Lightbulb } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import type { Suggestion } from '@/lib/taskContext'
-import { buildSuggestionTask, type TaskDraft } from '@/lib/taskContext'
+import type { Suggestion } from '@/shared/logic/taskContext'
+import { buildSuggestionTask, type TaskDraft } from '@/shared/logic/taskContext'
 
 interface Props {
   backendRepo: string | null

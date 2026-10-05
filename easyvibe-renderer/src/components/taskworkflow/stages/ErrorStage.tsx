@@ -1,9 +1,9 @@
 // 未启动/终态灰态：error + 重试/复制入口 + 删除 + 修改并复审。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { Copy, Hammer, XCircle } from 'lucide-react'
-import { toast } from '@/lib/toast'
-import { TaskAdminButtons } from '@/components/TaskAdminButtons'
-import type { TaskDraft } from '@/lib/taskContext'
+import { toast } from '@/runtime/toast'
+import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 import { STATUS_LABEL, type TaskItem } from '../types'
 
 export function ErrorStage({ sel, backendRepo, onCreateTask, onReload, onClearedSelection }: {

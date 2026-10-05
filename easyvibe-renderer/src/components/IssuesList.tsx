@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { toast } from '@/lib/toast'
+import { toast } from '@/runtime/toast'
 import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Loader2, Wrench, Zap } from 'lucide-react'
-import { buildConcernTask, type TaskDraft } from '@/lib/taskContext'
+import { buildConcernTask, type TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap, Concern, Module } from '@/types/map'
-import { healthColor, dependentsOf } from '@/lib/layout'
+import { healthColor, dependentsOf } from '@/shared/logic/layout'
 import { Badge } from '@/components/ui/badge'
 
 export interface Issue {

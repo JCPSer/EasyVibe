@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PageId } from '@/components/AppShell'
-import { toast } from '@/lib/toast'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { toast } from '@/runtime/toast'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 import { loadOnboarding, markCheck, completeAll, CHECK_KEYS } from '@/lib/onboarding'
 
 /**

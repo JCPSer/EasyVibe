@@ -12,10 +12,10 @@ import {
   Flame,
 } from 'lucide-react'
 import type { CodeMap, MapEdge } from '@/types/map'
-import { healthColor } from '@/lib/layout'
-import { buildModuleTask, type TaskDraft } from '@/lib/taskContext'
-import type { ChatAboutTarget } from '@/components/DetailPanel'
-import { couplingAnalysis, buildDepCards, type CouplingAnalysis, type DepCard } from '@/lib/depsAnalysis'
+import { healthColor } from '@/shared/logic/layout'
+import { buildModuleTask, type TaskDraft } from '@/shared/logic/taskContext'
+import type { ChatAboutTarget } from '@/shared/contract/chat'
+import { couplingAnalysis, buildDepCards, type CouplingAnalysis, type DepCard } from '@/shared/logic/depsAnalysis'
 import { Select } from '@/components/ui/SelectMenu'
 
 // 依赖体检全页（docs/dependency-feature-design-v2.md 施工）：

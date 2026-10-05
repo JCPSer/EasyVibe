@@ -1,4 +1,4 @@
-import type { TaskDraft } from '@/lib/taskContext'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // S1 对话升级任务的纯逻辑（QuickAsk 与旧 ChatPanel 同一契约的共享实现）：
 // 最近用户问句 + 近 6 轮问答摘要 + 引用模块（去重，≤5）→ TaskDraft（表单可再编辑）

@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import { SuggestPanel } from '@/components/SuggestPanel'
-import type { TaskDraft } from '@/lib/taskContext'
+import { SuggestPanel } from '@/components/chat/SuggestPanel'
+import type { TaskDraft } from '@/shared/logic/taskContext'
 
 /** 顶栏抽屉：智能优化建议（逐条可发起修复） */
 export function SuggestDrawer({

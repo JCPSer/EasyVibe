@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodeMap } from '@/types/map'
-import { toast } from '@/lib/toast'
-import { enqueue } from '@/lib/sessionQueue'
-import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
-import { onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, setWsCloseListener } from '@/lib/growthBus'
+import { toast } from '@/runtime/toast'
+import { enqueue } from '@/runtime/sessionQueue'
+import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/shared/logic/growthMerge'
+import { onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, setWsCloseListener } from '@/runtime/growthBus'
 import type { GrowthState } from './types'
 
 /**

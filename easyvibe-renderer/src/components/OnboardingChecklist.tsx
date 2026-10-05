@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { CheckCircle2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { CheckKey, OnboardingState } from '@/lib/onboarding'
 import { CHECK_KEYS, checkDoneCount } from '@/lib/onboarding'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 
 /** 事件驱动上手指引（调研定稿方案③：Linear 式 checklist）。
  *  完成态由 App 层的真实事件写入（markCheck），本组件纯展示 + 折叠/关闭。
