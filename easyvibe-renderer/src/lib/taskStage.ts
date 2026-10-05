@@ -11,7 +11,7 @@ export function stageOf(status: string, gate: string | null | undefined): TaskSt
     case 'awaiting_approval':
       // failed 可能残留 gate=diff——status 优先已挡在上面；这里只认活动审批态
       if (gate === 'plan' || gate === 'analysis') return 0 // ①需求分析（任务书批准 / 矩阵评审）
-      if (gate === 'solution') return 1 // ②需求方案（方案评审）
+      if (gate === 'solution') return 1 // ②方案设计（方案评审）
       if (gate === 'diff') return 3
       if (gate === 'report') return 4
       return 'error' // 未知 gate 兜底灰态，不制造假阶段
@@ -49,7 +49,7 @@ export function gateLabel(status: string, gate: string | null | undefined): stri
 
 export const STAGES = [
   { key: 'analysis', label: '需求分析', hint: '需求矩阵 · 需评审' },
-  { key: 'solution', label: '需求方案', hint: '方案文档 · 需评审' },
+  { key: 'solution', label: '方案设计', hint: '方案文档 · 需评审' },
   { key: 'implement', label: '实施', hint: '实时执行' },
   { key: 'review', label: '代码审查', hint: 'Diff 审批' },
   { key: 'archive', label: '归档', hint: '审查报告 · STAR 记忆' },

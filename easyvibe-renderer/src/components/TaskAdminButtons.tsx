@@ -95,7 +95,7 @@ export function TaskAdminButtons({
         <button
           onClick={() => void run('remediate')}
           disabled={busy}
-          title="修改并复审：注入子 agent 审查意见，直达实施阶段重跑，完成后自动复审"
+          title="修改并复审：注入打回/审查意见，直达实施阶段重跑，完成后自动复审"
           className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-violet-50 hover:text-violet-600 disabled:opacity-40"
         >
           <Hammer size={11} />

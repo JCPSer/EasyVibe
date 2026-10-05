@@ -909,7 +909,8 @@ export function TaskWorkflowPage({
                     </div>
                     </div>
                     {/* 2026-10-03 实弹 bug：Diff 关此前没有裁决按钮——任务卡死在代码审查关无法推进。
-                        通过 = 进审查报告关（终审），打回 = 终止返工（复制为新任务或修改复审） */}
+                        2026-10-05 打回语义修订：通过 = 进审查报告关（终审）；
+                        打回 = 带意见原地重跑实施（完成后子 agent 自动复审，回到本关再审，可循环）。 */}
                     <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-2.5">
                       {rejecting ? (
                         <div className="space-y-1.5">
@@ -918,7 +919,7 @@ export function TaskWorkflowPage({
                             value={rejectNote}
                             onChange={(e) => setRejectNote(e.target.value)}
                             rows={2}
-                            placeholder="打回意见（必填）——将作为新任务的上下文"
+                            placeholder="打回意见（必填）——agent 带意见重跑实施，完成后自动复审"
                             className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                           />
                           <div className="flex gap-2">
@@ -1018,7 +1019,7 @@ export function TaskWorkflowPage({
                           value={rejectNote}
                           onChange={(e) => setRejectNote(e.target.value)}
                           rows={3}
-                          placeholder="打回意见（必填）"
+                          placeholder="打回意见（必填）——agent 带意见重跑实施，完成后自动复审"
                           className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
                         />
                         <div className="flex gap-2">

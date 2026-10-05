@@ -10,7 +10,7 @@ describe('stageOf', () => {
     expect(stageOf('awaiting_approval', 'analysis')).toBe(0)
   })
 
-  it('方案评审属②需求方案', () => {
+  it('方案评审属②方案设计', () => {
     expect(stageOf('awaiting_approval', 'solution')).toBe(1)
   })
 

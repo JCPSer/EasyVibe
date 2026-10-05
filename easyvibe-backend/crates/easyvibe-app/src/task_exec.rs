@@ -163,7 +163,9 @@ impl TaskExecutor {
         }
     }
 
-    /// 审批决策（路由层调用）：approved 按关卡推进，rejected 终止；返回最新任务行。
+    /// 审批决策（路由层调用）：approved 按关卡推进；rejected 分两路——
+    /// plan 关（任务书）驳回=终态（返工走复制为新任务），其余评审关（analysis/solution/diff/report）
+    /// 驳回=带意见原地重跑本阶段（2026-10-05 用户裁定：与需求分析/方案设计同一打回机制，覆盖代码审查）。
     /// M4-2：驳回必须给理由（审批中心定稿），空理由 400。
     /// expected_gate：调用方所见关卡（N27 防双击穿透）；None 回退服务端当前关卡。
     pub async fn decide(self: &Arc<Self>, task_id: &str, decision: &str, note: Option<&str>, expected_gate: Option<&str>) -> Result<easyvibe_db::TaskRow, ApiError> {
@@ -180,7 +182,7 @@ impl TaskExecutor {
         let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
         if task.status != "awaiting_approval" {
             return Err(ApiError::Conflict(format!(
-                "任务当前状态 {} 不可审批（仅 awaiting_approval 可 decide——驳回返工请复制为新任务）",
+                "任务当前状态 {} 不可审批（仅 awaiting_approval 可 decide——打回由评审关裁决，终态任务请重试/修改复审/复制为新任务）",
                 task.status
             )));
         }
@@ -191,8 +193,25 @@ impl TaskExecutor {
         // 分阶段执行（2026-10-03 用户裁定）：manual 批准后不再一口气跑完——
         // plan → 阶段1 需求矩阵（p:analysis）→ 评审 → 阶段2 方案（p:solution）→ 评审 → 阶段3 实施。
         // 需求矩阵/方案设计在实施前必须经用户评审（rule_development 2.1/2.2 硬规定）。
+        // 2026-10-05 用户裁定：评审关打回 = 带意见原地重跑本阶段（覆盖 analysis/solution/diff/report），
+        // 不再落终态 rejected——代码审查发现问题与矩阵/方案打回同一处置：意见注入 context.remediation，
+        // 重跑完成后照旧走后续链（阶段1/2 → 初审 → 评审关；阶段3 → 采集 → 子 agent 复审 → diff 关）。
+        let rework_phase: Option<u8> = match (decision, gate.as_str()) {
+            ("rejected", "analysis") => Some(1),
+            ("rejected", "solution") => Some(2),
+            ("rejected", "diff") | ("rejected", "report") => Some(3),
+            _ => None,
+        };
         let (new_gate, new_status) = match (decision, gate.as_str()) {
-            ("rejected", _) => (Some("rejected"), Some("rejected")),
+            ("rejected", "plan") => (Some("rejected"), Some("rejected")),
+            ("rejected", _) => (
+                Some(match rework_phase {
+                    Some(1) => "p:analysis",
+                    Some(2) => "p:solution",
+                    _ => "p:implement",
+                }),
+                Some("running"),
+            ),
             (_, "plan") => (Some("p:analysis"), Some("running")),
             (_, "analysis") => (Some("p:solution"), Some("running")),
             (_, "solution") => (Some("p:implement"), Some("running")),
@@ -205,7 +224,20 @@ impl TaskExecutor {
             return Err(ApiError::Conflict("该任务刚被并发审批或状态已变化，请刷新后重试".into()));
         }
         self.record_approval(&task.id, &gate, if decision == "rejected" { "rejected" } else { "approved" }, note).await;
-        if decision != "rejected" {
+        if let Some(phase) = rework_phase {
+            // 打回闭环：意见入库 + 带新上下文重跑本阶段。
+            // spawn 用内存行装配 prompt——必须改到 task.context 再 spawn，否则打回意见丢失。
+            let feedback = note.map(str::trim).unwrap_or_default().to_string();
+            let instruction = match phase {
+                1 => "上一轮需求矩阵经评审打回。逐条处理打回意见后重做需求矩阵（覆盖度/可测性/无歧义）；除产物文档外禁止修改任何文件。",
+                2 => "上一轮方案设计经评审打回。逐条处理打回意见后重做方案设计（对齐需求矩阵/可行性/风险验证）；除产物文档外禁止修改任何文件。",
+                _ => "上一轮实施经评审打回。先修复打回意见指出的问题，再做一轮完整自检；禁止无关改动（打回意见外的文件不要碰）。",
+            };
+            let mut task = task;
+            task.context = inject_remediation(&task.context, &feedback, instruction);
+            self.task_repo.set_context(&task.id, &task.context).await?;
+            self.clone().spawn_and_watch(task, phase).await;
+        } else if decision != "rejected" {
             let phase = match gate.as_str() {
                 "plan" => 1u8,
                 "analysis" => 2,
@@ -273,18 +305,17 @@ impl TaskExecutor {
             .flatten()
             .unwrap_or_else(|| "（无审查意见留痕——按 error 字段修复后重新提交）".into());
         // 注入 remediation 反馈（保留既有 context 键）
-        let mut ctx: serde_json::Value = serde_json::from_str(&task.context).unwrap_or_else(|_| serde_json::json!({}));
-        let round = ctx["remediation"]["round"].as_u64().unwrap_or(0) + 1;
-        ctx["remediation"] = serde_json::json!({
-            "round": round,
-            "review_feedback": note.trim(),
-            "instruction": "上一轮实施经子 agent 审查未通过。先修复反馈问题，再做一轮完整自检；禁止无关改动（审查意见外的文件不要碰）。",
-        });
+        let ctx = inject_remediation(
+            &task.context,
+            note.trim(),
+            "上一轮实施经子 agent 审查未通过。先修复反馈问题，再做一轮完整自检；禁止无关改动（审查意见外的文件不要碰）。",
+        );
+        let round = serde_json::from_str::<serde_json::Value>(&ctx).unwrap_or_default()["remediation"]["round"].as_u64().unwrap_or(1);
         let n = self.task_repo.reset_for_remediate(task_id).await?;
         if n == 0 {
             return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
         }
-        self.task_repo.set_context(task_id, &serde_json::to_string(&ctx).unwrap_or_else(|_| "{}".into())).await?;
+        self.task_repo.set_context(task_id, &ctx).await?;
         self.publish_status(&task.repo, task_id, "running", Some("p:implement")).await;
         info!("[task-exec] 任务 {} 进入修改并复审（第 {} 轮）: {}", task_id, round, note.trim());
         // 直达实施阶段（复用分阶段 prompt 装配；矩阵/方案已在 context 与 dev-docs 中）。
@@ -630,6 +661,32 @@ impl TaskExecutor {
     }
 }
 
+/// 打回反馈注入 context.remediation（decide 打回与 remediate 复审共用）：
+/// round 在既有值上累加，review_feedback/instruction 整段替换——新一轮打回覆盖上一轮。
+/// 返回新的 context JSON 字符串（保留既有其他键）。
+fn inject_remediation(context_json: &str, feedback: &str, instruction: &str) -> String {
+    let mut ctx: serde_json::Value = serde_json::from_str(context_json).unwrap_or_else(|_| serde_json::json!({}));
+    let round = ctx["remediation"]["round"].as_u64().unwrap_or(0) + 1;
+    ctx["remediation"] = serde_json::json!({
+        "round": round,
+        "review_feedback": feedback,
+        "instruction": instruction,
+    });
+    serde_json::to_string(&ctx).unwrap_or_else(|_| "{}".into())
+}
+
+/// 打回反馈展示段：context.remediation 存在时拼进阶段 prompt（重跑带着意见做），否则空串。
+fn remediation_section(context_json: &str) -> String {
+    let ctx: serde_json::Value = serde_json::from_str(context_json).unwrap_or_else(|_| serde_json::json!({}));
+    match (ctx["remediation"]["round"].as_u64(), ctx["remediation"]["review_feedback"].as_str()) {
+        (Some(round), Some(fb)) if !fb.is_empty() => format!(
+            "\n## 打回反馈（第 {round} 轮）\n{fb}\n\n处置要求：{}\n",
+            ctx["remediation"]["instruction"].as_str().unwrap_or("")
+        ),
+        _ => String::new(),
+    }
+}
+
 /// 阶段 1 prompt：只产出需求矩阵，禁改代码（rule_development 2.1）。
 /// 产出后由用户在 analysis 关评审——评审通过才进阶段 2。
 fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
@@ -641,7 +698,7 @@ fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
 - 需求描述：{description}
 - 影响模块：{modules}
 - 验收标准：{acceptance}
-
+{feedback}
 ## 要求
 1. 研读仓库代码与 .easyvibe/map/map.json，将需求拆解为需求矩阵（背景、目标、描述、优先级、难度、风险）。
 2. 需求矩阵写入 .easyvibe/development_docs/{user}/1_requirements_matrix/<yyyy-MM-dd-hh-mm>-<brief>.md，
@@ -652,10 +709,10 @@ fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
+        feedback = remediation_section(&task.context),
         user = user,
     )
 }
-
 /// 阶段 2 prompt：只产出方案设计，禁改代码（rule_development 2.2）。
 /// 基于已评审通过的需求矩阵；产出后由用户在 solution 关评审——通过才进阶段 3 实施。
 fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
@@ -670,7 +727,7 @@ fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
 
 ## 输入
 - 已评审通过的需求矩阵：.easyvibe/development_docs/{user}/1_requirements_matrix/ 下最新文档（先读它）
-
+{feedback}
 ## 要求
 1. 针对需求矩阵中的每个子需求进行方案设计：背景、目标、描述、详细方案设计。
 2. 方案用伪代码或流程图表述，**禁止大段真实代码**（保证方案可读性）。
@@ -683,6 +740,7 @@ fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
+        feedback = remediation_section(&task.context),
         user = user,
     )
 }

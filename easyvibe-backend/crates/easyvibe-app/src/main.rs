@@ -4094,6 +4094,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_reject_at_analysis_gate_reworks_phase_with_feedback() {
+        // 2026-10-05 打回闭环（用户裁定：评审关不通过=带意见原地重跑本阶段，
+        // 与需求分析/方案设计同一机制，覆盖代码审查 diff/report 关）：
+        // analysis 关打回 → running+p:analysis + remediation 注入 → 重跑完成 → 回到 analysis 关可再审。
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("task-rework").await;
+        let app = build_router(state.clone());
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "title": "矩阵打回", "description": "做一个东西", "trust": "manual" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let tid = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string();
+
+        // 批准计划关 → 阶段1 跑完（agent "true" 秒退，初审不可用不阻断）→ 停 analysis 关
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/decide"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "decision": "approved", "note": "开工", "gate": "plan" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let mut t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        for _ in 0..40 {
+            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("analysis") { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "awaiting_approval", "阶段1 应停在 analysis 评审关");
+        assert_eq!(t.gate.as_deref(), Some("analysis"));
+
+        // 打回（带意见）→ 不是终态，而是带意见重跑阶段1
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/decide"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "decision": "rejected", "note": "验收标准缺边界用例", "gate": "analysis" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "评审关打回应成功");
+        let t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        assert_eq!(t.status, "running", "打回=原地重跑，不落终态 rejected");
+        assert_eq!(t.gate.as_deref(), Some("p:analysis"), "重跑阶段1");
+        let ctx: serde_json::Value = serde_json::from_str(&t.context).unwrap();
+        assert_eq!(ctx["remediation"]["round"], 1, "打回轮次记录");
+        assert!(ctx["remediation"]["review_feedback"].as_str().unwrap().contains("边界用例"), "打回意见必须注入 context");
+
+        // 重跑完成 → 回到 analysis 关等再审（闭环可循环）
+        let mut t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        for _ in 0..40 {
+            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("analysis") { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "awaiting_approval", "重跑后应回到 analysis 评审关");
+        assert_eq!(t.gate.as_deref(), Some("analysis"));
+        // 留痕：审批轨迹里可看到打回记录（评审轮回的证据）
+        let aps = state.approval_repo.list_by_task(&tid).await.unwrap();
+        assert!(
+            aps.iter().any(|a| a.gate == "analysis" && a.decision == "rejected" && a.note.as_deref().unwrap_or("").contains("边界用例")),
+            "打回必须留痕，实际: {:?}",
+            aps.iter().map(|a| (a.gate.clone(), a.decision.clone())).collect::<Vec<_>>()
+        );
+    }
+
+
+    #[tokio::test]
     async fn agent_status_detect_test_endpoints() {
         // M1 端点：status 形状 / test 协议判定（echo 兼容 / false 非 0 退出不兼容）
         use easyvibe_db::SettingsRepository as _;
