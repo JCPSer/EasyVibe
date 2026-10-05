@@ -1,0 +1,9 @@
+#!/bin/sh
+# codesign 包装：系统代理（Clash）对 Apple 时间戳服务器返回 502——本地构建禁用时间戳。
+# 发布公证版本时需恢复时间戳（先解决代理白名单）。
+for arg in "$@"; do
+  case "$arg" in
+    --timestamp*) exec /usr/bin/codesign "$@" ;;
+  esac
+done
+exec /usr/bin/codesign --timestamp=none "$@"
