@@ -73,7 +73,8 @@ async fn cfg(settings: &easyvibe_db::SqliteSettingsRepository, key: &str) -> Opt
         .await
         .ok()
         .flatten()
-        .map(|r| r.value)
+        // The settings API stores strings as JSON; older direct writes may be raw.
+        .map(|r| serde_json::from_str::<String>(&r.value).unwrap_or(r.value))
         .filter(|v| !v.trim().is_empty())
 }
 
@@ -476,6 +477,27 @@ mod tests {
         let env = resolve_agent(&s, None, "C:\\tools\\codex.exe", &[]).await;
         assert_eq!(env.preset, "codex");
         assert_eq!(env.agent_type, "codex");
+    }
+
+    #[tokio::test]
+    async fn resolve_json_encoded_settings_from_api() {
+        let s = mem_settings().await;
+        set(&s, "agent.preset", r#""codex""#).await;
+        let r = resolve_agent(&s, None, "claude", &default_args_for_command("claude")).await;
+        assert_eq!(r.preset, "codex");
+        assert_eq!(command_preset(&r.command).unwrap().id, "codex");
+        assert_eq!(r.agent_type, "codex");
+        assert_eq!(r.args, default_args_for_command("codex"));
+
+        set(&s, "agent.command", &serde_json::to_string("C:\\tools\\codex.exe").unwrap()).await;
+        set(&s, "agent.type", r#""codex""#).await;
+        set(&s, "agent.args.global", r#"["exec","--json","--sandbox","read-only"]"#).await;
+        let r = resolve_agent(&s, None, "claude", &[]).await;
+        assert_eq!(r.command, "C:\\tools\\codex.exe");
+        assert_eq!(r.agent_type, "codex");
+        assert_eq!(r.args, ["exec", "--json", "--sandbox", "read-only"]);
+        set(&s, "agent.command", r#""""#).await;
+        assert_eq!(cfg(&s, "agent.command").await, None);
     }
 
     #[test]

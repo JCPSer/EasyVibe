@@ -1624,15 +1624,12 @@ async fn agent_status_json(st: &AppState, detected: Vec<agent_conf::DetectedAgen
     let found = std::path::Path::new(&resolved.command).is_file();
     let preset = cfg_get(st, "agent.preset").await.unwrap_or(serde_json::Value::String("claude".into()));
     let configured_args = cfg_get(st, "agent.args.global").await
-        .and_then(|v| v.as_str().map(str::to_string))
-        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+        .filter(serde_json::Value::is_array);
     // 槽位参数（整体替换语义）——配置原样回显给设置面板
     let args_task = cfg_get(st, "agent.args.task").await
-        .and_then(|v| v.as_str().map(str::to_string))
-        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+        .filter(serde_json::Value::is_array);
     let args_review = cfg_get(st, "agent.args.review").await
-        .and_then(|v| v.as_str().map(str::to_string))
-        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+        .filter(serde_json::Value::is_array);
     let test = st.agent_test.read().await.clone();
     let protocol_ok = test.as_ref().map(|t| t.ok);
     Json(serde_json::json!({
@@ -1668,7 +1665,9 @@ async fn agent_status_json(st: &AppState, detected: Vec<agent_conf::DetectedAgen
 /// 读取一条 agent 相关设置（响应体组装用）
 async fn cfg_get(st: &AppState, key: &str) -> Option<serde_json::Value> {
     use easyvibe_db::SettingsRepository as _;
-    st.settings_repo.get("global", key).await.ok().flatten().map(|r| serde_json::Value::String(r.value))
+    st.settings_repo.get("global", key).await.ok().flatten().map(|r| {
+        serde_json::from_str(&r.value).unwrap_or(serde_json::Value::String(r.value))
+    })
 }
 
 /// 智能优化建议：AI 主动发现优化机会（Stub=确定性派生；LLM=地图注入生成），
@@ -4092,6 +4091,37 @@ mod tests {
             t = state.task_repo.get(&tid).await.unwrap().unwrap();
         }
         assert_ne!(t.gate.as_deref(), Some("p:implement"), "复审应跑完实施阶段");
+    }
+
+    #[tokio::test]
+    async fn agent_settings_api_round_trip() {
+        let (state, _repo) = chat_state("agent-settings-json").await;
+        let app = build_router(state);
+        let command = "C:\\tools\\codex.exe";
+        let args = serde_json::json!(["exec", "--json", "--sandbox", "workspace-write"]);
+        for (key, value) in [
+            ("agent.preset", serde_json::json!("codex")),
+            ("agent.command", serde_json::json!(command)),
+            ("agent.args.global", args.clone()),
+        ] {
+            let request = axum::http::Request::put("/api/settings/set")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({
+                    "scope": "global", "key": key, "value": value,
+                }).to_string())).unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+        }
+        let response = app.oneshot(axum::http::Request::get("/api/agent/status")
+            .body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status["data"]["configured"]["preset"], "codex");
+        assert_eq!(status["data"]["configured"]["command"], command);
+        assert_eq!(status["data"]["configured"]["args"], args);
+        assert_eq!(status["data"]["effective"]["command"], command);
+        assert_eq!(status["data"]["effective"]["args"], args);
+        assert_eq!(status["data"]["effective"]["type"], "codex");
     }
 
     #[tokio::test]
