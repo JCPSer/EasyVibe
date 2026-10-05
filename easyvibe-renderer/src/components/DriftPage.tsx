@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, Coins, RefreshCw } from 'lucide-react'
 import { onFreshnessEvent } from '@/lib/growthBus'
+import { useRepoActivityMap } from '@/lib/useRepoActivity'
 import { relTime } from '@/lib/diffStat'
 import { toast } from '@/lib/toast'
 
@@ -58,6 +59,9 @@ export function DriftPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const tableRef = useRef<HTMLDivElement | null>(null) // 重审 P2：横幅"查看详情"滚动到排名表
   const [now] = useState(() => Date.now()) // 渲染期纯度：漂移百分比以进入页面时刻为锚
+  // 跨页共享"归纳进行中"（19:29 实弹：本页发起的归纳只存于行内态，按钮随后恢复可点，
+  // 用户在地图头部再点一次 → 重复入队）：活动会话/排队以 sessions/overview 为准
+  const activityMap = useRepoActivityMap()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -235,13 +239,19 @@ export function DriftPage() {
                     </div>
                   </td>
                   <td className="px-3 py-3 text-right">
-                    <button
-                      onClick={() => reinduce(r.repo.id)}
-                      disabled={r.reinducing}
-                      className="rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
-                    >
-                      {r.reinducing ? '归纳中…' : '重新归纳'}
-                    </button>
+                    {(() => {
+                      const act = activityMap.get(r.repo.id)
+                      const busy = r.reinducing || act?.inducing || act?.reinduceQueued
+                      return (
+                        <button
+                          onClick={() => reinduce(r.repo.id)}
+                          disabled={busy}
+                          className="rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                        >
+                          {act?.reinduceQueued ? '排队中…' : r.reinducing || act?.inducing ? '归纳中…' : '重新归纳'}
+                        </button>
+                      )
+                    })()}
                   </td>
                 </tr>
               )

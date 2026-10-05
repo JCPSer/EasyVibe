@@ -19,6 +19,8 @@ import { MAX_EXPANDED, type Filters } from './types'
 import { useCanvasPanelDrag } from './useCanvasPanelDrag'
 import { useSubmaps } from './useSubmaps'
 import { useGrowthPlayback } from './useGrowthPlayback'
+import { useRepoActivity } from '@/lib/useRepoActivity'
+import { toast } from '@/lib/toast'
 
 export function Canvas({
   map,
@@ -102,6 +104,17 @@ export function Canvas({
     onPatrollingChange,
     onPlaybackStart,
   })
+  // 跨页共享"归纳进行中"（19:29 实弹：漂移洞察发起的归纳，本页 inducing 仍为 false，
+  // chip 的立即归纳可再点 → 重复入队）。任何来源的归纳活动会话/排队都计入。
+  const shared = useRepoActivity(backendRepo)
+  const inducingAny = inducing || shared.inducing
+  const guardReinduce = useCallback(() => {
+    if (inducingAny || shared.reinduceQueued) {
+      toast(shared.reinduceQueued ? '归纳已排队：当前会话结束后自动接续' : '归纳进行中，无需重复发起', 'info')
+      return
+    }
+    startReinduce()
+  }, [inducingAny, shared.reinduceQueued, startReinduce])
 
   // 2026-10-04 实弹「渲染问题」修复：切仓库必须清掉上一仓库的画布状态——selection 是
   // keep-alive 的，旧仓库的模块 id 在新地图里不存在，nodeDim 的 neighborhood 判定会把
@@ -311,11 +324,11 @@ export function Canvas({
                 moduleName={selModule.name}
                 expanded={expandedIds.includes(selModule.id)}
                 backendActive={!!backendRepo}
-                inducing={inducing}
+                inducing={inducingAny}
                 solo={filters.solo}
                 onToggleExpand={() => toggleExpand(selModule.id)}
                 onToggleSolo={() => toggleFilter('solo')}
-                onReinduce={startReinduce}
+                onReinduce={guardReinduce}
                 onChat={onChatAbout ? () => onChatAbout({ refId: selModule.id, refName: selModule.name, kind: 'module' }) : undefined}
               />
             </Panel>
@@ -466,9 +479,9 @@ export function Canvas({
                     <AlertTriangle size={9} />
                     地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
                     {/* 2026-10-04 实弹：只摆问题不给出路是死胡同——drifting/stale 两档都挂行动按钮 */}
-                    {backendRepo && !inducing && (
+                    {backendRepo && !inducingAny && !shared.reinduceQueued && (
                       <button
-                        onClick={startReinduce}
+                        onClick={guardReinduce}
                         className="ml-0.5 flex items-center gap-0.5 rounded-full bg-white/80 dark:bg-slate-800/80 px-1.5 py-px text-micro font-bold text-red-600 dark:text-amber-300 shadow-sm transition-colors hover:bg-white dark:hover:bg-slate-700"
                         title="立即重新归纳：agent 按 v2.2 协议重跑，全程直播"
                       >
@@ -477,10 +490,10 @@ export function Canvas({
                     )}
                   </span>
                 )}
-                {inducing && (
+                {inducingAny && (
                   <span className="flex items-center gap-1 font-semibold text-amber-600">
                     <RefreshCw size={10} className="animate-spin" />
-                    归纳中…
+                    {shared.reinduceQueued ? '归纳排队中…' : '归纳中…'}
                   </span>
                 )}
               </div>

@@ -88,8 +88,13 @@ pub struct Harness {
     pub framework_transparent: String,
     /// user_entry 插槽 skill 正文（供对话 prompt；透明 agent 永不注入）
     pub user_entry_skills: Vec<String>,
-    /// 自定义层（harness-custom/）：仅启用的槽有内容
+    /// 自定义层（harness-custom/）：仅启用的槽有内容——**原始文本**，仅供入口对话（user_entry）使用
     pub custom: HarnessCustom,
+    /// 自定义层的透明中和副本：按 manifest.transparent_neutralize 逐行中和后的内容。
+    /// 透明注入点（任务/审查/归纳/巡检/子图/auto-init）必须用这个——否则用户补充里
+    /// 的"拷问/向用户提问"类指令会漏进透明 agent（2026-10-05 实弹：迁移播种的旧框架
+    /// 文本含 grill-me 拷问指令，巡检 agent 被带跑成"拷问用户"）
+    pub custom_neutral: HarnessCustom,
     /// 出厂规则正文内嵌副本（审查 prompt 直接内嵌，agent 不再 cat 磁盘文件——
     /// 用户裁定 17:58：任何方式不动原 harness，磁盘参考副本被改也不影响审查行为）
     pub rule_development: String,
@@ -232,12 +237,14 @@ pub(crate) fn assemble_from_builtin(dir: &std::path::Path, custom_dir: &std::pat
         user_entry_skills.push(content.to_string());
     }
     let custom = load_custom(custom_dir);
+    let custom_neutral = neutralize_custom(&custom, &manifest.transparent_neutralize);
     Ok(Harness {
         dir: dir.to_path_buf(),
         manifest,
         framework_transparent,
         user_entry_skills,
         custom,
+        custom_neutral,
         rule_development: adapt_builtin_content(entry("rule_development.md")),
         rule_bugfix: adapt_builtin_content(entry("rule_bugfix.md")),
     })
@@ -268,15 +275,30 @@ fn load_harness_from_parts(dir: &std::path::Path, custom_dir: &std::path::Path) 
         user_entry_skills.push(content);
     }
     let custom = load_custom(custom_dir);
+    let custom_neutral = neutralize_custom(&custom, &manifest.transparent_neutralize);
     Ok(Harness {
         dir: dir.to_path_buf(),
         manifest,
         framework_transparent,
         user_entry_skills,
         custom,
+        custom_neutral,
         rule_development: String::new(),
         rule_bugfix: String::new(),
     })
+}
+
+/// 自定义层的透明中和副本：逐槽过 neutralize_transparent（与出厂框架同一防线、同一驱动）
+fn neutralize_custom(raw: &HarnessCustom, patterns: &[String]) -> HarnessCustom {
+    let n = |c: &Option<String>| c.as_ref().map(|s| neutralize_transparent(s, patterns));
+    HarnessCustom {
+        global: n(&raw.global),
+        analysis: n(&raw.analysis),
+        design: n(&raw.design),
+        implement: n(&raw.implement),
+        review: n(&raw.review),
+        development: n(&raw.development),
+    }
 }
 
 /// 自定义层装载：state.json 控制各槽开关（缺失默认启用）；停用或缺文件 = None。

@@ -26,8 +26,9 @@ pub(crate) async fn spawn_repo_pipeline(
     // 产物经 watcher 推送，前端 map.changed 后自动渲染
     if map_service.cached(&r.id).await.is_none() {
         info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
-        // 注入点 #8：global 块拼在模板后（不影响 <REPO_ROOT> 占位——会话层替换发生在更下游）
-        let prompt = format!("{prompt_template}{}", crate::task_exec::custom_block(&harness.read().await.custom.global));
+        // 注入点 #8：global 块拼在模板后（不影响 <REPO_ROOT> 占位——会话层替换发生在更下游）。
+        // 用透明中和副本——与出厂框架同一中和防线（用户补充不得把拷问指令漏进透明 agent）
+        let prompt = format!("{prompt_template}{}", crate::task_exec::custom_block(&harness.read().await.custom_neutral.global));
         match session_manager
             .start_induction(&r.id, &r.root, &prompt, &agent_command, &agent_args, None)
             .await

@@ -17,9 +17,10 @@ use crate::assets::resolve_text_asset;
 use crate::freshness;
 
 /// 自定义补充 global 块（方案 v2 注入点 #5-#7：归纳/子图/巡检 prompt 尾部追加）。
+/// **用透明中和副本**——用户补充里的拷问类指令不得漏进透明 agent（2026-10-05 实弹）。
 /// spawn 时刻读锁——custom 保存后对后续会话生效（热生效语义，与任务链一致）。
 async fn global_custom_block(harness: &std::sync::Arc<tokio::sync::RwLock<crate::task_exec::Harness>>) -> String {
-    crate::task_exec::custom_block(&harness.read().await.custom.global)
+    crate::task_exec::custom_block(&harness.read().await.custom_neutral.global)
 }
 
 pub(crate) async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
