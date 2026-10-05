@@ -68,9 +68,10 @@ export function onFreshnessEvent(l: FreshnessEventListener): () => void {
 }
 
 // 改进#2：agent 过程直播（session.output——子图分析/任务执行的 stdout 行）
-export type SessionOutputListener = (event: { sessionId: string; line: string }) => void
+// M2 扩展：seq = 每会话单调行号（断线补拉锚点）；stream = stdout/stderr
+export type SessionOutputListener = (event: { sessionId: string; seq: number; stream: string; line: string }) => void
 const outputListeners = new Set<SessionOutputListener>()
-export function emitSessionOutput(e: { sessionId: string; line: string }) {
+export function emitSessionOutput(e: { sessionId: string; seq: number; stream: string; line: string }) {
   for (const l of outputListeners) l(e)
 }
 export function onSessionOutput(l: SessionOutputListener): () => void {

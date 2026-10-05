@@ -2025,7 +2025,7 @@ export default function App() {
               emitQueueChanged({ repo: d.repo, type: d.type, job: d.job, started: d.started, error: d.error })
           }
           if (msg.name === 'session.output') {
-            emitSessionOutput({ sessionId: msg.data.sessionId, line: msg.data.line })
+            emitSessionOutput({ sessionId: msg.data.sessionId, seq: msg.data.seq ?? 0, stream: msg.data.stream ?? 'stdout', line: msg.data.line })
             // 方案 v3 §4.2：终端推送挂在常驻的 App 层（页面卸载也在攒）——
             // 工作流页的终端缓冲因此切走再回来不丢
             pushTerminalLine(msg.data.sessionId, msg.data.line)
@@ -2483,6 +2483,7 @@ export default function App() {
         backendRepo={backendRepo}
         initialSessionId={runsFocus}
         onInitialConsumed={() => setRunsFocus(null)}
+        resyncKey={queueResyncTick}
       />
     ),
     usage: (

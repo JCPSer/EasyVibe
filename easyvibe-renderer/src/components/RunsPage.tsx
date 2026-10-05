@@ -12,35 +12,45 @@ import {
   Terminal,
   ListTree,
   LayoutList,
-  X,
 } from 'lucide-react'
 import { onQueueChanged, onSessionEvent, onSessionOutput } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
 import { toMs } from '@/lib/diffStat'
 import { formatElapsed, isEmptyState, kindFromLabel, type SessionQueueKind, type SessionQueueSnapshot } from '@/lib/sessionQueue'
 
-// 「运行」页（docs/runs-page-design-v1.md M3）：
-// 左栏三态会话列表（运行中/排队中/历史-M1前诚实占位）+ 右栏单会话流水三档呈现（进展卡/时间线/终端）。
-// 数据面：GET /session-queue 快照 + WS（statusChanged/queue.changed/session.output）实时增量；
-// 速度显示 = 60s 滑窗行频（tokens/s 待 M1/M2 后端解析 usage 后接入）。
+// 「运行」页（docs/runs-page-design-v1.md M2 完成体）：
+// 左栏三态会话列表（运行中/排队中/历史——历史为 agent_sessions 库表，重启后仍可回放）
+// + 右栏单会话流水三档呈现（进展卡/时间线/终端）。
+// 数据面：GET /session-queue（活动快照）+ WS 实时增量 + GET /sessions/{sid}/output（回放/补拉）。
+// M2 补拉语义：每会话 seq 单调（WS 事件带 seq），断线重连后按 lastSeq 拉差集，幂等去重。
+// 速度显示 = 60s 滑窗行频；tokens/s 待 usage 解析后接入（用量页同源）。
 
 interface StreamLine {
+  seq: number
+  stream: string
   line: string
   t: number
 }
 
-interface EndedSession {
-  sessionId: string
-  label: string
+interface HistoryRow {
+  id: string
+  kind: string
+  label?: string | null
+  startedAt: string
+  terminalAt?: string | null
   status: string
-  lines: StreamLine[]
+  exitCode?: number | null
 }
 
-const MAX_LINES = 500
+const KIND_NAME: Record<string, string> = {
+  induce: '归纳', patrol: '巡检', submap: '深入分析', task: '任务执行',
+  'subagent-review': '任务执行 · 初审', 'subagent-audit': '任务执行 · 审查', unknown: '会话',
+}
+const MAX_LINES = 2000
 const RATE_WINDOW_MS = 60_000
 
-function kindIcon(kind: SessionQueueKind) {
-  return kind === 'patrol' ? HeartPulse : kind === 'submap' ? Search : Sparkles
+function kindIcon(kind: string) {
+  return kind === 'patrol' ? HeartPulse : kind === 'submap' ? Search : kind === 'task' || kind.startsWith('subagent') ? Activity : Sparkles
 }
 
 /** 60s 滑窗行频 → 「N 行/分」 */
@@ -59,14 +69,13 @@ type Block = { kind: 'think' | 'text' | 'err' | 'result'; lines: string[] }
 
 function toBlocks(lines: StreamLine[]): Block[] {
   const blocks: Block[] = []
-  for (const { line } of lines) {
+  for (const { line, stream } of lines) {
     const isThink = line.startsWith('[思考]')
-    const isErr = line.startsWith('[err]')
+    const isErr = stream === 'stderr' || line.startsWith('[err]')
     const isResult = line.includes('[EASYVIBE-RESULT]')
     const kind: Block['kind'] = isErr ? 'err' : isResult ? 'result' : isThink ? 'think' : 'text'
-    const clean = isThink ? line.slice('[思考]'.length).trim() : isErr ? line.slice('[err]'.length).trim() : line
+    const clean = isThink ? line.slice('[思考]'.length).trim() : isErr && line.startsWith('[err]') ? line.slice('[err]'.length).trim() : line
     const last = blocks[blocks.length - 1]
-    // 同型才合并；result 行独立成块（协议行不粘连）
     if (last && last.kind === kind && kind !== 'result') last.lines.push(clean)
     else blocks.push({ kind, lines: [clean] })
   }
@@ -80,29 +89,96 @@ const TIERS: { id: Tier; label: string; icon: typeof Terminal }[] = [
   { id: 'terminal', label: '终端', icon: Terminal },
 ]
 
-export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed }: {
+/** 会话最后一条有效输出（进展卡与运行卡共用） */
+function lastTextOf(lines: StreamLine[]): string {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].line
+    if (l && !l.startsWith('[err]')) return l.startsWith('[思考]') ? l.slice(4).trim() : l
+  }
+  return ''
+}
+
+export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, resyncKey = 0 }: {
   backendRepo: string | null
   /** 用量页明细表跳入：打开页面即选中该会话 */
   initialSessionId?: string | null
   onInitialConsumed?: () => void
+  /** WS 重连信号：触发全量补拉（断线期间的行按 seq 差集拉回） */
+  resyncKey?: number
 }) {
   const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
-  // 各会话流水（内存态，M2 落盘前重启即失——诚实降级见历史区）
+  const [history, setHistory] = useState<HistoryRow[]>([])
+  // 各会话流水（内存态；历史会话选中时从库表回放补入；每会话按 seq 去重）
   const [streams, setStreams] = useState<Map<string, StreamLine[]>>(new Map())
-  const [ended, setEnded] = useState<EndedSession[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [tier, setTier] = useState<Tier>('timeline')
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const seqSeenRef = useRef<Map<string, Set<number>>>(new Map())
   const streamsRef = useRef(streams)
   useEffect(() => {
     streamsRef.current = streams
   }, [streams])
-  const snapRef = useRef(snap)
-  useEffect(() => {
-    snapRef.current = snap
-  }, [snap])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [tier, setTier] = useState<Tier>('timeline')
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const followRef = useRef(true)
+
+  /** 追加行（seq 幂等去重；每会话内存最多留 MAX_LINES 行，全量在库表） */
+  const appendLines = useCallback((sessionId: string, lines: StreamLine[]) => {
+    if (lines.length === 0) return
+    let seen = seqSeenRef.current.get(sessionId)
+    if (!seen) {
+      seen = new Set()
+      seqSeenRef.current.set(sessionId, seen)
+    }
+    const fresh = lines.filter((l) => l.seq >= 0 && !seen.has(l.seq))
+    if (fresh.length === 0) return
+    fresh.forEach((l) => seen.add(l.seq))
+    setStreams((prev) => {
+      const list = prev.get(sessionId) ?? []
+      const next = [...list, ...fresh].sort((a, b) => a.seq - b.seq)
+      if (next.length > MAX_LINES) next.splice(0, next.length - MAX_LINES)
+      const m = new Map(prev)
+      m.set(sessionId, next)
+      return m
+    })
+  }, [])
+
+  /** 回放/补拉：afterSeq 之后的行（历史会话 afterSeq=0 全量回放） */
+  const backfill = useCallback(
+    (sessionId: string, afterSeq = 0) => {
+      if (!backendRepo) return
+      fetch(
+        `/api/repos/${encodeURIComponent(backendRepo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${afterSeq}&limit=5000`
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { data?: { seq: number; stream: string; line: string; ts: string }[] } | null) => {
+          const rows = d?.data ?? []
+          if (rows.length === 0) return
+          appendLines(
+            sessionId,
+            rows.map((r) => ({ seq: r.seq, stream: r.stream, line: r.line, t: toMs(r.ts) ?? Date.now() }))
+          )
+        })
+        .catch(() => {})
+    },
+    [backendRepo, appendLines]
+  )
+
+  const loadHistory = useCallback(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/agent-sessions`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: HistoryRow[] } | null) => setHistory(d?.data ?? []))
+      .catch(() => {})
+  }, [backendRepo])
+
+  /** 选中会话：无内存流水时从库表回放 */
+  const select = useCallback(
+    (id: string) => {
+      setSelectedId(id)
+      if (!seqSeenRef.current.get(id)?.size) backfill(id)
+    },
+    [backfill]
+  )
 
   const pull = useCallback(() => {
     if (!backendRepo) return
@@ -112,19 +188,9 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed }: {
       .catch(() => {})
   }, [backendRepo])
 
-  // 用量页 deeplink：打开即选中对应会话（一次性消费；setTimeout 0 避开 effect 内同步 setState 级联渲染）
-  useEffect(() => {
-    if (!initialSessionId) return
-    const id = initialSessionId
-    const t = window.setTimeout(() => {
-      setSelectedId(id)
-      onInitialConsumed?.()
-    }, 0)
-    return () => window.clearTimeout(t)
-  }, [initialSessionId, onInitialConsumed])
-
   useEffect(() => {
     pull()
+    loadHistory()
     const offQ = onQueueChanged((e) => {
       if (e.repo !== backendRepo) return
       if (e.type === 'failed') toast(`排队任务启动失败：${e.error ?? '未知原因'}`, 'error')
@@ -132,37 +198,43 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed }: {
     })
     const offS = onSessionEvent((e) => {
       if (e.repo !== backendRepo) return
-      // 终态：流水留在内存里继续可看（直到离开页面/刷新）
-      if (e.status === 'succeeded' || e.status === 'failed') {
-        const cur = snapRef.current
-        if (cur?.active?.sessionId === e.sessionId) {
-          const lines = streamsRef.current.get(e.sessionId) ?? []
-          setEnded((prev) =>
-            [{ sessionId: e.sessionId, label: cur.active!.label, status: e.status, lines }, ...prev].slice(0, 5),
-          )
-        }
-      }
       pull()
+      loadHistory()
     })
     const offO = onSessionOutput((e) => {
-      const t = Date.now()
-      setStreams((prev) => {
-        const list = prev.get(e.sessionId)
-        const next = list ? [...list, { line: e.line, t }] : [{ line: e.line, t }]
-        if (next.length > MAX_LINES) next.splice(0, next.length - MAX_LINES)
-        const m = new Map(prev)
-        m.set(e.sessionId, next)
-        return m
-      })
+      appendLines(e.sessionId, [{ seq: e.seq, stream: e.stream, line: e.line, t: Date.now() }])
     })
     return () => {
       offQ()
       offS()
       offO()
     }
-  }, [backendRepo, pull])
+  }, [backendRepo, pull, loadHistory, appendLines])
 
-  // 已运行时长 tick：interval 只强制重渲染，渲染期现取 wall clock（SessionBubble 同款实弹修复）
+  // 用量页 deeplink：打开即选中对应会话（一次性消费）
+  useEffect(() => {
+    if (!initialSessionId) return
+    const id = initialSessionId
+    const t = window.setTimeout(() => {
+      select(id)
+      onInitialConsumed?.()
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [initialSessionId, onInitialConsumed, select])
+
+  // WS 重连补拉：每个有流水的会话按 lastSeq 拉差集（幂等去重）
+  useEffect(() => {
+    if (resyncKey === 0) return
+    for (const [id, lines] of streamsRef.current) {
+      const last = lines[lines.length - 1]
+      if (last) backfill(id, last.seq)
+    }
+    pull()
+    loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resyncKey 为脉冲信号
+  }, [resyncKey])
+
+  // 已运行时长 tick：interval 只强制重渲染，渲染期现取 wall clock
   const [, forceRender] = useReducer((x: number) => x + 1, 0)
   const active = snap?.active ?? null
   const startedMs = active?.startedAt ? toMs(active.startedAt) : null
@@ -182,24 +254,14 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed }: {
   // eslint-disable-next-line react-hooks/purity -- 时长/行频必须在渲染时读真实时钟：定时器被 webview 节流时状态快照会过期（SessionBubble 同款，2026-10-04 实弹）
   const now = Date.now()
 
-/** 会话最后一条有效输出（进展卡与运行卡共用） */
-function lastTextOf(lines: StreamLine[]): string {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i].line
-    if (l && !l.startsWith('[err]')) return l.startsWith('[思考]') ? l.slice(4).trim() : l
-  }
-  return ''
-}
-
-  const selectedLines = useMemo(() => {
-    if (!selectedId) return []
-    const dead = ended.find((e) => e.sessionId === selectedId)
-    if (dead) return dead.lines
-    return streams.get(selectedId) ?? []
-  }, [selectedId, ended, streams])
-
-  const selectedEnded = selectedId ? ended.find((e) => e.sessionId === selectedId) : undefined
-  const selectedAlive = active && active.sessionId === selectedId
+  const selectedLines = useMemo(() => (selectedId ? streams.get(selectedId) ?? [] : []), [selectedId, streams])
+  const selectedMeta: { label: string; status: 'alive' | 'succeeded' | 'failed' } | null = useMemo(() => {
+    if (!selectedId) return null
+    if (active && active.sessionId === selectedId) return { label: active.label, status: 'alive' }
+    const row = history.find((h) => h.id === selectedId)
+    if (row) return { label: row.label ?? row.id, status: row.status === 'failed' ? 'failed' : 'succeeded' }
+    return { label: selectedId, status: 'alive' }
+  }, [selectedId, active, history])
   const blocks = useMemo(() => (tier === 'timeline' ? toBlocks(selectedLines) : []), [tier, selectedLines])
   const rate = linesPerMinute(selectedLines, now)
   const lastText = useMemo(() => lastTextOf(selectedLines), [selectedLines])
@@ -235,6 +297,8 @@ function lastTextOf(lines: StreamLine[]): string {
 
   const elapsed = startedMs !== null ? formatElapsed(now - startedMs) : null
   const queuedAt = snap?.queued?.enqueuedAt ? toMs(snap.queued.enqueuedAt) : null
+  const histKind = (row: HistoryRow): SessionQueueKind =>
+    row.kind === 'patrol' ? 'patrol' : row.kind === 'submap' ? 'submap' : 'reinduce'
 
   return (
     <div className="flex h-full flex-col p-5">
@@ -274,7 +338,7 @@ function lastTextOf(lines: StreamLine[]): string {
             </p>
             {active ? (
               <button
-                onClick={() => setSelectedId(active.sessionId)}
+                onClick={() => select(active.sessionId)}
                 className={`w-full rounded-xl border p-3 text-left transition-colors ${
                   selectedId === active.sessionId
                     ? 'border-blue-400 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30'
@@ -289,10 +353,8 @@ function lastTextOf(lines: StreamLine[]): string {
                   <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{active.label}</span>
                   <span className="tnum text-micro text-slate-400 dark:text-slate-500">{elapsed !== null ? `已运行 ${elapsed}` : '…'}</span>
                 </div>
-                <p className="mt-1 truncate text-micro text-slate-400 dark:text-slate-500">
-                  {activeLastText || '等待输出…'}
-                </p>
-                <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">输出 {linesPerMinute(streams.get(active.sessionId) ?? [], now)} 行/分</p>
+                <p className="mt-1 truncate text-micro text-slate-400 dark:text-slate-500">{activeLastText || '等待输出…'}</p>
+                <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">输出 {linesPerMinute(activeLines, now)} 行/分</p>
               </button>
             ) : (
               <p className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-3 py-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
@@ -311,8 +373,8 @@ function lastTextOf(lines: StreamLine[]): string {
                 <div className="flex items-center gap-2">
                   <Clock size={12} className="shrink-0 text-amber-500" />
                   <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-600 dark:text-slate-300">{snap.queued.label}</span>
-                  <button onClick={cancelQueue} className="rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-red-500" title="取消排队">
-                    <X size={11} />
+                  <button onClick={cancelQueue} className="rounded px-1 text-slate-300 dark:text-slate-600 hover:text-red-500" title="取消排队">
+                    ✕
                   </button>
                 </div>
                 <p className="mt-1 text-micro text-slate-400 dark:text-slate-500">
@@ -322,49 +384,49 @@ function lastTextOf(lines: StreamLine[]): string {
             </section>
           )}
 
-          {/* 本次期间已结束（内存态） */}
-          {ended.length > 0 && (
-            <section>
-              <p className="mb-1.5 flex items-center gap-1.5 text-cap font-semibold text-slate-400 dark:text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> 本次已结束
-              </p>
-              <div className="space-y-1.5">
-                {ended.map((e) => (
-                  <button
-                    key={e.sessionId}
-                    onClick={() => setSelectedId(e.sessionId)}
-                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                      selectedId === e.sessionId
-                        ? 'border-blue-400 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`min-w-0 flex-1 truncate text-[12px] ${e.status === 'failed' ? 'font-semibold text-red-500' : 'text-slate-600 dark:text-slate-300'}`}>
-                        {e.label}
-                      </span>
-                      <span className={`rounded-full px-1.5 py-px text-micro font-semibold ${e.status === 'failed' ? 'bg-red-50 dark:bg-red-950/40 text-red-500' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'}`}>
-                        {e.status === 'failed' ? '失败' : '成功'}
-                      </span>
-                    </div>
-                    <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">{e.lines.length} 行输出 · {e.sessionId}</p>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* 历史（M1 诚实占位） */}
+          {/* 历史（agent_sessions 库表——M2 转正，重启后仍可回放） */}
           <section>
             <p className="mb-1.5 flex items-center gap-1.5 text-cap font-semibold text-slate-400 dark:text-slate-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-slate-600" /> 历史
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> 历史
             </p>
-            <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-3 py-3 text-center">
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">会话历史即将支持</p>
-              <p className="mt-0.5 text-micro leading-4 text-slate-300 dark:text-slate-600">
-                后端落盘后，重启也能回放每次会话的完整流水与耗时。
-              </p>
-            </div>
+            {history.length > 0 ? (
+              <div className="space-y-1.5">
+                {history.slice(0, 12).map((h) => {
+                  const Icon = kindIcon(histKind(h))
+                  const durMs = h.terminalAt ? (toMs(h.terminalAt) ?? 0) - (toMs(h.startedAt) ?? 0) : null
+                  return (
+                    <button
+                      key={h.id}
+                      onClick={() => select(h.id)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                        selectedId === h.id
+                          ? 'border-blue-400 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon size={12} className={`shrink-0 ${h.status === 'failed' ? 'text-red-400' : 'text-slate-400 dark:text-slate-500'}`} />
+                        <span className={`min-w-0 flex-1 truncate text-[12px] ${h.status === 'failed' ? 'font-semibold text-red-500' : 'text-slate-600 dark:text-slate-300'}`}>
+                          {h.label ?? KIND_NAME[h.kind] ?? h.kind}
+                        </span>
+                        <span className={`shrink-0 rounded-full px-1.5 py-px text-micro font-semibold ${h.status === 'failed' ? 'bg-red-50 dark:bg-red-950/40 text-red-500' : h.status === 'succeeded' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}`}>
+                          {h.status === 'failed' ? '失败' : h.status === 'succeeded' ? '成功' : '进行中'}
+                        </span>
+                      </div>
+                      <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">
+                        {h.startedAt.slice(5, 16).replace('T', ' ')}
+                        {durMs !== null && durMs >= 0 ? ` · 耗时 ${formatElapsed(durMs)}` : ''} · {h.id}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-3 py-3 text-center">
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">暂无历史会话</p>
+                <p className="mt-0.5 text-micro leading-4 text-slate-300 dark:text-slate-600">归纳 / 巡检 / 任务执行后会留下可回放的流水。</p>
+              </div>
+            )}
           </section>
         </div>
 
@@ -374,37 +436,34 @@ function lastTextOf(lines: StreamLine[]): string {
             <>
               {/* 会话头 */}
               <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-2.5">
-                {selectedAlive
-                  ? (() => {
-                      const Icon = kindIcon(kindFromLabel(active.label))
-                      return <Icon size={14} className="shrink-0 text-blue-500" />
-                    })()
-                  : selectedEnded && (selectedEnded.status === 'failed' ? (
-                      <X size={14} className="shrink-0 text-red-500" />
-                    ) : (
-                      <Activity size={14} className="shrink-0 text-emerald-500" />
-                    ))}
-                <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-slate-800 dark:text-slate-100">
-                  {selectedAlive ? active.label : selectedEnded?.label ?? selectedId}
-                </span>
+                {selectedMeta?.status === 'alive' ? (
+                  <Loader2 size={14} className="shrink-0 animate-spin text-blue-500" />
+                ) : selectedMeta?.status === 'failed' ? (
+                  <span className="h-3.5 w-3.5 shrink-0 rounded-full bg-red-500" />
+                ) : (
+                  <span className="h-3.5 w-3.5 shrink-0 rounded-full bg-emerald-500" />
+                )}
+                <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-slate-800 dark:text-slate-100">{selectedMeta?.label ?? selectedId}</span>
                 <span className="mono text-micro text-slate-400 dark:text-slate-500">{selectedId}</span>
-                {selectedAlive && (
+                {selectedMeta?.status === 'alive' && (
                   <>
                     <span className="tnum text-micro text-slate-400 dark:text-slate-500">
-                      {elapsed !== null ? elapsed : '…'} · {rate} 行/分
+                      {elapsed !== null && active?.sessionId === selectedId ? `${elapsed} · ${rate} 行/分` : `${rate} 行/分`}
                     </span>
-                    <button
-                      onClick={kill}
-                      className="flex items-center gap-1 rounded-md border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-2 py-1 text-micro font-semibold text-red-600 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900/40"
-                      title="终止该会话（二次确认）"
-                    >
-                      <Square size={9} /> 终止
-                    </button>
+                    {active && (
+                      <button
+                        onClick={kill}
+                        className="flex items-center gap-1 rounded-md border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-2 py-1 text-micro font-semibold text-red-600 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900/40"
+                        title="终止该会话（二次确认）"
+                      >
+                        <Square size={9} /> 终止
+                      </button>
+                    )}
                   </>
                 )}
-                {selectedEnded && (
-                  <span className={`rounded-full px-1.5 py-px text-micro font-semibold ${selectedEnded.status === 'failed' ? 'bg-red-50 dark:bg-red-950/40 text-red-500' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'}`}>
-                    {selectedEnded.status === 'failed' ? '失败' : '成功'}
+                {selectedMeta && selectedMeta.status !== 'alive' && (
+                  <span className={`rounded-full px-1.5 py-px text-micro font-semibold ${selectedMeta.status === 'failed' ? 'bg-red-50 dark:bg-red-950/40 text-red-500' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'}`}>
+                    {selectedMeta.status === 'failed' ? '失败' : '成功'}
                   </span>
                 )}
               </div>
@@ -416,10 +475,10 @@ function lastTextOf(lines: StreamLine[]): string {
                     <>
                       <p className="max-w-lg text-center text-[15px] font-semibold leading-7 text-slate-800 dark:text-slate-100">{lastText}</p>
                       <div className="flex items-center gap-3 text-micro text-slate-400 dark:text-slate-500">
-                        {selectedAlive && (
+                        {selectedMeta?.status === 'alive' && (
                           <>
                             <Loader2 size={11} className="animate-spin text-blue-500" />
-                            <span className="tnum">已运行 {elapsed ?? '…'}</span>
+                            {active?.sessionId === selectedId && elapsed !== null && <span className="tnum">已运行 {elapsed}</span>}
                             <span>·</span>
                             <span className="tnum">{rate} 行/分</span>
                           </>
@@ -472,9 +531,7 @@ function lastTextOf(lines: StreamLine[]): string {
                           >
                             {isCollapsed ? <ChevronRight size={11} className="shrink-0 text-slate-400" /> : <ChevronDown size={11} className="shrink-0 text-slate-400" />}
                             <span className="shrink-0 rounded bg-slate-200 dark:bg-slate-700 px-1 py-px text-micro font-semibold text-slate-500 dark:text-slate-300">思考</span>
-                            <span className="min-w-0 flex-1 truncate text-[12px] text-slate-500 dark:text-slate-400">
-                              {b.lines[0] || '（空）'}
-                            </span>
+                            <span className="min-w-0 flex-1 truncate text-[12px] text-slate-500 dark:text-slate-400">{b.lines[0] || '（空）'}</span>
                             <span className="tnum shrink-0 text-micro text-slate-300 dark:text-slate-600">{b.lines.length} 行</span>
                           </button>
                         )}
@@ -501,12 +558,12 @@ function lastTextOf(lines: StreamLine[]): string {
                       </div>
                     )
                   })}
-                  {selectedAlive && (
+                  {selectedMeta?.status === 'alive' && (
                     <p className="flex items-center gap-1.5 pl-1 text-micro text-slate-400 dark:text-slate-500">
                       <Loader2 size={10} className="animate-spin text-blue-500" /> 正在输出…
                     </p>
                   )}
-                  {blocks.length === 0 && !selectedAlive && (
+                  {blocks.length === 0 && selectedMeta?.status !== 'alive' && (
                     <p className="py-8 text-center text-[11px] text-slate-300 dark:text-slate-600">没有捕获到输出行</p>
                   )}
                 </div>
@@ -522,9 +579,9 @@ function lastTextOf(lines: StreamLine[]): string {
                   className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-4"
                 >
                   <pre className="font-mono text-[11px] leading-5 text-slate-200">
-                    {selectedLines.slice(-200).map(({ line }, i) => (
-                      <div key={i} className={line.startsWith('[err]') ? 'text-red-400' : line.includes('[EASYVIBE-RESULT]') ? 'text-emerald-400' : undefined}>
-                        {line}
+                    {selectedLines.slice(-200).map((l, i) => (
+                      <div key={i} className={l.stream === 'stderr' || l.line.startsWith('[err]') ? 'text-red-400' : l.line.includes('[EASYVIBE-RESULT]') ? 'text-emerald-400' : undefined}>
+                        {l.line}
                       </div>
                     ))}
                     {selectedLines.length === 0 && <span className="text-slate-500"># 等待输出…</span>}
@@ -534,7 +591,7 @@ function lastTextOf(lines: StreamLine[]): string {
             </>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6">
-              {isEmptyState(snap) ? (
+              {isEmptyState(snap) && history.length === 0 ? (
                 <>
                   <Activity size={20} className="text-slate-300 dark:text-slate-600" />
                   <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">当前没有运行中的 agent</p>
