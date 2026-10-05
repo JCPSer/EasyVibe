@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { X, Loader2, Check, Send, ChevronDown, ChevronUp, Wrench, ArrowRight, Crosshair} from 'lucide-react'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { Module } from '@/types/map'
+import { createTask } from '@/api/task'
 
 interface Props {
   backendRepo: string | null
@@ -40,19 +41,15 @@ const [trust, setTrust] = useState<'manual' | 'auto' | 'supervised'>('manual')
   const submit = () => {
     if (!backendRepo || sending || !description.trim()) return
     setSending(true)
-    fetch(`/api/repos/${backendRepo}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: title.trim() || draft.title || '修复任务',
-        description,
-        modules: selected,
-        acceptance,
-        source: draft.source,
-        context: draft.context,
-        trust,
-        conversation_id: draft.conversation_id ?? null,
-      }),
+    createTask(backendRepo, {
+      title: title.trim() || draft.title || '修复任务',
+      description,
+      modules: selected,
+      acceptance,
+      source: draft.source,
+      context: draft.context,
+      trust,
+      conversation_id: draft.conversation_id ?? null,
     })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))

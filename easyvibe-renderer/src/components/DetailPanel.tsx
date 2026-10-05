@@ -7,6 +7,8 @@ import { couplingAnalysis } from '@/shared/logic/depsAnalysis'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { IssuesList } from '@/components/IssuesList'
+import { healthHistory } from '@/api/canvas'
+import { usage } from '@/api/repos'
 import { PanelChat } from '@/components/chat/PanelChat'
 import { Waypoints } from 'lucide-react'
 
@@ -55,7 +57,7 @@ function HealthTrend({ backendRepo, moduleId }: { backendRepo: string; moduleId:
   const [rows, setRows] = useState<{ score: number; runId: string }[] | null>(null)
   useEffect(() => {
     let stale = false
-    fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(moduleId)}/health-history`)
+    healthHistory(backendRepo, moduleId)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { score: number; runId: string }[] }) => {
         if (!stale) setRows(d.data.slice().reverse()) // 旧→新
@@ -100,7 +102,7 @@ function GovernanceBill({ backendRepo, moduleId }: { backendRepo: string | null;
   useEffect(() => {
     if (!backendRepo) return
     let stale = false
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/usage?days=30`)
+    usage(backendRepo, 30)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { byModule?: { name: string; sessions: number; cost?: number | null; failed?: number | null }[]; sessions?: { id: string; label?: string | null; kind: string; moduleId?: string | null; costUsd?: number | null; status: string; startedAt: string }[] } } | null) => {
         if (stale || !d?.data) return
@@ -109,7 +111,7 @@ function GovernanceBill({ backendRepo, moduleId }: { backendRepo: string | null;
         setBill({ cost: row?.cost ?? null, sessions: row?.sessions ?? 0, failed: row?.failed ?? 0, recent })
       })
       .catch(() => {})
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/modules/${encodeURIComponent(moduleId)}/health-history`)
+    healthHistory(backendRepo, moduleId)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { score: number }[] } | null) => {
         if (stale) return

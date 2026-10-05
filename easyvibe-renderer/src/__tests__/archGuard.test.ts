@@ -207,3 +207,97 @@ describe('archGuard · 断言组 4：文件集快照（双向全等）', () => {
     }
   })
 })
+
+// ---------------- 断言组 5：api client 层与「禁业务文件直连 REST」（c-arch-1 收敛） ----------------
+//
+// R6/R7/R8：server-api 的 REST 契约面收敛为「每域一个 api client」，业务文件不得再直连。
+//  ① src/api/** 文件集快照（双向全等，照 RUNTIME_FILES 范式）；
+//  ② 业务文件禁直连：源码（**去注释后**）不得出现裸 `fetch(`、`'/api/…'` 字面量、`new WebSocket`；
+//  ③ src/api/** 依赖白名单：只许相对路径与 @/runtime、@/types（不得反向 import 业务层）；
+//  ④ LEGACY 棘轮：批 C 四域未迁完，登记现值只降不升、禁新增（照 componentGuard 范式）；
+//  ⑤ 反绕过：`fetch` 与 `/api/` 两条同时扫（`const u='/api/x';fetch(u)` 逃逸被堵）。
+const API_FILES = [
+  'api/canvas.ts', 'api/chat.ts', 'api/core.ts', 'api/git.ts', 'api/index.ts',
+  'api/repos.ts', 'api/settings.ts', 'api/system.ts', 'api/task.ts',
+]
+const API_ABS = API_FILES.map((f) => `src/${f}`)
+
+/** 网络层 leaf / 测试 / 生成物豁免（见方案 §3.3.2）。runtime 是网络层且为 leaf（不得 import @/api）。 */
+const DIRECT_REST_WHITELIST = /^(src\/api\/|src\/runtime\/|src\/types\/generated)|(__tests__\/|\.test\.tsx?$)/
+/** 批 C 四域存量（本轮未迁；棘轮只降不升——清干净须摘牌，新增文件不得蒙混）。 */
+const DIRECT_REST_LEGACY: ReadonlyArray<readonly [string, number]> = [
+  ['src/components/canvas/Canvas.tsx', 4],
+  ['src/components/canvas/InductionOverlay.tsx', 6],
+  ['src/components/canvas/useGrowthPlayback.ts', 4],
+  ['src/components/canvas/useSubmaps.ts', 4],
+  ['src/components/chat/ChatPanel.tsx', 8],
+  ['src/components/chat/MessageStream.tsx', 4],
+  ['src/components/chat/QuickAsk.tsx', 10],
+  ['src/components/chat/QuickAskStream.tsx', 4],
+  ['src/components/chat/SuggestPanel.tsx', 2],
+  ['src/components/chat/WorkbenchPage.tsx', 16],
+  ['src/components/chat/useConversations.ts', 10],
+  ['src/components/settings/AgentSection.tsx', 10],
+  ['src/components/settings/HarnessSection.tsx', 14],
+  ['src/components/taskworkflow/DocCard.tsx', 4],
+  ['src/components/taskworkflow/PhaseDocReview.tsx', 8],
+  ['src/components/taskworkflow/TaskBoardPage.tsx', 4],
+  ['src/components/taskworkflow/TaskGovernancePage.tsx', 2],
+  ['src/components/taskworkflow/TaskWorkflowPage.tsx', 10],
+  ['src/components/taskworkflow/stages/DoneStage.tsx', 2],
+  ['src/components/taskworkflow/stages/ErrorStage.tsx', 2],
+  ['src/components/taskworkflow/stages/TerminalStage.tsx', 2],
+  ['src/components/taskworkflow/taskAdmin.ts', 7],
+]
+
+/** 去注释（保留字符串字面量——`/api/` 字面量正是要抓的）：`/* *\/` 与行注释，行注释避开 `https://`。 */
+const stripComments = (s: string): string =>
+  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+const RE_FETCH = /(?<![\w.])fetch\s*\(/g
+const RE_APIPATH = /['"`]\/api\//g
+const RE_WS = /new\s+WebSocket\b/g
+const directRestHits = (rel: string): number => {
+  const src = stripComments(read(rel))
+  return (src.match(RE_FETCH)?.length ?? 0) + (src.match(RE_APIPATH)?.length ?? 0) + (src.match(RE_WS)?.length ?? 0)
+}
+const isBusinessFile = (f: string) => !DIRECT_REST_WHITELIST.test(f)
+
+describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST', () => {
+  it('① src/api/** 文件集 == API_FILES（双向全等）', () => {
+    expect(sorted(walk('src/api').map((f) => f.replace(/^src\//, '')))).toEqual(sorted(API_FILES))
+  })
+  it('② 业务文件（去注释后）不得直连 REST：fetch( / /api/ 字面量 / new WebSocket，LEGACY 棘轮只降不升', () => {
+    const violating: Record<string, number> = {}
+    for (const f of walk('src')) {
+      if (!isBusinessFile(f)) continue
+      const n = directRestHits(f)
+      if (n > 0) violating[f] = n
+    }
+    const legacy = Object.fromEntries(DIRECT_REST_LEGACY.map(([f, n]) => [f, n]))
+    // 键集全等：清干净须摘牌；新增违规文件不得蒙混
+    expect(sorted(Object.keys(violating)), '直连 REST 的业务文件集').toEqual(sorted(Object.keys(legacy)))
+    for (const [f, budget] of DIRECT_REST_LEGACY) {
+      expect(violating[f] ?? 0, `${f} 直连 REST 处数`).toBeLessThanOrEqual(budget)
+    }
+  })
+  it('③ src/api/** 依赖白名单：只许相对路径 + @/runtime + @/types（不得反向 import 业务层）', () => {
+    const forbidden = /^(?:@\/(?:components|pages|hooks|lib|App|shared|api)|easyvibe-renderer\/src\/(?:components|pages|hooks|lib|App|shared|api))/
+    for (const f of API_ABS) {
+      for (const s of specs(f)) {
+        const r = resolveRel(f, s) ?? s
+        const isRelative = s.startsWith('./') || s.startsWith('../')
+        const allowedAlias = /^@\/(?:runtime|types)\//.test(s)
+        expect(forbidden.test(s) || forbidden.test(r), `${f} → ${s}`).toBe(false)
+        expect(isRelative || allowedAlias, `${f} → ${s}（api 层只许相对路径 / @/runtime / @/types）`).toBe(true)
+      }
+    }
+  })
+  it('④ 反绕过：fetch 与 /api/ 字面量两条同时扫（const u="/api/x"; fetch(u) 逃逸被堵）', () => {
+    // 直接对内联样例断言扫描器行为（守卫自身可执行性，R12）
+    const sample = stripComments(`const u = '/api/repos'\nfetch(u)\nnew WebSocket('/ws')`)
+    const hits = (sample.match(RE_FETCH)?.length ?? 0) + (sample.match(RE_APIPATH)?.length ?? 0) + (sample.match(RE_WS)?.length ?? 0)
+    expect(hits).toBe(3)
+    // 注释中的 /api/ 与 fetch 不误报
+    expect(directRestHits('src/api/core.ts')).toBeGreaterThan(0) // 唯一出口自身持有 fetch（在 src/api 内合法）
+  })
+})

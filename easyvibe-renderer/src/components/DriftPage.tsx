@@ -4,6 +4,8 @@ import { onFreshnessEvent } from '@/runtime/growthBus'
 import { useRepoActivityMap } from '@/runtime/useRepoActivity'
 import { relTime } from '@/shared/logic/diffStat'
 import { toast } from '@/runtime/toast'
+import { listRepos, patrolRuns } from '@/api/repos'
+import { freshness, reinduce as reinduceApi } from '@/api/canvas'
 
 // M4-3 漂移洞察整页（按 ui-mockups/漂移洞察原型.png 施工）：
 // 跨仓库的保鲜仪表盘——KPI（需重归纳/平均落后提交/最近巡检）+ 仓库漂移排名
@@ -66,15 +68,15 @@ export function DriftPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const reposRes = await fetch('/api/repos')
+      const reposRes = await listRepos()
       if (!reposRes.ok) throw new Error(`HTTP ${reposRes.status}`)
       const reposData: { data?: RepoInfo[] } | null = await reposRes.json()
       const repos = reposData?.data ?? []
       const settled = await Promise.all(
         repos.map(async (repo) => {
           const [fRes, pRes] = await Promise.all([
-            fetch(`/api/repos/${encodeURIComponent(repo.id)}/freshness`),
-            fetch(`/api/repos/${encodeURIComponent(repo.id)}/patrol-runs`),
+            freshness(repo.id),
+            patrolRuns(repo.id),
           ])
           const f: { data?: Freshness } | null = fRes.ok ? await fRes.json() : null
           const p: { data?: PatrolRun[] } | null = pRes.ok ? await pRes.json() : null
@@ -137,7 +139,7 @@ export function DriftPage() {
   const reinduce = async (repoId: string) => {
     setRows((rs) => rs?.map((r) => (r.repo.id === repoId ? { ...r, reinducing: true } : r)) ?? null)
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(repoId)}/reinduce`, { method: 'POST' })
+      const r = await reinduceApi(repoId)
       const d = await r.json().catch(() => null)
       if (!r.ok) toast(d?.error ?? '重新归纳发起失败', 'error')
     } catch {

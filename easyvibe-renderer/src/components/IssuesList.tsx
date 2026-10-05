@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { patrolRuns } from '@/api/repos'
+import { createTask } from '@/api/task'
 import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Loader2, Wrench, Zap } from 'lucide-react'
 import { buildConcernTask, type TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap, Concern, Module } from '@/types/map'
@@ -85,7 +87,7 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
   useEffect(() => {
     if (!backendRepo) return
     let dead = false
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs`)
+    patrolRuns(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { runs?: { status: string; concernsDiff?: unknown }[] } } | null) => {
         if (dead) return
@@ -126,12 +128,8 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
       }
     }
     setQuickBusy(issue.key)
-    fetch(`/api/repos/${backendRepo}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // R5 清债：架构级问题（影响面最大）默认走 supervised 风险预评估，不直通 auto
-      body: JSON.stringify({ ...draft, trust: issue.moduleId ? 'auto' : 'supervised' }),
-    })
+    // R5 清债：架构级问题（影响面最大）默认走 supervised 风险预评估，不直通 auto
+    createTask(backendRepo, { ...draft, trust: issue.moduleId ? 'auto' : 'supervised' })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setQuickDone(issue.key)

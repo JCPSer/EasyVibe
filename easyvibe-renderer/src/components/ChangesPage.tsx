@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FileDiff, History, ShieldCheck } from 'lucide-react'
 import { onTaskEvent } from '@/runtime/growthBus'
+import { taskDiff, listTasks, taskApprovals } from '@/api/task'
 import { Select } from '@/components/ui/SelectMenu'
 import { absTime, aggregateByModule, parseDiffStat, toMs } from '@/shared/logic/diffStat'
 import type { CodeMap } from '@/types/map'
@@ -68,7 +69,7 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
     if (!backendRepo) return
     setDiffFor({ taskId, text: null, loading: true })
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(taskId)}/diff`)
+      const r = await taskDiff(backendRepo, taskId)
       const d = await r.json().catch(() => null)
       setDiffFor({ taskId, text: d?.data?.diff ?? null, loading: false })
     } catch {
@@ -78,7 +79,7 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
 
   const load = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+    listTasks(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: ChangeTask[] } | null) => setTasks(d?.data ?? []))
       .catch(() => setTasks([]))
@@ -91,7 +92,7 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
 
   useEffect(() => {
     if (!backendRepo || !selected) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(selected)}/approvals`)
+    taskApprovals(backendRepo, selected)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Approval[] } | null) => setApprovalsFor({ taskId: selected, list: d?.data ?? [] }))
       .catch(() => setApprovalsFor({ taskId: selected, list: [] }))

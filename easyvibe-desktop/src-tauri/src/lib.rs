@@ -12,6 +12,9 @@ const BACKEND_PORT: u16 = 7151;
 
 struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
+/// 关闭确认放行位：用户在确认框点"仍要关闭"后置位，后续 close() 不再拦截（防死循环）
+struct CloseConfirmed(std::sync::atomic::AtomicBool);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -42,6 +45,7 @@ pub fn run() {
                 .expect("错误页响应构建")
         })
         .setup(|app| {
+            app.manage(CloseConfirmed(std::sync::atomic::AtomicBool::new(false)));
             let res_dir = app
                 .path()
                 .resource_dir()
@@ -226,6 +230,46 @@ pub fn run() {
             });
             Ok(())
         })
+        // 关闭确认（2026-10-06）：有 agent 会话在跑时关闭 = 静默杀任务（此前的僵尸"进行中"实弹）。
+        // 拦截 CloseRequested 查后端活动会话数，>0 先阻止关闭、弹原生确认，确认后经
+        // CloseConfirmed 放行位再 close()（否则确认后的 close 会再次触发本拦截死循环）。
+        // 查询失败放行——后端不在就没有会话可丢。崩溃/强杀路径由后端启动清扫兜底。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+                if let Some(st) = window.try_state::<CloseConfirmed>() {
+                    if st.0.load(std::sync::atomic::Ordering::SeqCst) {
+                        return; // 用户已确认，放行
+                    }
+                }
+                let busy = active_session_count();
+                if busy > 0 {
+                    api.prevent_close();
+                    let win = window.clone();
+                    use tauri_plugin_dialog::DialogExt;
+                    window
+                        .dialog()
+                        .message(format!(
+                            "有 {busy} 个 agent 会话正在运行，关闭将中断它们（任务与进度保留，重启后可重新发起）。"
+                        ))
+                        .title("关闭确认")
+                        .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom(
+                            "仍要关闭".to_string(),
+                            "取消".to_string(),
+                        ))
+                        .show(move |ok| {
+                            if ok {
+                                if let Some(st) = win.try_state::<CloseConfirmed>() {
+                                    st.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                                }
+                                let _ = win.close();
+                            }
+                        });
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building EasyVibe desktop");
 
@@ -240,6 +284,39 @@ pub fn run() {
             }
         }
     });
+}
+
+/// 关闭确认原料：查后端活动会话数（阻塞 ≤1.4s；查不到/解析失败视为 0——后端不在就没有会话可丢）
+fn active_session_count() -> usize {
+    use std::io::{Read, Write};
+    let addr: std::net::SocketAddr = match "127.0.0.1:7151".parse() {
+        Ok(a) => a,
+        Err(_) => return 0,
+    };
+    let mut stream = match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(600)) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(800)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(800)));
+    if stream
+        .write_all(b"GET /api/sessions/overview HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return 0;
+    }
+    let mut buf = Vec::new();
+    if stream.read_to_end(&mut buf).is_err() {
+        return 0;
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let body = text.split("\r\n\r\n").nth(1).unwrap_or("");
+    let v: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return 0,
+    };
+    v["data"]["active"].as_array().map(|a| a.len()).unwrap_or(0)
+        + v["data"]["queued"].as_array().map(|a| a.len()).unwrap_or(0)
 }
 
 /// 后端 30s 未就绪时的启动错误页（内嵌 HTML，无外部依赖）

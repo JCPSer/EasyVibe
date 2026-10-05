@@ -58,6 +58,15 @@ pub enum SessionStatus {
     Failed,
 }
 
+/// task 决策/重试/复审/回看等动作的统一返回体 `{status, gate}`（R3：REST 命名 DTO，
+/// 替代 handler 内联 `json!` 现拼）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskActionResult {
+    pub status: String,
+    pub gate: Option<String>,
+}
+
 /// session.statusChanged 事件的 data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -211,6 +211,20 @@ impl AgentSessionRepo {
         Ok(())
     }
 
+    /// 启动清扫（与 tasks.interrupt_running 同策）：后端重启后残留 running 的僵尸行收尸——
+    /// 历史/用量列表不再出现假"进行中"（2026-10-06 实弹：关应用留下的行挂了数小时）。
+    /// terminal_at 由调用方格式化（本 crate 无 chrono，口径随写入方 RFC3339）。
+    pub async fn interrupt_running(&self, terminal_at: &str) -> Result<u64, ApiError> {
+        let res = sqlx::query(
+            "UPDATE agent_sessions SET status = 'failed', terminal_at = ? WHERE status = 'running'",
+        )
+        .bind(terminal_at)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(res.rows_affected())
+    }
+
     /// M1.1：运行期落库标签与类型（note_label 即播——此前仅终态 finalize 才写，
     /// 运行中的会话在用量/运行页显示 unknown 或「归纳」误标，2026-10-05 实弹）
     pub async fn set_label_kind(&self, id: &str, label: &str, kind: &str) -> Result<(), ApiError> {

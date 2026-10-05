@@ -351,6 +351,13 @@ pub(crate) async fn run() {
         Ok(_) => {}
         Err(e) => tracing::warn!("[startup] interrupted 标记失败: {e}"),
     }
+    // agent_sessions 同步收尸（与 tasks 清扫同策）：关应用/崩溃留下的 running 僵尸行——
+    // 历史列表的假"进行中"（2026-10-06 实弹）。必须在 enqueue_pending 之前（spawn 会重新写 running）
+    match agent_session_repo.interrupt_running(&chrono::Utc::now().to_rfc3339()).await {
+        Ok(n) if n > 0 => tracing::warn!("[startup] {} 个 running 会话标记 failed（后端重启）", n),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("[startup] agent_sessions 收尸失败: {e}"),
+    }
     executor.enqueue_pending(None).await;
 
     // S2：定时落后度检查——地图保鲜状态变化推 freshness.changed（默认 30 分钟，adv.freshnessCheckMinutes 可调）。

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
 import { Loader2, ExternalLink, Trash2, Bookmark, Check, Download, Pencil } from 'lucide-react'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
+import { views as viewsApi, renameView, deleteView } from '@/api/chat'
 
 interface ViewItem {
   slug: string
@@ -38,7 +39,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   const load = useCallback(() => {
     if (!backendRepo) return
     setError(null)
-    fetch(`/api/repos/${backendRepo}/views`)
+    viewsApi(backendRepo)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -68,7 +69,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
   const remove = (slug: string) => {
     if (!backendRepo) return
     setDeleting(slug)
-    fetch(`/api/repos/${backendRepo}/views/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+    deleteView(backendRepo, slug)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setConfirming(null)
@@ -80,11 +81,7 @@ export function ViewsPanel({ backendRepo, onOpenView, validModuleIds }: Props) {
 
   const rename = (slug: string) => {
     if (!backendRepo || !renameVal.trim()) return
-    fetch(`/api/repos/${backendRepo}/views/${encodeURIComponent(slug)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: renameVal.trim() }),
-    })
+    renameView(backendRepo, slug, renameVal.trim())
       .then(async (r) => {
         if (!r.ok) {
           const d = await r.json().catch(() => null)

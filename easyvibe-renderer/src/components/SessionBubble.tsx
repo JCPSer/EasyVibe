@@ -4,6 +4,9 @@ import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/runtime/growthBus
 import { toast } from '@/runtime/toast'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel } from '@/runtime/sessionQueue'
+import { sessionsOverview } from '@/api/repos'
+import { listTasks } from '@/api/task'
+import { killSession, cancelSessionQueue } from '@/api/system'
 
 type QueueKind = 'patrol' | 'reinduce' | 'submap'
 
@@ -45,13 +48,13 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
   }, [ov])
 
   const pull = useCallback(() => {
-    fetch('/api/sessions/overview')
+    sessionsOverview()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Overview } | null) => setOv(d?.data ?? { active: [], queued: [] }))
       .catch(() => {})
     // 任务槽排队数：当前仓库 pending 任务（任务 permit 满退回 pending，不在会话队列里）
     if (backendRepo) {
-      fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+      listTasks(backendRepo)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { status?: string }[] } | null) =>
           setPendingTasks((d?.data ?? []).filter((t) => t.status === 'pending').length),
@@ -120,9 +123,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
 
   const kill = (a: OverviewActive) => {
     if (!window.confirm(`确定取消「${a.label}」（${a.repo}）？该操作不可撤销。`)) return
-    fetch(`/api/repos/${encodeURIComponent(a.repo)}/sessions/${encodeURIComponent(a.sessionId)}/kill`, {
-      method: 'POST',
-    })
+    killSession(a.repo, a.sessionId)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         toast(`已取消「${a.label}」`)
@@ -132,7 +133,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
   }
 
   const cancelQueue = (q: OverviewQueued) => {
-    fetch(`/api/repos/${encodeURIComponent(q.repo)}/session-queue`, { method: 'DELETE' })
+    cancelSessionQueue(q.repo)
       .then(async (r) => {
         if (r.status === 404) {
           const b = (await r.json().catch(() => null)) as { error?: string } | null

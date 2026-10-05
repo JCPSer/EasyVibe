@@ -7,7 +7,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json, Router,
 };
-use easyvibe_common::ApiError;
+use easyvibe_common::{ApiError, ApiResponse};
+use easyvibe_api_types::TaskActionResult;
 use easyvibe_event_bus::{publish, BusEvent};
 use easyvibe_ai_agent::SuggestClient as _;
 use crate::service::{self, CreateTaskRequest};
@@ -35,7 +36,7 @@ pub(crate) async fn post_task_kill(State(st): State<AppState>, Path((id, tid)): 
     let task = st.task_repo.get(&tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
     let sid = task.session_id.ok_or_else(|| ApiError::BadRequest(format!("任务 {tid} 无关联会话（未开始执行）")))?;
     st.session_manager.kill(&sid).await?;
-    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+    Ok(Json(ApiResponse::ok(true)).into_response())
 }
 
 /// 管理闭环（2026-10-03 现状重审 P0）：删除任务。
@@ -64,7 +65,7 @@ pub(crate) async fn delete_task(State(st): State<AppState>, Path((id, tid)): Pat
         m.remove(&tid);
     }
     publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: "deleted".into(), gate: None });
-    Ok(Json(serde_json::json!({ "success": true, "data": true })).into_response())
+    Ok(Json(ApiResponse::ok(true)).into_response())
 }
 
 /// 就地重试：failed/interrupted → pending 重新入队（见 TaskExecutor::retry 的语义注释）
@@ -72,7 +73,7 @@ pub(crate) async fn post_task_retry(State(st): State<AppState>, Path((id, tid)):
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.executor.retry(&tid).await?;
     publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: task.status.clone(), gate: task.gate.clone() });
-    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+    Ok(Json(ApiResponse::ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })).into_response())
 }
 
 /// 修改并复审：子 agent 审查打回（rejected）→ 注入审查意见 → 直达实施阶段重跑 →
@@ -81,7 +82,7 @@ pub(crate) async fn post_task_remediate(State(st): State<AppState>, Path((id, ti
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.executor.remediate(&tid).await?;
     publish(&st.event_bus, BusEvent::TaskStatus { repo: id, task_id: tid, status: task.status.clone(), gate: task.gate.clone() });
-    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+    Ok(Json(ApiResponse::ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })).into_response())
 }
 
 /// 管道回看·节点重开（方案 §3.1）：body `{gate: "analysis"|"solution"}`——
@@ -94,7 +95,7 @@ pub(crate) async fn post_task_rewind(
     st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let target = body["gate"].as_str().ok_or_else(|| ApiError::BadRequest("缺少 gate 字段（analysis/solution）".into()))?;
     let task = st.executor.rewind(&tid, target).await?;
-    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+    Ok(Json(ApiResponse::ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })).into_response())
 }
 
 /// 人工触发子 agent 复审（代码审查节点的审查-修复闭环）：异步执行，结论经
@@ -104,7 +105,7 @@ pub(crate) async fn post_task_review(State(st): State<AppState>, Path((id, tid))
     let task = st.executor.review_now(&tid).await?;
     Ok((
         axum::http::StatusCode::ACCEPTED,
-        Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })),
+        Json(ApiResponse::ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })),
     )
         .into_response())
 }
@@ -134,7 +135,7 @@ pub(crate) async fn decide_task(State(st): State<AppState>, Path((id, tid)): Pat
         status: task.status.clone(),
         gate: task.gate.clone(),
     });
-    Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+    Ok(Json(ApiResponse::ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })).into_response())
 }
 
 pub(crate) async fn list_task_approvals(State(st): State<AppState>, Path((_, tid)): Path<(String, String)>) -> Result<Response, AppError> {

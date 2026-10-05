@@ -8,6 +8,8 @@ import { buildModuleTask, type TaskDraft } from '@/shared/logic/taskContext'
 import { onPatrolFinished } from '@/runtime/growthBus'
 import { enqueue } from '@/runtime/sessionQueue'
 import { toast } from '@/runtime/toast'
+import { prunePatrolRuns, healthDashboard } from '@/api/repos'
+import { patrol } from '@/api/canvas'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
@@ -101,7 +103,7 @@ export function HealthPage({
     if (!backendRepo || pruning) return
     setPruning(true)
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs?keep=${pruneKeep}`, { method: 'DELETE' })
+      const r = await prunePatrolRuns(backendRepo, pruneKeep)
       const d = await r.json().catch(() => null)
       if (!r.ok) throw new Error(d?.error ?? '清理失败')
       toast(`已清理 ${d?.data?.deleted ?? 0} 条历史巡检（保留最近 ${pruneKeep} 次）`)
@@ -117,7 +119,7 @@ export function HealthPage({
   const load = useCallback(() => {
     if (!backendRepo) return
     setLoading(true)
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/health-dashboard`)
+    healthDashboard(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Dashboard } | null) => setData(d?.data ?? null))
       .catch(() => setData(null))
@@ -154,7 +156,7 @@ export function HealthPage({
     if (!backendRepo || starting) return
     setStarting(true)
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' })
+      const r = await patrol(backendRepo)
       // 单会话纪律：归纳/分析会话在跑时后端返回 409——入队，当前会话结束后自动接续
       if (!r.ok) {
         const body = await r.json().catch(() => null)

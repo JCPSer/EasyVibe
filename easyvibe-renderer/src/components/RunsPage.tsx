@@ -18,6 +18,8 @@ import { toast } from '@/runtime/toast'
 import { toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel, type SessionQueueKind } from '@/runtime/sessionQueue'
 import { useRunsAutoSelect } from '@/hooks/useRunsAutoSelect'
+import { agentSessions, sessionsOverview } from '@/api/repos'
+import { sessionOutput, killSession, cancelSessionQueue } from '@/api/system'
 
 // 「运行」页（docs/runs-page-design-v1.md M2 完成体）：
 // 左栏三态会话列表（运行中/排队中/历史——历史为 agent_sessions 库表，重启后仍可回放）
@@ -164,9 +166,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
     (sessionId: string, afterSeq = 0, repoOverride?: string) => {
       const repo = repoOverride ?? sessionsRepoRef.current.get(sessionId) ?? backendRepo
       if (!repo) return
-      fetch(
-        `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${afterSeq}&limit=5000`
-      )
+      sessionOutput(repo, sessionId, afterSeq)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { seq: number; stream: string; line: string; ts: string }[] } | null) => {
           const rows = d?.data ?? []
@@ -183,7 +183,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
 
   const loadHistory = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/agent-sessions`)
+    agentSessions(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: HistoryRow[] } | null) => {
         const rows = d?.data ?? []
@@ -204,7 +204,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   )
 
   const pull = useCallback(() => {
-    fetch('/api/sessions/overview')
+    sessionsOverview()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { active: OverviewActive[]; queued: OverviewQueued[] } } | null) => {
         const ov = d?.data ?? { active: [], queued: [] }
@@ -295,7 +295,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   const kill = () => {
     if (!active) return
     if (!window.confirm(`确定终止「${active.label}」？该操作不可撤销。`)) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/sessions/${encodeURIComponent(active.sessionId)}/kill`, { method: 'POST' })
+    killSession(backendRepo, active.sessionId)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         toast(`已终止「${active.label}」`)
@@ -305,7 +305,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   }
 
   const cancelQueue = (q: OverviewQueued) => {
-    fetch(`/api/repos/${encodeURIComponent(q.repo)}/session-queue`, { method: 'DELETE' })
+    cancelSessionQueue(q.repo)
       .then(async (r) => {
         if (r.status === 404) toast('没有排队任务', 'error')
         else if (!r.ok) toast(`取消排队失败（HTTP ${r.status}）`, 'error')

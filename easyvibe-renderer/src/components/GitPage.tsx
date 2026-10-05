@@ -7,6 +7,10 @@ import { toast } from '@/runtime/toast'
 import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/shared/logic/diffStat'
 import { healthColor } from '@/shared/logic/layout'
 import { onPatrolFinished } from '@/runtime/growthBus'
+import { gitStatus, gitLog, commitMessage, postCommit, discard, gitSync, gitCommit } from '@/api/git'
+import { freshness as freshnessApi, healthHistory, patrol } from '@/api/canvas'
+import { listTasks } from '@/api/task'
+import { patrolRuns } from '@/api/repos'
 import type { CodeMap } from '@/types/map'
 
 // M4-4 Git 工作树（按 ui-mockups/Git工作树原型-v3.png 施工）：
@@ -88,11 +92,9 @@ export function GitPage({
   const [patrolAfter, setPatrolAfter] = useState(true)
   const [patroling, setPatroling] = useState(false)
 
-  const api = (p: string) => `/api/repos/${encodeURIComponent(backendRepo ?? '')}${p}`
-
   const load = useCallback(() => {
     if (!backendRepo) return
-    fetch(api('/git/status'))
+    gitStatus(backendRepo)
       .then(async (r) => {
         if (!r.ok) {
           const e = await r.json().catch(() => null)
@@ -105,15 +107,15 @@ export function GitPage({
       })
       .then((d: { data?: GitStatus } | null) => setStatus(d?.data ?? null))
       .catch(() => setGitError('后端不可达'))
-    fetch(api('/git/log?limit=30'))
+    gitLog(backendRepo, 30)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: GitLogRow[] } | null) => setCommits(d?.data ?? []))
       .catch(() => {})
-    fetch(api('/freshness'))
+    freshnessApi(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { status?: string } } | null) => setFreshness(d?.data?.status ?? null))
       .catch(() => {})
-    fetch(api('/tasks'))
+    listTasks(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: TaskLite[] } | null) => setTasks((d?.data ?? []).slice(0, 15)))
       .catch(() => {})
@@ -205,7 +207,7 @@ export function GitPage({
     if (!backendRepo || patroling) return
     setPatroling(true)
     try {
-      await fetch(api('/patrol'), { method: 'POST' })
+      await patrol(backendRepo)
       toast('巡检已发起（全量 · 可在健康看板看进度）')
     } catch {
       toast('巡检发起失败', 'error')
@@ -222,11 +224,7 @@ export function GitPage({
       const diffStat = status?.files
         .map((f) => `${f.path} | ${(f.adds ?? 0) + (f.dels ?? 0)} ${'+'.repeat(f.adds ?? 0)}${'-'.repeat(f.dels ?? 0)}`)
         .join('\n')
-      const r = await fetch(api('/git/commit-message'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: dominantTask?.id ?? null, modules: affected, diff_stat: diffStat ?? '' }),
-      })
+      const r = await commitMessage(backendRepo, { task_id: dominantTask?.id ?? null, modules: affected, diff_stat: diffStat ?? '' })
       const d = await r.json().catch(() => null)
       if (!r.ok || !d?.data?.message) {
         toast(d?.error ?? '生成失败', 'error')
@@ -246,11 +244,7 @@ export function GitPage({
     setCommitting(true)
     try {
       const full = footer ? `${message.trim()}\n\n${footer}` : message.trim()
-      const r = await fetch(api('/git/commit'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: full }),
-      })
+      const r = await postCommit(backendRepo, { message: full })
       const d = await r.json().catch(() => null)
       if (!r.ok) {
         toast(d?.error ?? '提交失败', 'error')
@@ -260,7 +254,7 @@ export function GitPage({
       setMessage('')
       setFooter(null)
       load()
-      if (patrolAfter) await fetch(api('/patrol'), { method: 'POST' }).catch(() => {})
+      if (patrolAfter) await patrol(backendRepo).catch(() => {})
     } finally {
       setCommitting(false)
     }
@@ -269,11 +263,7 @@ export function GitPage({
   const doDiscard = async (path: string) => {
     if (!backendRepo) return
     try {
-      const r = await fetch(api('/git/discard'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      })
+      const r = await discard(backendRepo, { path })
       const d = await r.json().catch(() => null)
       if (!r.ok) toast(d?.error ?? '撤销失败', 'error')
       else toast(path === '*' ? '已撤销全部未提交改动' : `已撤销 ${path}`)
@@ -288,7 +278,7 @@ export function GitPage({
     if (!backendRepo || busy) return
     setBusy(kind)
     try {
-      const r = await fetch(api(`/git/${kind}`), { method: 'POST' })
+      const r = await gitSync(backendRepo, kind)
       const d = await r.json().catch(() => null)
       if (!r.ok) toast(d?.error ?? `${kind === 'pull' ? '拉取' : '推送'}失败`, 'error')
       else toast(kind === 'pull' ? '已拉取（rebase）' : '已推送')
@@ -647,12 +637,12 @@ function EvolutionChart({
   useEffect(() => {
     let alive = true
     const loadSeries = async () => {
-      const runsRes = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs`)
+      const runsRes = await patrolRuns(backendRepo)
       const runs: { data?: { id: string; startedAt: string }[] } | null = runsRes.ok ? await runsRes.json() : null
       const timeByRun = new Map((runs?.data ?? []).map((r) => [r.id, toMs(r.startedAt) ?? 0]))
       const out: typeof series = []
       for (const g of affected) {
-        const res = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/modules/${encodeURIComponent(g.id)}/health-history`)
+        const res = await healthHistory(backendRepo, g.id)
         const d: { data?: HealthPoint[] } | null = res.ok ? await res.json() : null
         const points = (d?.data ?? [])
           .map((h) => ({ t: timeByRun.get(h.runId) ?? 0, s: h.score }))
@@ -762,7 +752,7 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
     setDetail(null)
     if (!backendRepo) return
     setDetailLoading(true)
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/git/commit?hash=${encodeURIComponent(hash)}`)
+    gitCommit(backendRepo, hash)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data?: CommitDetail }) => setDetail(d.data ?? null))
       .catch(() => toast('提交详情加载失败', 'error'))

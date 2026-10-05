@@ -125,6 +125,7 @@ fn rest_dto_single_source_exists() {
     for needed in [
         "pub struct RepoInfo",
         "pub struct HealthResponse",
+        "pub struct TaskActionResult",
         "pub struct TaskStatusChanged",
         "pub struct SessionOutput",
         "pub struct PatrolFinished",
@@ -146,7 +147,7 @@ const JSON_RATCHET: &[(&str, usize)] = &[
     ("routes/repo.rs", 2),
     ("routes/sessions.rs", 9),
     ("routes/settings.rs", 19),
-    ("routes/task.rs", 15),
+    ("routes/task.rs", 8),
     ("service/chat.rs", 3),
     ("service/map.rs", 7),
     ("service/task.rs", 2),
