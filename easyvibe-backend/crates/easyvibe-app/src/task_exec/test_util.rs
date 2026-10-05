@@ -43,6 +43,7 @@ use super::*;
             },
             framework_transparent: framework.into(),
             user_entry_skills: vec![],
+            custom: HarnessCustom::default(),
         }))
     }
 

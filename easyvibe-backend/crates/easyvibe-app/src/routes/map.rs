@@ -16,6 +16,12 @@ use tracing::info;
 use crate::assets::resolve_text_asset;
 use crate::freshness;
 
+/// 自定义补充 global 块（方案 v2 注入点 #5-#7：归纳/子图/巡检 prompt 尾部追加）。
+/// spawn 时刻读锁——custom 保存后对后续会话生效（热生效语义，与任务链一致）。
+async fn global_custom_block(harness: &std::sync::Arc<tokio::sync::RwLock<crate::task_exec::Harness>>) -> String {
+    crate::task_exec::custom_block(&harness.read().await.custom.global)
+}
+
 pub(crate) async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let snap = st.map_service.load_map(&repo).await?;
@@ -156,6 +162,8 @@ pub(crate) async fn analyze_submap_inner(st: AppState, id: String, module_id: St
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
         .replace("<MODULE_ID>", &module_id)
         .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());
+    // 注入点 #6：自定义 global 块追加到子图分析 prompt 尾部
+    let prompt = format!("{prompt}{}", global_custom_block(&st.harness).await);
     let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
     let session = st
         .session_manager
@@ -186,9 +194,11 @@ pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Res
     // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
     let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
     let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+    // 注入点 #5：自定义 global 块追加到归纳 prompt 尾部
+    let prompt = format!("{}{}", st.prompt_template, global_custom_block(&st.harness).await);
     let session = st
         .session_manager
-        .start_induction(&repo.id, &repo.root, &st.prompt_template, &resolved.command, &resolved.args, None)
+        .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
         .await?;
     // I1：气泡标签「归纳」
     st.session_manager.note_label(&session.session_id, "归纳".into()).await;
@@ -316,6 +326,8 @@ pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Respo
                     .replace("<SCHEMA_PATH>", &st.schema_path),
                 _ => st.patrol_prompt.to_string(),
             };
+            // 注入点 #7：自定义 global 块追加到巡检 prompt 尾部
+            let prompt = format!("{prompt}{}", global_custom_block(&st.harness).await);
             // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
             let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
             // 秒退假成功防线：记录 spawn 前 map.json mtime——agent 进程退出码 0 但没写回

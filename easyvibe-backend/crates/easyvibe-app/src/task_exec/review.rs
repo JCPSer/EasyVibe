@@ -10,6 +10,7 @@ pub struct ReviewVerdict {
 }
 
 /// 跑独立审查会话并等终态。25 分钟上限（审查是分钟级任务；超时判不可用不阻断）。
+/// custom：自定义层补充（注入点 #3——global + development 块拼进审查 prompt）。
 pub(crate) async fn run_subagent_review(
     session_manager: &SessionManager,
     agent_command: &str,
@@ -17,9 +18,10 @@ pub(crate) async fn run_subagent_review(
     repo_id: &str,
     repo_root: &std::path::Path,
     task: &TaskRow,
+    custom: &HarnessCustom,
 ) -> Option<ReviewVerdict> {
     let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
-    let prompt = assemble_review_prompt(task, &user);
+    let prompt = assemble_review_prompt(task, &user, custom);
     // 审查会话沿用任务槽 CLI 参数（可经 settings `agent.args.review` 单独收紧/换模型）
     let session = session_manager
         .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(25 * 60)))
@@ -43,9 +45,10 @@ pub(crate) async fn run_phase_doc_review(
     repo_root: &std::path::Path,
     task: &TaskRow,
     phase: u8,
+    custom: &HarnessCustom,
 ) -> Option<ReviewVerdict> {
     let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
-    let prompt = assemble_phase_review_prompt(task, phase, &user);
+    let prompt = assemble_phase_review_prompt(task, phase, &user, custom);
     // 初审是读文档+下结论，比实施审查轻——15 分钟上限足够
     let session = session_manager
         .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(15 * 60)))

@@ -1,11 +1,16 @@
-//! task_exec::harness —— harness 出厂底账部署、装载与透明模式中和（文件 IO + 纯函数）。
+//! task_exec::harness —— harness 出厂层密封部署、一次性迁移、自定义层装载与透明模式中和（文件 IO + 纯函数）。
+//!
+//! 两层分离（2026-10-05 方案 v2，用户裁定）：
+//! - 出厂层（~/.easyvibe/harness/）：编译期内嵌底账的换姓形态，**密封**——每次启动幂等
+//!   全量覆写，不对用户展示、不可修改（deploy_sealed）；
+//! - 自定义层（~/.easyvibe/harness-custom/）：用户可编辑的补充规则（global.md /
+//!   rule_development.md 两槽），只追加不修改，带独立开关（state.json）。
+//! 老版本用户对出厂层的修改经一次性迁移（哨兵防重入）整体挪入自定义层。
 
 use super::*;
 
-/// 出厂 harness 只读底账：编译期内嵌（§12c 决策——reference/ 只是构建源，运行时唯一
-/// 生效副本是数据目录的用户可编辑层；"改哪份才生效"的二义就此消灭）
-/// 注意：内嵌的仍是 reference/ 原稿（含 .claude 路径）——换姓发生在写盘时
-/// （adapt_builtin_content），原稿保持用户参考材料原样不动
+/// 出厂 harness 只读底账：编译期内嵌。注意：内嵌的仍是 reference/ 原稿（含 .claude
+/// 路径与 <user_name>）——换姓发生在写盘/装载时（adapt_builtin_content），原稿保持不动。
 pub const BUILTIN_HARNESS: &[(&str, &str)] = &[
     ("manifest.json", include_str!("../../../../../reference/manifest.json")),
     ("inject-prompt.md", include_str!("../../../../../reference/inject-prompt.md")),
@@ -16,7 +21,29 @@ pub const BUILTIN_HARNESS: &[(&str, &str)] = &[
 
 const TRANSPARENT_MODE_LINE: &str = "（透明执行模式：禁止向用户提问或要求确认；需求有歧义时按最合理假设直接执行，并在 [EASYVIBE-RESULT] 的 summary 中说明你做出的假设。）";
 
-/// Harness manifest（§12c 边界定稿：控制面声明，装配层唯一需要解析的文件）
+/// 自定义补充引导句（装配约定：与出厂冲突时以补充为准）
+pub const CUSTOM_BLOCK_HEADER: &str = "【用户补充规则——优先级高于出厂规则，与出厂冲突时以补充为准】";
+
+/// 自定义层槽位：(文件名, state.json 键)。bugfix 槽待任务类型字段落地后追加。
+pub const CUSTOM_SLOTS: &[(&str, &str)] = &[
+    ("global.md", "global"),
+    ("rule_development.md", "development"),
+];
+
+/// 单槽大小上限（防 prompt 爆炸）
+const CUSTOM_MAX_BYTES: u64 = 64 * 1024;
+
+/// 一次性迁移完成哨兵（harness-custom/ 内）
+const MIGRATION_SENTINEL: &str = ".migrated-v2";
+
+/// 自定义层装载产物：None = 无内容或已停用（装配层统一表现）
+#[derive(Debug, Clone, Default)]
+pub struct HarnessCustom {
+    pub global: Option<String>,
+    pub development: Option<String>,
+}
+
+/// Harness manifest（控制面声明，装配层唯一需要解析的文件）
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessManifest {
@@ -47,6 +74,8 @@ pub struct Harness {
     pub framework_transparent: String,
     /// user_entry 插槽 skill 正文（供对话 prompt；透明 agent 永不注入）
     pub user_entry_skills: Vec<String>,
+    /// 自定义层（harness-custom/）：仅启用的槽有内容
+    pub custom: HarnessCustom,
 }
 
 pub fn harness_dir() -> PathBuf {
@@ -62,87 +91,140 @@ pub fn harness_dir() -> PathBuf {
     }
 }
 
-/// 出厂底账部署：缺失文件从内嵌底账补齐（写盘时路径换姓）；**不覆盖**用户已编辑的文件。
-/// 版本迁移：内置 manifest 版本高于磁盘 → 三份规则正文仅在"磁盘内容仍等于出厂原稿"
-/// （即用户未改动）时重写为换姓版；manifest 只抬版本号、保留用户其余字段。
-/// 恢复默认（reset）走 deploy_builtin_force。
-pub fn deploy_builtin(dir: &std::path::Path) -> Result<(), ApiError> {
-    // 版本迁移判定（manifest 版本比较）
-    let disk_ver = std::fs::read_to_string(dir.join("manifest.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v["version"].as_str().map(str::to_string));
-    let builtin_ver = BUILTIN_HARNESS
-        .iter()
-        .find(|(rel, _)| *rel == "manifest.json")
-        .and_then(|(_, c)| serde_json::from_str::<serde_json::Value>(c).ok())
-        .and_then(|v| v["version"].as_str().map(str::to_string));
-    let migrate = match (&builtin_ver, &disk_ver) {
-        (Some(b), Some(d)) => version_gt(b, d),
-        // 磁盘无 manifest（首次部署）或版本不可解析：不触发迁移，走缺失补齐
-        _ => false,
-    };
+/// 自定义层目录：出厂目录的兄弟（~/.easyvibe/harness-custom/）
+pub fn harness_custom_dir() -> PathBuf {
+    custom_dir_for(&harness_dir())
+}
 
+fn custom_dir_for(factory_dir: &std::path::Path) -> PathBuf {
+    factory_dir.with_file_name("harness-custom")
+}
+
+/// 出厂层密封部署（v2 语义，替代旧"缺失才补 + 版本迁移"）：幂等全量覆写。
+/// 比较基准 = 换姓后的底账（磁盘稳态就是换姓形态；手工写入未换姓原文也必然不等，照覆写）。
+pub fn deploy_sealed(dir: &std::path::Path) -> Result<(), ApiError> {
     for (rel, content) in BUILTIN_HARNESS {
         let p = dir.join(rel);
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
         }
-        if !p.exists() {
-            std::fs::write(&p, adapt_builtin_content(content))
+        let expected = adapt_builtin_content(content);
+        let same = std::fs::read_to_string(&p).map(|d| d == expected).unwrap_or(false);
+        if !same {
+            std::fs::write(&p, &expected)
                 .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
-            continue;
         }
-        if !migrate {
-            continue;
+    }
+    Ok(())
+}
+
+/// 一次性迁移（§3.3）：老版本用户对出厂层的修改 → 整体挪入自定义层。
+/// 哨兵防重入；播种"槽文件已存在则不覆盖"保证崩溃重入安全。
+/// 步骤 2 内部窗口（rename 后重铺前崩溃）：重入时出厂目录缺失 → tampered 判定重铺；
+/// 播种原料回退读最新 harness.backup-*。
+pub(crate) fn migrate_builtin_to_custom(factory_dir: &std::path::Path, custom_dir: &std::path::Path) {
+    let sentinel = custom_dir.join(MIGRATION_SENTINEL);
+    if sentinel.exists() {
+        return;
+    }
+    let backup = latest_harness_backup(factory_dir);
+    // 播种原料必须在 rename/重铺**之前**读进内存——重铺后出厂目录里已是新内容
+    // （步骤 2 内部崩溃窗口：目录缺失时回退读最新备份，旧内容仍找得回）
+    let read_old = |rel: &str| -> Option<String> {
+        std::fs::read_to_string(factory_dir.join(rel)).ok()
+            .or_else(|| backup.as_ref().and_then(|b| std::fs::read_to_string(b.join(rel)).ok()))
+    };
+    let old_contents: Vec<(String, Option<String>)> = BUILTIN_HARNESS.iter().map(|(rel, _)| (rel.to_string(), read_old(rel))).collect();
+    // 出厂层是否偏离出厂内容（文件缺失 = 偏离；目录缺失 = 偏离，须重铺）
+    let factory_tampered = !factory_dir.exists() || BUILTIN_HARNESS.iter().any(|(rel, content)| {
+        match std::fs::read_to_string(factory_dir.join(rel)) {
+            Ok(d) => d != adapt_builtin_content(content),
+            Err(_) => true,
         }
-        if *rel == "manifest.json" {
-            // 只抬版本号：磁盘 manifest 的其余字段（用户可能加过 routeRules）保留
-            if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&p).unwrap_or_default()) {
-                if let (Some(obj), Some(bv)) = (v.as_object_mut(), &builtin_ver) {
-                    obj.insert("version".into(), serde_json::Value::String(bv.clone()));
-                    if let Ok(s) = serde_json::to_string_pretty(&v) {
-                        let _ = std::fs::write(&p, s);
-                    }
-                }
+    });
+    if factory_tampered {
+        if factory_dir.exists() {
+            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+            let backup_path = factory_dir.with_file_name(format!("harness.backup-{ts}"));
+            if let Err(e) = std::fs::rename(factory_dir, &backup_path) {
+                warn!("[harness] 迁移归档失败（继续重铺，旧内容可能丢失）: {e}");
+            } else {
+                info!("[harness] 迁移：旧出厂层已归档到 {}", backup_path.display());
             }
+        }
+        if let Err(e) = deploy_sealed(factory_dir) {
+            warn!("[harness] 迁移重铺失败: {e}");
+        }
+    }
+    // 播种（不覆盖既有槽文件——崩溃重入也不重复播种）
+    const SEEDS: &[(&str, &str)] = &[
+        ("inject-prompt.md", "global.md"),
+        ("rule_development.md", "rule_development.md"),
+    ];
+    for (rel, slot) in SEEDS {
+        let slot_path = custom_dir.join(slot);
+        if slot_path.exists() {
             continue;
         }
-        // 规则正文：磁盘仍等于出厂原稿 = 未改动 → 重写为换姓版；已改动则保留用户版
-        let disk = std::fs::read_to_string(&p).unwrap_or_default();
-        if disk == *content {
-            std::fs::write(&p, adapt_builtin_content(content))
-                .map_err(|e| ApiError::Internal(format!("harness 换姓重写失败 {}: {e}", p.display())))?;
+        let old = old_contents.iter().find(|(r, _)| r == rel).and_then(|(_, c)| c.clone());
+        let Some(old) = old else { continue };
+        let differs = BUILTIN_HARNESS
+            .iter()
+            .find(|(r, _)| r == rel)
+            .map(|(_, c)| old != adapt_builtin_content(c))
+            .unwrap_or(true);
+        if differs {
+            let _ = std::fs::create_dir_all(custom_dir);
+            match std::fs::write(&slot_path, &old) {
+                Ok(_) => info!("[harness] 迁移：{} 的用户修改已播种到 {}", rel, slot),
+                Err(e) => warn!("[harness] 迁移播种失败 {}: {e}", slot_path.display()),
+            }
         }
     }
-    Ok(())
-}
-
-/// 恢复默认：全量覆盖用户层（与 deploy_builtin 的"缺失才补"语义相反）；同样写盘时换姓
-pub fn deploy_builtin_force(dir: &std::path::Path) -> Result<(), ApiError> {
-    for (rel, content) in BUILTIN_HARNESS {
-        let p = dir.join(rel);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
+    // manifest / grill-me 的差异不在 custom 范围：提示但不播种
+    let old_manifest = old_contents.iter().find(|(r, _)| r == "manifest.json").and_then(|(_, c)| c.clone());
+    if let Some(old) = old_manifest {
+        let builtin = BUILTIN_HARNESS.iter().find(|(r, _)| *r == "manifest.json").map(|(_, c)| *c).unwrap_or("");
+        if old != builtin {
+            info!("[harness] 迁移：manifest.json 的用户字段随出厂重置（可在 harness.backup-* 找回）");
         }
-        std::fs::write(&p, adapt_builtin_content(content))
-            .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
     }
-    Ok(())
+    let _ = std::fs::create_dir_all(custom_dir);
+    if let Err(e) = std::fs::write(&sentinel, b"") {
+        warn!("[harness] 迁移哨兵写入失败（下次启动将重入，播种不覆盖故安全）: {e}");
+    }
 }
 
-/// harness 装载（§12c 插槽内核）：
-/// 1) 底账补齐（缺失才写）→ 2) 解析 manifest → 3) 透明框架=路径换姓+按 manifest 中和
-/// 4) user_entry 插槽正文读取。装配层唯一解析 manifest，正文如何演化与防线解耦
-/// （实弹#3 教训：grep 硬编码与框架文本演化会漂移）。
+/// 出厂目录的兄弟中凡 harness.backup-* 都算备份，按名倒序取最新（名字含时间戳）
+fn latest_harness_backup(factory_dir: &std::path::Path) -> Option<PathBuf> {
+    let parent = factory_dir.parent()?;
+    let stem = factory_dir.file_name()?.to_str()?;
+    let mut best: Option<PathBuf> = None;
+    for e in std::fs::read_dir(parent).ok()?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with(&format!("{stem}.backup-")) && e.path().is_dir() && best.as_ref().map(|b| b.file_name().unwrap_or_default() < e.file_name()).unwrap_or(true) {
+            best = Some(e.path());
+        }
+    }
+    best
+}
+
+/// harness 生产装载：迁移（哨兵短路）→ 密封自检重铺 → 纯装载
 pub fn load_harness() -> Result<Harness, ApiError> {
     let dir = harness_dir();
-    load_harness_from(&dir)
+    let custom_dir = custom_dir_for(&dir);
+    migrate_builtin_to_custom(&dir, &custom_dir);
+    deploy_sealed(&dir)?;
+    load_harness_from_parts(&dir, &custom_dir)
 }
 
-/// 从指定目录装载（测试注入点——避免 env 变量在并行测试间的竞态）
+/// 从指定目录纯装载（**不 deploy、不迁移**——测试注入点，避免 env 变量在并行测试间的竞态
+/// 与"手工写入的文件被密封覆写"的相互干扰）。v2 拆分：生产入口 load_harness 才做密封。
 pub fn load_harness_from(dir: &std::path::Path) -> Result<Harness, ApiError> {
-    deploy_builtin(dir)?;
+    load_harness_from_parts(dir, &custom_dir_for(dir))
+}
+
+fn load_harness_from_parts(dir: &std::path::Path, custom_dir: &std::path::Path) -> Result<Harness, ApiError> {
     let manifest: HarnessManifest = serde_json::from_str(
         &std::fs::read_to_string(dir.join("manifest.json"))
             .map_err(|e| ApiError::Internal(format!("harness manifest 不可读: {e}")))?,
@@ -160,7 +242,50 @@ pub fn load_harness_from(dir: &std::path::Path) -> Result<Harness, ApiError> {
             .map_err(|e| ApiError::Internal(format!("user_entry 插槽文件不可读 {}: {e}", p.display())))?;
         user_entry_skills.push(content);
     }
-    Ok(Harness { dir: dir.to_path_buf(), manifest, framework_transparent, user_entry_skills })
+    let custom = load_custom(custom_dir);
+    Ok(Harness { dir: dir.to_path_buf(), manifest, framework_transparent, user_entry_skills, custom })
+}
+
+/// 自定义层装载：state.json 控制各槽开关（缺失默认启用）；停用或缺文件 = None。
+/// 内容过一遍 adapt_builtin_content（用户从旧文档抄 .claude 路径同样生效）；64KB 超限拒载不阻断。
+fn load_custom(custom_dir: &std::path::Path) -> HarnessCustom {
+    let state = read_custom_state(custom_dir);
+    let mut custom = HarnessCustom::default();
+    for (file, key) in CUSTOM_SLOTS {
+        let enabled = state[key].as_bool().unwrap_or(true);
+        if !enabled {
+            continue;
+        }
+        let p = custom_dir.join(file);
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        if meta.len() > CUSTOM_MAX_BYTES {
+            warn!("[harness] 自定义槽 {} 超限（{}B > {}B），拒载", file, meta.len(), CUSTOM_MAX_BYTES);
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&p) else { continue };
+        let adapted = adapt_builtin_content(&content);
+        match *key {
+            "global" => custom.global = Some(adapted),
+            "development" => custom.development = Some(adapted),
+            _ => {}
+        }
+    }
+    custom
+}
+
+/// 读 custom 层开关状态（state.json；缺失/损坏返回空对象 = 全部默认启用）
+pub fn read_custom_state(custom_dir: &std::path::Path) -> serde_json::Value {
+    std::fs::read_to_string(custom_dir.join("state.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// 写 custom 层开关（toggle 端点用；不热装载——由端点层完成，与既有 put 同纪律）
+pub fn write_custom_state(custom_dir: &std::path::Path, state: &serde_json::Value) -> Result<(), ApiError> {
+    std::fs::create_dir_all(custom_dir).map_err(|e| ApiError::Internal(format!("harness-custom 目录创建失败: {e}")))?;
+    let s = serde_json::to_string_pretty(state).map_err(|e| ApiError::Internal(format!("开关状态序列化失败: {e}")))?;
+    std::fs::write(custom_dir.join("state.json"), s).map_err(|e| ApiError::Internal(format!("开关状态写入失败: {e}")))
 }
 
 /// 透明执行中和：命中 manifest 声明模式的行替换为透明执行指令（§9 #4 对齐）

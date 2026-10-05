@@ -443,6 +443,7 @@ impl TaskExecutor {
         let this = self.clone();
         let tid = task_id.to_string();
         tokio::spawn(async move {
+            let custom = this.harness.read().await.custom.clone();
             let verdict = run_subagent_review(
                 &this.session_manager,
                 &resolved.command,
@@ -450,6 +451,7 @@ impl TaskExecutor {
                 &repo.id,
                 &repo.root,
                 &task,
+                &custom,
             )
             .await;
             let note = match &verdict {
@@ -545,13 +547,15 @@ impl TaskExecutor {
         // L2 哨兵原料：合约边界 + 基线（过程巡检用；终态采集另有权威计算）
         let contract = contract_patterns_from_context(&task.context);
         // 阶段化 prompt：1/2 只产出文档（禁改代码），3 才是完整实施 prompt
+        // custom：自定义层补充（注入点 #1/#2——阶段 prompt 注 global+development，实施注 global）
         let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+        let custom = self.harness.read().await.custom.clone();
         let prompt = match phase {
-            1 => assemble_phase1_prompt(&task, &user),
-            2 => assemble_phase2_prompt(&task, &user),
+            1 => assemble_phase1_prompt(&task, &user, &custom),
+            2 => assemble_phase2_prompt(&task, &user, &custom),
             _ => {
                 let h = self.harness.read().await;
-                assemble_task_prompt(&h.framework_transparent, &task)
+                assemble_task_prompt(&h, &task)
             }
         };
         // M1 配置体系：spawn 现读 settings 优先解析链（env 为 fallback）——
@@ -683,6 +687,7 @@ impl TaskExecutor {
                                         &repo_root,
                                         &task_for_review,
                                         phase,
+                                        &this.harness.read().await.custom,
                                     )
                                     .await
                                     {
@@ -705,6 +710,7 @@ impl TaskExecutor {
                                         &repo_name,
                                         &repo_root,
                                         &task_for_review,
+                                        &this.harness.read().await.custom,
                                     )
                                     .await;
                                     match review_v

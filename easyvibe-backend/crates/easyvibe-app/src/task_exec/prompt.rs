@@ -28,9 +28,24 @@ pub(crate) fn remediation_section(context_json: &str) -> String {
     }
 }
 
+/// 自定义补充块（方案 v2 §4）：有内容时带固定引导句追加；空槽/停用 = 空串，
+/// 装配产物与无 custom 时逐字节一致（无回归契约）。槽内容已在装载时做过路径换姓。
+pub(crate) fn custom_block(c: &Option<String>) -> String {
+    match c.as_deref().map(str::trim) {
+        Some(t) if !t.is_empty() => format!("\n\n{}\n{}\n", CUSTOM_BLOCK_HEADER, t),
+        _ => String::new(),
+    }
+}
+
+/// 阶段 prompt 共用的补充块：global（团队通用）+ development（流程规则）。
+pub(crate) fn custom_blocks_dev(custom: &HarnessCustom) -> String {
+    format!("{}{}", custom_block(&custom.global), custom_block(&custom.development))
+}
+
 /// 阶段 1 prompt：只产出需求矩阵，禁改代码（rule_development 2.1）。
 /// 产出后由用户在 analysis 关评审——评审通过才进阶段 2。
-pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
+/// custom：自定义层补充（global + development 块，方案 v2 §4 注入点 #2）。
+pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是需求分析 agent（harness 规则正文 2.1 的执行者）。**只做需求分析，禁止修改任何代码文件。**
@@ -46,18 +61,19 @@ pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str) -> String {
    文档必须含「评审意见栏」（留空待用户填写）。
 3. 更新同目录 INDEX-<yyyy-MM>.md 索引。
 4. 不要实施任何代码改动——实施发生在用户评审通过之后。
-5. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"需求矩阵已产出：一句话概括","changed_modules":[]}}"#,
+5. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"需求矩阵已产出：一句话概括","changed_modules":[]}}{custom}"#,
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         feedback = remediation_section(&task.context),
+        custom = custom_blocks_dev(custom),
         user = user,
     )
 }
 
 /// 阶段 2 prompt：只产出方案设计，禁改代码（rule_development 2.2）。
 /// 基于已评审通过的需求矩阵；产出后由用户在 solution 关评审——通过才进阶段 3 实施。
-pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
+pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是方案设计 agent（harness 规则正文 2.2 的执行者）。**只做方案设计，禁止修改任何代码文件。**
@@ -78,11 +94,12 @@ pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
    文档必须含「评审意见栏」（留空待用户填写）。
 5. 更新同目录 INDEX-<yyyy-MM>.md 索引。
 6. 不要实施任何代码改动——实施发生在用户评审通过之后。
-7. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"方案设计已产出：一句话概括","changed_modules":[]}}"#,
+7. 最后一行输出：[EASYVIBE-RESULT] {{"summary":"方案设计已产出：一句话概括","changed_modules":[]}}{custom}"#,
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         feedback = remediation_section(&task.context),
+        custom = custom_blocks_dev(custom),
         user = user,
     )
 }
@@ -93,7 +110,7 @@ pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str) -> String {
 /// （与 A 案协议同一规范路径，dev-docs 端点自动捞取）。
 /// 结论行协议：`[EASYVIBE-REVIEW] {"verdict":"pass|fail","summary":"一句话"}`
 /// 审查自身失败/超时 → None（不阻断：diff 关照常，人机审查兜底）。
-pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str) -> String {
+pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是独立代码审查 agent（harness 2.3.2 的执行者），只做审查，不做实现。
@@ -117,19 +134,20 @@ pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str) -> String {
 1. 审查报告写入 .easyvibe/development_docs/{user}/3_test_results/review-{task_id}.md
    （含明确的审查意见：通过 / 打回 + 理由；发现问题逐条列出）
 2. 最后一行输出：[EASYVIBE-REVIEW] {{"verdict":"pass","summary":"一句话结论"}}
-   verdict 只能是 pass 或 fail；有任一阻断性问题必须 fail。"#,
+   verdict 只能是 pass 或 fail；有任一阻断性问题必须 fail。{custom}"#,
         description = task.description,
         modules = if modules.is_empty() { "（未指定）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         user = user,
         task_id = task.id,
         harness_dir = harness_dir().to_string_lossy(),
+        custom = custom_blocks_dev(custom),
     )
 }
 
 /// 阶段初审 prompt：只审不改（禁止修改文件），按修改时间找最新产物文档通读，
 /// 对照任务书核质量，最后一行输出 [EASYVIBE-REVIEW] 结论。
-pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str) -> String {
+pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str, custom: &HarnessCustom) -> String {
     let (name, dir, focus) = if phase == 1 {
         (
             "需求矩阵",
@@ -162,21 +180,23 @@ pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str
 
 ## 输出
 审查过程不需要长篇大论；最后一行必须严格是：
-[EASYVIBE-REVIEW] {{"verdict":"pass 或 fail","summary":"一句话结论（≤80 字：通过理由或关键问题）"}}"#,
+[EASYVIBE-REVIEW] {{"verdict":"pass 或 fail","summary":"一句话结论（≤80 字：通过理由或关键问题）"}}{custom}"#,
         description = task.description,
         acceptance = if task.acceptance.is_empty() { "（未指定——按需求描述推断合理验收口径）".into() } else { task.acceptance.clone() },
         name = name,
         dir = dir,
         focus = focus,
+        custom = custom_blocks_dev(custom),
     )
 }
 
-/// 组装任务执行 prompt：harness 框架（路径适配）+ 表单字段 + 事前注入上下文。
+/// 组装任务执行 prompt：harness 框架（路径适配）+ 自定义补充（global 块，方案 v2 §4
+/// 注入点 #1——framework 后、任务书前）+ 表单字段 + 事前注入上下文。
 /// 路由/拷问/豁免全交给 LLM 决断（§9 #3/#5）。
-pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
+pub fn assemble_task_prompt(harness: &Harness, task: &TaskRow) -> String {
     let modules = serde_json::from_str::<Vec<String>>(&task.modules).unwrap_or_default();
     format!(
-        r#"{framework}
+        r#"{framework}{custom}
 
 ---
 
@@ -206,7 +226,8 @@ pub fn assemble_task_prompt(framework: &str, task: &TaskRow) -> String {
 - 实施完成后对接口/界面进行测试，测试结果写入 .easyvibe/development_docs/{user}/3_test_results/（规范路径，含 INDEX 索引）——对应规则正文 2.3.1。
 - 代码审查（规则正文 2.3.2）由系统独立审查 agent 执行，你无需自审；不要伪造审查结论。
 - 完成后最后一行输出：`[EASYVIBE-RESULT] {{"summary": "一句话总结", "changed_modules": ["模块id"]}}` 便于系统归档。"#,
-        framework = framework,
+        framework = harness.framework_transparent,
+        custom = custom_block(&harness.custom.global),
         description = task.description,
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
@@ -233,17 +254,4 @@ pub fn adapt_builtin_content(content: &str) -> String {
         .replace(".claude/", ".easyvibe/")
         .replace("<user_name>", &user)
         .replace(HOOKS_ANCHOR, "~/.claude/hooks/")
-}
-
-/// 版本号比较（a > b）。"1.2.0" vs "1.10.0" 按段数值比较，解析失败段按 0。
-pub(crate) fn version_gt(a: &str, b: &str) -> bool {
-    let segs = |s: &str| s.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
-    let (sa, sb) = (segs(a), segs(b));
-    for i in 0..sa.len().max(sb.len()) {
-        let (x, y) = (sa.get(i).copied().unwrap_or(0), sb.get(i).copied().unwrap_or(0));
-        if x != y {
-            return x > y;
-        }
-    }
-    false
 }

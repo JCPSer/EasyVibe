@@ -203,12 +203,15 @@ pub(crate) async fn chat_once(st: &AppState, id: &str, body: ChatHttpRequest) ->
             }
             let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
             // S1-3：user_entry 插槽注入（§9 #4——仅用户入口对话；透明 agent 的空插槽装配永不注入）
-            let skills = st.harness.read().await.user_entry_skills.join("\n\n---\n\n");
+            // 注入点 #4：自定义 global 块拼在 skills 之后（团队规则在入口对话同样生效）
+            let h = st.harness.read().await;
+            let skills = h.user_entry_skills.join("\n\n---\n\n");
             let prefix = if skills.trim().is_empty() {
                 String::new()
             } else {
                 format!("\n\n## 对话技能（grill-me：需求有歧义时主动用选择题澄清）\n\n{skills}\n\n---\n")
             };
+            let prefix = format!("{prefix}{}", crate::task_exec::custom_block(&h.custom.global));
             easyvibe_ai_agent::LlmQaClient::new_with_prefix(llm, &prefix).ask(&snap.json, &llm_message, &pairs, &body.images).await?
         }
     };

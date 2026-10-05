@@ -78,16 +78,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/set", axum::routing::put(put_setting))
         .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
         .route("/harness", get(get_harness))
-        .route("/harness/files", get(list_harness_files))
-        .route("/harness/file", get(get_harness_file).put(put_harness_file))
-        .route("/harness/backups", get(list_harness_backups))
-        .route("/harness/restore", axum::routing::post(restore_harness))
+        // 自定义层端点（方案 v2 §5——出厂层端点全删：files/file/reset/backups/restore）
+        .route("/harness/custom/files", get(list_custom_files))
+        .route("/harness/custom/file", get(get_custom_file).put(put_custom_file).delete(delete_custom_file))
+        .route("/harness/custom/toggle", axum::routing::put(toggle_custom_file))
+        .route("/harness/custom/template", get(get_custom_template))
+        .route("/harness/custom/generate", axum::routing::post(generate_custom))
         .route("/agent/status", get(agent_status))
         .route("/agent/detect", axum::routing::post(agent_detect))
         .route("/agent/test", axum::routing::post(agent_test))
         .route("/llm/test", axum::routing::post(llm_test))
         .route("/diagnostics", get(export_diagnostics))
-        .route("/harness/reset", axum::routing::post(reset_harness))
         .with_state(state.clone());
 
     let router = Router::new()

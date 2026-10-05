@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Terminal, Trash2, X, Zap,
+  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Pencil, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { Select } from '@/components/ui/SelectMenu'
@@ -29,7 +29,7 @@ const SLOTS: [string, string, string][] = [
 const SECTIONS = [
   { id: 'agent', label: '执行 agent', icon: Terminal, hint: 'CLI agent 命令与参数' },
   { id: 'services', label: '模型服务', icon: Bot, hint: 'LLM 服务与槽位绑定' },
-  { id: 'harness', label: 'Harness', icon: ShieldCheck, hint: '工作流护栏：恢复默认与备份' },
+  { id: 'harness', label: 'Harness', icon: ShieldCheck, hint: '自定义补充：追加团队规则' },
   { id: 'advanced', label: '高级参数', icon: SlidersHorizontal, hint: '上下文预算与自动巡检' },
   { id: 'about', label: '关于', icon: Info, hint: '版本与运行环境' },
 ] as const
@@ -730,213 +730,444 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   )
 }
 
-/// Harness 分区（2026-10-04 审计 P1 收口 + 编辑能力）：恢复默认 / 备份列表与恢复 /
-/// 规则文件在线编辑（保存即热装载，chat 与任务执行立即生效）。
+/// Harness 分区（两栏改造 2026-10-05 方案 v2 + 用户裁定）：出厂层不对用户展示，
+/// 单栏只呈现「自定义补充」——两槽卡片（iOS 开关：停用≠删除）、示例模板/AI 生成
+/// 都走"不落盘、不保存不生效"纪律；✨ AI 辅助生成 = 自然语言需求 → LLM 草稿 → 编辑器待审。
+const SLOT_WHERE: Record<string, string> = {
+  'global.md': '全部 9 个 agent 上下文——任务流水线（需求分析 / 方案设计 / 实施 / 审查 / 初审）、归纳、子图分析、巡检、自动归纳、入口对话',
+  'rule_development.md': 'development 流程——阶段 1/2 需求与方案、实施任务、独立代码审查、阶段产物初审',
+}
+const SLOT_LABEL: Record<string, string> = { global: 'global.md', development: 'rule_development.md' }
+
+interface CustomSlot {
+  path: string
+  slot: string
+  exists: boolean
+  size: number
+  mtimeMs: number
+  enabled: boolean
+}
+
+function IosToggle({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={`relative h-[25px] w-[42px] flex-shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40 ${
+        on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+      }`}
+    >
+      <span
+        className={`absolute top-[2px] h-[21px] w-[21px] rounded-full bg-white shadow transition-all duration-200 ${
+          on ? 'left-[19px]' : 'left-[2px]'
+        }`}
+      />
+    </button>
+  )
+}
+
 function HarnessSection({ about, onVersionChange }: { about: { backend: string; harness: string } | null; onVersionChange: (v: string) => void }) {
-  const [backups, setBackups] = useState<{ name: string; mtimeMs: number }[] | null>(null)
-  const [confirmReset, setConfirmReset] = useState(false)
-  const [confirmRestore, setConfirmRestore] = useState<string | null>(null)
+  const [slots, setSlots] = useState<CustomSlot[] | null>(null)
   const [busy, setBusy] = useState(false)
-  // 规则文件编辑
-  const [files, setFiles] = useState<string[] | null>(null)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [content, setContent] = useState('')
-  const [loaded, setLoaded] = useState('')
-  const [savingFile, setSavingFile] = useState(false)
+  // 编辑态：mode=create 时是"尚未落盘的草稿"（模板/AI 预填），保存才真正创建
+  const [editing, setEditing] = useState<{ path: string; content: string; loaded: string; mode: 'edit' | 'create'; source: 'template' | 'ai' | null } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+  // AI 生成弹窗
+  const [ai, setAi] = useState<{ slot: string; description: string; generating: boolean } | null>(null)
+
   const load = useCallback(() => {
-    fetch('/api/harness/backups')
+    fetch('/api/harness/custom/files')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { backups?: { name: string; mtimeMs: number }[] } } | null) => setBackups(d?.data?.backups ?? []))
-      .catch(() => setBackups([]))
-    fetch('/api/harness/files')
+      .then((d: { data?: { slots?: CustomSlot[] } } | null) => setSlots(d?.data?.slots ?? []))
+      .catch(() => setSlots([]))
+    fetch('/api/harness')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { files?: { path: string }[] } } | null) => setFiles((d?.data?.files ?? []).map((f) => f.path)))
-      .catch(() => setFiles([]))
-  }, [])
+      .then((d: { data?: { manifest?: { version?: string } } } | null) => {
+        const v = d?.data?.manifest?.version
+        if (v) onVersionChange(v)
+      })
+      .catch(() => null)
+  }, [onVersionChange])
   useEffect(load, [load])
-  const openFile = (path: string) => {
-    setEditing(path)
-    setContent('')
-    setLoaded('')
-    fetch(`/api/harness/file?path=${encodeURIComponent(path)}`)
+
+  const refresh = () => {
+    setBusy(true)
+    load()
+    setTimeout(() => setBusy(false), 300)
+  }
+
+  const openCreate = (slotKey: string) => {
+    const path = SLOT_LABEL[slotKey]
+    fetch(`/api/harness/custom/template?slot=${encodeURIComponent(slotKey)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data?: { content?: string } }) => {
-        setContent(d?.data?.content ?? '')
-        setLoaded(d?.data?.content ?? '')
+        const content = d?.data?.content ?? ''
+        setEditing({ path, content, loaded: '', mode: 'create', source: 'template' })
+      })
+      .catch(() => toast('示例模板加载失败', 'error'))
+  }
+
+  const openEdit = (path: string) => {
+    fetch(`/api/harness/custom/file?path=${encodeURIComponent(path)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { content?: string } }) => {
+        const content = d?.data?.content ?? ''
+        setEditing({ path, content, loaded: content, mode: 'edit', source: null })
       })
       .catch(() => toast('文件加载失败', 'error'))
   }
-  const saveFile = () => {
+
+  const save = () => {
     if (!editing) return
-    setSavingFile(true)
-    fetch('/api/harness/file', {
+    setSaving(true)
+    fetch('/api/harness/custom/file', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: editing, content }),
+      body: JSON.stringify({ path: editing.path, content: editing.content }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data?: { version?: string } }) => {
-        toast(`已保存并热装载（v${d?.data?.version ?? '?'}）`, 'info')
-        setLoaded(content)
-        if (d?.data?.version) onVersionChange(d.data.version)
+      .then(() => {
+        toast(`已保存并热装载——${editing.path} 立即注入 agent 上下文`, 'info')
+        setEditing(null)
+        refresh()
       })
       .catch(() => toast('保存失败（路径防线或磁盘错误）', 'error'))
-      .finally(() => setSavingFile(false))
+      .finally(() => setSaving(false))
   }
-  const reset = () => {
-    setBusy(true)
-    fetch('/api/harness/reset', { method: 'POST' })
+
+  const remove = (path: string) => {
+    fetch(`/api/harness/custom/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data?: { version?: string } }) => {
-        toast(`已恢复出厂 harness（v${d?.data?.version ?? '?'}），旧版本已备份`, 'info')
-        if (d?.data?.version) onVersionChange(d.data.version)
-        setConfirmReset(false)
-        load()
+      .then(() => {
+        toast(`已删除 ${path}，agent 上下文恢复为出厂规则`, 'info')
+        if (editing?.path === path) setEditing(null)
+        refresh()
       })
-      .catch(() => toast('恢复默认失败', 'error'))
-      .finally(() => setBusy(false))
+      .catch(() => toast('删除失败', 'error'))
+      .finally(() => setConfirmDel(null))
   }
-  const restore = (name: string) => {
-    setBusy(true)
-    fetch('/api/harness/restore', {
-      method: 'POST',
+
+  const toggle = (path: string, enabled: boolean) => {
+    fetch('/api/harness/custom/toggle', {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ backup: name }),
+      body: JSON.stringify({ path, enabled }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data?: { version?: string } }) => {
-        toast(`已从备份恢复 harness（v${d?.data?.version ?? '?'}）`, 'info')
-        if (d?.data?.version) onVersionChange(d.data.version)
-        setConfirmRestore(null)
-        load()
+      .then(() => {
+        toast(enabled ? `${path} 已启用，立即注入 agent 上下文` : `${path} 已停用（文件保留，仅停止注入）`, 'info')
+        refresh()
       })
-      .catch(() => toast('恢复失败（备份不存在或已被使用）', 'error'))
-      .finally(() => setBusy(false))
+      .catch(() => toast('开关切换失败', 'error'))
   }
+
+  const clearAll = () => {
+    const paths = (slots ?? []).filter((s) => s.exists).map((s) => s.path)
+    Promise.all(paths.map((p) => fetch(`/api/harness/custom/file?path=${encodeURIComponent(p)}`, { method: 'DELETE' })))
+      .then(() => {
+        toast('已清空全部自定义补充', 'info')
+        setEditing(null)
+        refresh()
+      })
+      .catch(() => toast('清空失败', 'error'))
+      .finally(() => setConfirmClear(false))
+  }
+
+  const openAi = (slotKey: string) => setAi({ slot: slotKey, description: '', generating: false })
+
+  const runAi = () => {
+    if (!ai || !ai.description.trim()) return
+    setAi({ ...ai, generating: true })
+    fetch('/api/harness/custom/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot: ai.slot, description: ai.description.trim() }),
+    })
+      .then((r) => (r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? String(r.status))))))
+      .then((d: { data?: { content?: string } }) => {
+        const content = d?.data?.content ?? ''
+        const path = SLOT_LABEL[ai.slot]
+        // 与示例模板同一纪律：填入编辑器待审，不落盘；不覆盖未保存的既有草稿
+        setEditing((prev) =>
+          prev && prev.path === path
+            ? { ...prev, content, source: 'ai' }
+            : { path, content, loaded: '', mode: prev?.path === path ? prev.mode : 'create', source: 'ai' }
+        )
+        setAi(null)
+        toast('AI 草稿已填入编辑器——审阅后保存才生效', 'info')
+      })
+      .catch((e: Error) => toast(`AI 生成失败：${e.message}`, 'error'))
+      .finally(() => setAi((a) => (a ? { ...a, generating: false } : null)))
+  }
+
+  const slotCards = (slots ?? []).map((s) => {
+    const statePill = !s.exists ? (
+      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-micro font-bold text-slate-400">未设置</span>
+    ) : s.enabled ? (
+      <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-bold text-emerald-600">● 已生效</span>
+    ) : (
+      <span className="rounded-full bg-red-50 dark:bg-red-950/40 px-2 py-0.5 text-micro font-bold text-red-500">已停用</span>
+    )
+    return (
+      <div
+        key={s.path}
+        className={`rounded-md border p-3 transition-colors ${
+          s.exists && !s.enabled
+            ? 'border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40'
+            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <span className={`mono text-[12px] font-bold ${s.exists && !s.enabled ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>
+            {s.path}
+          </span>
+          {statePill}
+          <span className="ml-auto flex items-center gap-2">
+            {s.exists && (
+              <span className="hidden text-micro text-slate-300 dark:text-slate-600 sm:inline">
+                {(s.size / 1024).toFixed(1)} KB · {s.mtimeMs ? new Date(s.mtimeMs).toLocaleString() : '—'} {!s.enabled && '· 文件保留'}
+              </span>
+            )}
+            {s.exists && <IosToggle on={s.enabled} onChange={(v) => toggle(s.path, v)} />}
+          </span>
+        </div>
+        <p className="mt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
+          <b className="font-semibold text-slate-500 dark:text-slate-400">生效位置：</b>
+          {SLOT_WHERE[s.path]}
+        </p>
+        <div className="mt-2 flex items-center gap-1.5">
+          {s.exists ? (
+            <>
+              <button
+                onClick={() => openEdit(s.path)}
+                className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
+              >
+                <Pencil size={11} /> 编辑
+              </button>
+              {confirmDel === s.path ? (
+                <button
+                  onClick={() => remove(s.path)}
+                  className="rounded-md bg-red-500 px-2 py-1 text-micro font-bold text-white hover:bg-red-600"
+                >
+                  确认删除
+                </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmDel(s.path)}
+                  onMouseLeave={() => setConfirmDel(null)}
+                  className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-red-300 hover:text-red-500"
+                >
+                  <Trash2 size={11} /> 删除
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => openCreate(s.slot)}
+              className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
+            >
+              <Plus size={11} /> 创建
+            </button>
+          )}
+          <button
+            onClick={() => openAi(s.slot)}
+            className="flex items-center gap-1 rounded-md border border-violet-200 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/30 px-2 py-1 text-micro font-bold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40"
+          >
+            <Sparkles size={11} /> AI 辅助生成
+          </button>
+          {editing?.path === s.path && (
+            <span className="text-micro font-semibold text-blue-500">编辑中…</span>
+          )}
+        </div>
+      </div>
+    )
+  })
+
   return (
     <div className="space-y-3">
-      {/* 板块头（文生图设计 v1）：标题 + 副文案 + 当前版本徽章 */}
+      {/* 头部：标题 + 副文案 + 出厂版本（出厂层不展示，只留版本事实） */}
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Harness 工作流护栏</h3>
-          <p className="text-cap mt-0.5 text-slate-400 dark:text-slate-500">管理您的工作流护栏规则与备份——编辑即时生效，可随时回滚</p>
+          <h3 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Harness 自定义补充</h3>
+          <p className="text-cap mt-0.5 leading-4 text-slate-400 dark:text-slate-500">
+            出厂工作流护栏随软件版本自动更新，不在此展示、不可修改；
+            <br />
+            以下内容追加到所有 agent 上下文，与出厂规则冲突时以补充为准
+          </p>
         </div>
         <span className="shrink-0 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-micro font-bold text-blue-600">
-          当前版本 v{about?.harness ?? '…'}
+          出厂版本 v{about?.harness ?? '…'}
         </span>
       </div>
 
-      {/* 规则文件编辑：保存即热装载（chat 与任务执行立即生效，无需重启）。
-          编辑器用深色代码主题（文生图设计 v1），与浅色的表单区形成"代码即资产"的视觉分层 */}
-      <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 dark:border-slate-800 px-3 pt-2">
-          {files === null && <p className="text-cap py-1.5 text-slate-400 dark:text-slate-500">加载中…</p>}
-          {files?.map((f) => (
-            <button
-              key={f}
-              onClick={() => openFile(f)}
-              className={`mono rounded-t-md border-b-2 px-2.5 py-1.5 text-[10.5px] transition-colors ${
-                editing === f
-                  ? 'border-blue-500 bg-slate-50 dark:bg-slate-950/70 font-semibold text-blue-700'
-                  : 'border-transparent text-slate-400 dark:text-slate-500 hover:text-slate-600'
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-        {editing ? (
-          <div>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={16}
-              spellCheck={false}
-              className="mono select-text w-full resize-y bg-slate-900 p-3 text-[11px] leading-5 text-slate-200 outline-none transition-colors focus:ring-2 focus:ring-blue-500/30 focus:ring-inset"
-            />
-            <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-2">
-              <p className="text-micro text-slate-300 dark:text-slate-600">
-                {content === loaded ? '未修改' : '● 有未保存修改'} · 保存后 chat 与任务执行立即生效；可用备份恢复回滚
-              </p>
-              <p className="mt-0.5 flex items-start gap-1 text-micro text-amber-500">
-                ⚠ 产物输出目录（.easyvibe/development_docs/）被任务流水线的归档/评审卡扫描依赖——改了它 agent 会照新路径写，但产物将在流水线中"失联"（执行本身不受影响）
-              </p>
-              <button
-                onClick={saveFile}
-                disabled={savingFile || content === loaded}
-                className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
-              >
-                {savingFile ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存
-              </button>
-            </div>
-          </div>
-        ) : (
-          <p className="px-3 py-6 text-center text-cap text-slate-300 dark:text-slate-600">点击上方文件名开始编辑</p>
-        )}
+      {/* 概念条：追加不是修改；停用不是删除 */}
+      <div className="flex items-start gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-slate-100/60 dark:from-slate-900 dark:to-slate-900/60 px-3 py-2.5">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-[11px]">🧩</span>
+        <p className="text-cap leading-4 text-slate-500 dark:text-slate-400">
+          <b className="font-semibold text-slate-600 dark:text-slate-300">追加，不是修改；停用，不是删除。</b>
+          补充写在出厂规则之后，agent 同时看到两者；拨动开关可临时停用（文件保留，随时恢复）；✨ AI 辅助生成帮你起草，保存前不会生效。
+        </p>
       </div>
 
-      {/* 恢复出厂：琥珀警示卡（文生图设计 v1 的警告语义色） */}
-      <div className="rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 p-4">
+      {/* 槽位卡片 */}
+      <div className="space-y-2">
+        {slots === null && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">加载中…</p>}
+        {slotCards}
+        {/* bugfix 槽占位：依赖任务类型字段 */}
+        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 p-3 opacity-70">
+          <div className="flex items-center gap-2">
+            <span className="mono text-[12px] font-bold text-slate-400 dark:text-slate-500">rule_bugfix.md</span>
+            <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-bold text-amber-600">即将推出</span>
+          </div>
+          <p className="mt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
+            <b className="font-semibold text-slate-400 dark:text-slate-500">生效位置：</b>
+            bugfix 类任务与审查 —— 依赖「任务类型」字段，落地后开放
+          </p>
+        </div>
+      </div>
+
+      {/* 编辑器：创建（模板/AI 预填）与编辑共用；不落盘纪律在顶部提示条明示 */}
+      {editing && (
+        <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+          <div className="flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 px-3 py-2">
+            <span className="mono text-[11px] font-bold text-slate-600 dark:text-slate-300">{editing.path}</span>
+            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">≤ 64 KB</span>
+            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">Markdown</span>
+            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">.claude 路径自动换姓</span>
+            <button
+              onClick={() => setEditing(null)}
+              className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-400 hover:text-slate-600"
+            >
+              <X size={11} /> {editing.mode === 'create' ? '取消创建' : '关闭'}
+            </button>
+          </div>
+          {editing.source && (
+            <div className="flex items-center gap-1.5 border-b border-violet-100 dark:border-violet-900/50 bg-violet-50 dark:bg-violet-950/30 px-3 py-1.5 text-micro text-violet-700 dark:text-violet-300">
+              <Sparkles size={11} className="shrink-0" />
+              {editing.source === 'template'
+                ? '示例模板已填入——按需删减后保存；不保存则不会创建，对 agent 无任何影响'
+                : 'AI 生成草稿——请审阅修改后保存；不保存则不会生效，也不会覆盖现有规则'}
+            </div>
+          )}
+          <textarea
+            value={editing.content}
+            onChange={(e) => setEditing({ ...editing, content: e.target.value })}
+            rows={14}
+            spellCheck={false}
+            className="mono select-text w-full resize-y bg-slate-900 p-3 text-[11px] leading-5 text-slate-200 outline-none transition-colors focus:ring-2 focus:ring-blue-500/30 focus:ring-inset"
+          />
+          <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-2">
+            <p className="text-micro text-slate-400 dark:text-slate-500">
+              {editing.mode === 'create' ? (
+                <span className="font-bold text-amber-500">● 未保存 · 槽位尚未创建</span>
+              ) : editing.content === editing.loaded ? (
+                '未修改'
+              ) : (
+                <span className="font-bold text-amber-500">● 有未保存修改</span>
+              )}
+              <span className="ml-1">保存后 agent 上下文立即生效，无需重启</span>
+            </p>
+            <button
+              onClick={save}
+              disabled={saving || (editing.mode === 'edit' ? editing.content === editing.loaded : !editing.content.trim())}
+              className="ml-auto flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存并热装载
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 危险区：清空全部 */}
+      <div className="rounded-md border border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/20 p-3">
         <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-1.5 text-[13px] font-bold text-amber-800">
-              <ShieldCheck size={13} className="text-amber-500" /> 恢复出厂 Harness
-            </div>
-            <p className="text-cap mt-0.5 text-amber-600/80">
-              当前的自定义规则整体备份为 harness.backup-*，出厂底账全量重铺——可随时从下方备份恢复
-            </p>
+            <div className="text-[12px] font-bold text-red-700 dark:text-red-400">清空全部自定义补充</div>
+            <p className="text-cap mt-0.5 text-red-500/80 dark:text-red-400/60">所有槽位文件与开关状态一并清除，agent 上下文恢复为纯出厂规则</p>
           </div>
-          {confirmReset ? (
+          {confirmClear ? (
             <button
-              onClick={reset}
+              onClick={clearAll}
               disabled={busy}
               className="shrink-0 rounded-md bg-red-500 px-3 py-1.5 text-micro font-bold text-white hover:bg-red-600 disabled:opacity-40"
             >
-              {busy ? '恢复中…' : '确认恢复'}
+              确认清空
             </button>
           ) : (
             <button
-              onClick={() => setConfirmReset(true)}
-              onMouseLeave={() => setConfirmReset(false)}
-              className="flex shrink-0 items-center gap-1 rounded-md border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              onClick={() => setConfirmClear(true)}
+              onMouseLeave={() => setConfirmClear(false)}
+              className="shrink-0 rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40"
             >
-              <RotateCcw size={11} /> 恢复默认
+              清空
             </button>
           )}
         </div>
       </div>
 
-      <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[13px] font-bold text-slate-700 dark:text-slate-200">历史备份</div>
-        </div>
-        {backups === null && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">加载中…</p>}
-        {backups?.length === 0 && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">暂无备份（恢复默认后此处出现旧版本）</p>}
-        {backups?.map((b) => (
-          <div key={b.name} className="flex items-center gap-2 border-t border-slate-50 py-2 first:border-0">
-            <span className="mono min-w-0 flex-1 truncate text-cap text-slate-500 dark:text-slate-400" title={b.name}>{b.name}</span>
-            <span className="tnum shrink-0 text-micro text-slate-300 dark:text-slate-600">{new Date(b.mtimeMs).toLocaleString()}</span>
-            {confirmRestore === b.name ? (
+      {/* AI 生成弹窗 */}
+      {ai && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setAi(null)}>
+          <div
+            className="w-[520px] max-w-[92vw] rounded-xl bg-white dark:bg-slate-900 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 px-4 pt-4">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-[13px] text-white">
+                <Sparkles size={14} />
+              </span>
+              <b className="text-[13px] text-slate-800 dark:text-slate-100">AI 辅助生成</b>
+              <span className="rounded-full border border-violet-200 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/30 px-2 py-0.5 text-micro text-violet-700 dark:text-violet-300">
+                {SLOT_LABEL[ai.slot]}
+              </span>
+            </div>
+            <p className="px-4 pt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
+              描述你的团队规则需求，AI 起草补充规则填入编辑器。
+              <b className="text-violet-600 dark:text-violet-300">生成内容需你审阅并保存后才生效。</b>
+            </p>
+            <textarea
+              autoFocus
+              value={ai.description}
+              onChange={(e) => setAi({ ...ai, description: e.target.value })}
+              rows={5}
+              placeholder="例：我们团队做金融系统，所有数据库查询必须参数化，代码审查必须额外检查越权访问和敏感数据日志……"
+              className="mx-4 mt-3 w-[calc(100%-2rem)] resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500/30"
+            />
+            <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+              {['所有 DB 查询必须参数化', '方案必须含性能与回滚章节', '公开 API 必须有文档注释'].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setAi({ ...ai, description: `例：我们要求${c}` })}
+                  className="rounded-full border border-violet-100 dark:border-violet-900/40 bg-violet-50/60 dark:bg-violet-950/20 px-2.5 py-1 text-micro text-violet-600 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30"
+                >
+                  例：{c}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3.5">
+              <span className="text-micro text-slate-300 dark:text-slate-600">将由已配置的 LLM 生成 · 不会自动生效</span>
               <button
-                onClick={() => restore(b.name)}
-                disabled={busy}
-                className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white disabled:opacity-40"
+                onClick={() => setAi(null)}
+                className="ml-auto rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700"
               >
-                {busy ? '…' : '确认恢复'}
+                取消
               </button>
-            ) : (
               <button
-                onClick={() => setConfirmRestore(b.name)}
-                onMouseLeave={() => setConfirmRestore(null)}
-                className="shrink-0 rounded border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                onClick={runAi}
+                disabled={ai.generating || !ai.description.trim()}
+                className="flex items-center gap-1 rounded-md bg-gradient-to-br from-violet-500 to-indigo-500 px-3.5 py-1.5 text-micro font-bold text-white hover:from-violet-600 hover:to-indigo-600 disabled:opacity-40"
               >
-                恢复此版本
+                {ai.generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} 生成草稿
               </button>
-            )}
+            </div>
           </div>
-        ))}
-        <p className="text-micro mt-2 leading-4 text-slate-300 dark:text-slate-600">恢复前当前层会自动留档为 harness.pre-restore-*，操作可反悔。</p>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

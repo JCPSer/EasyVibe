@@ -73,13 +73,16 @@ use tower::ServiceExt;
         assert_eq!(d2.status(), axum::http::StatusCode::OK);
         assert!(!doc_dir.join("a.md").exists(), "正常删除应落盘");
 
-        // 3) harness restore：非法备份名在触文件系统前被拒
-        let h = post(
-            app,
-            "/api/harness/restore".to_string(),
-            r#"{"backup":"../../etc/passwd"}"#.to_string(),
-        )
-        .await;
+        // 3) harness custom 槽：路径游戏在触文件系统前被拒（v2：出厂端点全删，防线收在白名单）
+        let h = app
+            .clone()
+            .oneshot(
+                axum::http::Request::delete("/api/harness/custom/file?path=../state.json")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(h.status(), axum::http::StatusCode::BAD_REQUEST, "路径游戏必须 400");
     }
 

@@ -10,6 +10,8 @@ use tracing::info;
 
 /// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
 /// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
+/// harness：自定义层注入（方案 v2 注入点 #8——auto-init 归纳 prompt 尾部追加 global 块，
+/// spawn 时刻读锁，custom 保存后对后续 auto-init 生效）。
 pub(crate) async fn spawn_repo_pipeline(
     r: easyvibe_map::Repo,
     map_service: Arc<MapService>,
@@ -18,13 +20,16 @@ pub(crate) async fn spawn_repo_pipeline(
     prompt_template: String,
     agent_command: String,
     agent_args: Vec<String>,
+    harness: Arc<tokio::sync::RwLock<crate::task_exec::Harness>>,
 ) {
     // F1 打开仓库自动初始化（后端侧）：无合法地图的仓库启动即触发归纳，
     // 产物经 watcher 推送，前端 map.changed 后自动渲染
     if map_service.cached(&r.id).await.is_none() {
         info!("[auto-init] {} 无合法地图，自动触发归纳", r.id);
+        // 注入点 #8：global 块拼在模板后（不影响 <REPO_ROOT> 占位——会话层替换发生在更下游）
+        let prompt = format!("{prompt_template}{}", crate::task_exec::custom_block(&harness.read().await.custom.global));
         match session_manager
-            .start_induction(&r.id, &r.root, &prompt_template, &agent_command, &agent_args, None)
+            .start_induction(&r.id, &r.root, &prompt, &agent_command, &agent_args, None)
             .await
         {
             Ok(session) => {

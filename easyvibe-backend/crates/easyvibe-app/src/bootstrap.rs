@@ -99,6 +99,10 @@ pub(crate) async fn run() {
     );
     info!("agent={} args={:?} prompt={}", agent_command, agent_args, prompt_path);
 
+    // M3-3/S1-3：harness 装载上移到管线挂载之前——spawn_repo_pipeline 注入点 #8 需要持有它
+    // （生产装载 = 迁移（哨兵短路）→ 密封自检重铺 → 纯装载）
+    let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
+
     // 每个仓库一个地图 watcher，变更翻译为总线事件
     // D5：抽成 spawn_repo_pipeline——启动挂载与 POST /api/repos 动态注册共用同一条管线
     for r in repos {
@@ -110,6 +114,7 @@ pub(crate) async fn run() {
             prompt_template.clone(),
             agent_command.clone(),
             agent_args.clone(),
+            harness.clone(),
         ));
     }
 
@@ -312,8 +317,7 @@ pub(crate) async fn run() {
         true,
     );
 
-    // M3-3/S1-3：harness 插槽内核装载（manifest 驱动 + 出厂底账补齐）+ 任务执行引擎 + pending 恢复
-    let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
+    // M3-3/S1-3：harness 已在管线挂载前装载（见上），此处仅打日志 + 任务执行引擎 + pending 恢复
     info!(
         "harness: {} v{}（user_entry 技能 {} 个）",
         harness.read().await.dir.display(),

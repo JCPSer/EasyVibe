@@ -56,6 +56,7 @@ pub(crate) async fn add_repo(State(st): State<AppState>, Json(body): Json<AddRep
         (*st.prompt_template).clone(),
         (*st.agent_command).clone(),
         (*st.agent_args).clone(),
+        st.harness.clone(),
     ));
     info!("[repo-add] 动态注册 {} -> {}", repo.id, repo.root.display());
     Ok(Json(serde_json::json!({ "success": true, "data": { "id": repo.id, "name": repo.name, "root": repo.root.to_string_lossy() } })).into_response())
