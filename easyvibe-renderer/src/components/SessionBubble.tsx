@@ -33,7 +33,7 @@ interface Overview {
   queued: OverviewQueued[]
 }
 
-export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: () => void }) {
+export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: (sessionId?: string) => void }) {
   const [ov, setOv] = useState<Overview | null>(null)
   // 终态红态：failed → 记住 label，红态 5s 后消失
   const [failed, setFailed] = useState<{ label: string } | null>(null)
@@ -140,9 +140,9 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { back
       {/* 顶部细条状态丸：26px 高单行——迷你转环 + 脉冲点 + label·进行中 + 已运行时长。
           点击整丸直达「运行」页看完整流水（跨仓库）；多会话时聚合计数 */}
       <div
-        onClick={onOpenRuns}
+        onClick={() => onOpenRuns?.(primary?.sessionId)}
         role={onOpenRuns ? 'button' : undefined}
-        title={onOpenRuns ? '查看 agent 流水（跨仓库）' : undefined}
+        title={onOpenRuns ? '查看 agent 流水（跨仓库；点击定位到当前会话）' : undefined}
         className={`glass elev-2 flex h-[26px] items-center gap-1.5 rounded-full border pl-1 pr-2.5 ${onOpenRuns ? 'cursor-pointer' : ''} ${
           failed ? 'border-red-300 dark:border-red-800' : 'border-slate-200 dark:border-slate-700'
         }`}

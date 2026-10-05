@@ -17,6 +17,7 @@ import { onQueueChanged, onSessionEvent, onSessionOutput } from '@/runtime/growt
 import { toast } from '@/runtime/toast'
 import { toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel, type SessionQueueKind } from '@/runtime/sessionQueue'
+import { useRunsAutoSelect } from '@/hooks/useRunsAutoSelect'
 
 // 「运行」页（docs/runs-page-design-v1.md M2 完成体）：
 // 左栏三态会话列表（运行中/排队中/历史——历史为 agent_sessions 库表，重启后仍可回放）
@@ -236,16 +237,8 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
     }
   }, [backendRepo, pull, loadHistory, appendLines])
 
-  // 用量页 deeplink：打开即选中对应会话（一次性消费）
-  useEffect(() => {
-    if (!initialSessionId) return
-    const id = initialSessionId
-    const t = window.setTimeout(() => {
-      select(id)
-      onInitialConsumed?.()
-    }, 0)
-    return () => window.clearTimeout(t)
-  }, [initialSessionId, onInitialConsumed, select])
+  // 选中逻辑（deeplink + 自动选中）已抽 hooks/useRunsAutoSelect——保组件体量红线
+  useRunsAutoSelect({ selectedId, initialSessionId, active: overview.active, history, select, onInitialConsumed })
 
   // WS 重连补拉：每个有流水的会话按 lastSeq 拉差集（幂等去重）
   useEffect(() => {

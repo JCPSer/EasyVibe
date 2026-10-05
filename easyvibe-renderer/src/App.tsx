@@ -280,7 +280,7 @@ export default function App() {
           page={page}
           onPageChange={handlePageChange}
           topBar={topBar}
-          topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} onOpenRuns={() => handlePageChange('runs')} /> : undefined}
+          topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} onOpenRuns={(sid) => (sid ? openRunsSession(sid) : handlePageChange('runs'))} /> : undefined}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
             <AttentionBar

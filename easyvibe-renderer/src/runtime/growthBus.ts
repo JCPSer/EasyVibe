@@ -37,6 +37,25 @@ export function notifyWsClosed() {
   wsCloseListener?.()
 }
 
+// WS 连接状态（2026-10-05 实弹：连接断开时全页面无感知，任务终端/生长直播静默死亡——
+// 状态可视化 + 消费端 HTTP 兜底两条防线；TopBar 显示"实时连接重连中"弱提示）
+let wsConnected = false
+const connListeners = new Set<(connected: boolean) => void>()
+export function setWsConnected(c: boolean) {
+  if (wsConnected === c) return
+  wsConnected = c
+  for (const l of connListeners) l(c)
+}
+export function isWsConnected(): boolean {
+  return wsConnected
+}
+export function onWsConnection(l: (connected: boolean) => void): () => void {
+  connListeners.add(l)
+  return () => {
+    connListeners.delete(l)
+  }
+}
+
 export type TaskEventListener = (event: { repo: string; taskId: string; status: string; gate?: string }) => void
 const taskListeners = new Set<TaskEventListener>()
 export function emitTaskEvent(e: { repo: string; taskId: string; status: string; gate?: string }) {

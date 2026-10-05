@@ -354,7 +354,7 @@ export function TaskWorkflowPage({
                 )}
 
                 {/* ③ 实施（及 ①② 产文档期间）：实时终端 */}
-                {(stage === 2 || isRunning) && <TerminalStage sel={sel} onOpenRuns={onOpenRuns} />}
+                {(stage === 2 || isRunning) && <TerminalStage sel={sel} repo={backendRepo} onOpenRuns={onOpenRuns} />}
 
                 {/* ④ diff 关：双栏查看器 + 审查-修复闭环 + 裁决 */}
                 {stage === 3 && (

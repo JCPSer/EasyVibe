@@ -1,6 +1,27 @@
-import { Activity, CircleHelp, FileDown, LayoutGrid, Lightbulb, Settings } from 'lucide-react'
+import { Activity, CircleHelp, FileDown, LayoutGrid, Lightbulb, Settings, WifiOff } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { isWsConnected, onWsConnection } from '@/runtime/growthBus'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TopCenter } from './TopCenter'
+
+/**
+ * 实时连接状态（2026-10-05 实弹：WS 断线曾导致任务终端静默空白而全界面无感知）。
+ * 断开时显示弱琥珀提示；正常时零占用。HTTP 兜底（终端/运行页）已覆盖主要消费端。
+ */
+function WsStatusChip() {
+  const [connected, setConnected] = useState(isWsConnected())
+  useEffect(() => onWsConnection(setConnected), [])
+  if (connected) return null
+  return (
+    <span
+      className="flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700"
+      title="与后端的实时连接已断开，正在自动重连；页面数据走 HTTP 轮询兜底（实时性降级）"
+    >
+      <WifiOff size={12} />
+      重连中
+    </span>
+  )
+}
 
 /**
  * 顶栏：中区仓库切换器 + 右区全局动作（视图/建议/巡检/导出/主题/帮助/设置）。
@@ -57,6 +78,7 @@ export function TopBar({
           onRemoveRepo={onRemoveRepo}
         />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <WsStatusChip />
         <button
           onClick={onToggleViews}
           className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"

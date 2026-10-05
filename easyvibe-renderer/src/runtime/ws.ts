@@ -15,6 +15,7 @@ import {
   emitSessionOutput,
   emitTaskEvent,
   notifyWsClosed,
+  setWsConnected,
 } from '@/runtime/growthBus'
 
 export type ConnectWsOptions = {
@@ -47,6 +48,7 @@ export function connectWs(opts: ConnectWsOptions): () => void {
     ws = create(`${proto}://${location.host}/ws`)
     ws.onopen = () => {
       retry = 0
+      setWsConnected(true)
       // 全量重同步（覆盖断线期间的变更）+ 队列快照重拉
       opts.onReconnected()
       // Y7：重连点比对后端版本——热重启/更新后前端是旧契约，提示刷新
@@ -84,7 +86,7 @@ export function connectWs(opts: ConnectWsOptions): () => void {
           emitSessionOutput({ sessionId: msg.data.sessionId, seq: msg.data.seq ?? 0, stream: msg.data.stream ?? 'stdout', line: msg.data.line })
           // 方案 v3 §4.2：终端推送挂在常驻的 App 层（页面卸载也在攒）——
           // 工作流页的终端缓冲因此切走再回来不丢
-          pushTerminalLine(msg.data.sessionId, msg.data.line)
+          pushTerminalLine(msg.data.sessionId, msg.data.seq ?? 0, msg.data.stream ?? 'stdout', msg.data.line)
         }
         if (msg.name === 'patrol.finished') {
           // R3 C1：巡检终态成为产品事件（真实模式会话 id 是 ind-N，靠事件而非前缀判定）
@@ -151,6 +153,7 @@ export function connectWs(opts: ConnectWsOptions): () => void {
     }
     ws.onclose = () => {
       if (closed) return
+      setWsConnected(false)
       notifyWsClosed() // R2：断线时通知 Canvas 退出生长模式（重连后重新进入会拉全量）
       retry += 1
       timer = window.setTimeout(connect, Math.min(15000, 1000 * 2 ** retry))

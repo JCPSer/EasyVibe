@@ -58,6 +58,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
   // agent 输出行：WS 直播（按 seq 幂等去重）+ 首挂补拉（接住订阅前已产出的行）
   const linesRef = useRef<string[]>([])
   const seenRef = useRef<Set<number>>(new Set())
+  const maxSeqRef = useRef(0)
   const silentTimerRef = useRef<number | null>(null)
   const sessionId = session?.sessionId ?? null
 
@@ -71,6 +72,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
       if (seq >= 0) {
         if (seenRef.current.has(seq)) return
         seenRef.current.add(seq)
+        if (seq > maxSeqRef.current) maxSeqRef.current = seq
       }
       const text = formatTickerLine(line, stream)
       if (!text) return
@@ -86,6 +88,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
   useEffect(() => {
     linesRef.current = []
     seenRef.current = new Set()
+    maxSeqRef.current = 0
     setTicker({ text: '', silent: false })
     if (silentTimerRef.current) window.clearTimeout(silentTimerRef.current)
     if (!enabled || !repo || !sessionId) return
@@ -102,8 +105,20 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
       if (e.sessionId !== sessionId) return
       pushLine(e.seq, e.stream, e.line)
     })
+    // 低频重同步兜底：WS 断线时 ticker 不冻死（progress.json 轮询同款的降级思路）
+    const resync = window.setInterval(() => {
+      fetch(
+        `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${maxSeqRef.current}&limit=5000`,
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { data?: { seq: number; stream: string; line: string }[] } | null) => {
+          for (const row of d?.data ?? []) pushLine(row.seq, row.stream, row.line)
+        })
+        .catch(() => {})
+    }, 10000)
     return () => {
       off()
+      window.clearInterval(resync)
       if (silentTimerRef.current) window.clearTimeout(silentTimerRef.current)
     }
   }, [enabled, repo, sessionId, pushLine, armSilentTimer])
