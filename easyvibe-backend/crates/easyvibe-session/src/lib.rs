@@ -21,11 +21,21 @@ use tracing::{info, warn};
 /// 会话完成/状态变化的回调（app 层翻译为 WS 事件）
 pub type SessionEventSender = tokio::sync::mpsc::Sender<SessionStatusChanged>;
 
-/// 会话 stdout 行（改进#2"分析中黑洞"——agent 过程直播的原料；行已截断）
+/// 会话 stdout/stderr 行（改进#2"分析中黑洞"——agent 过程直播的原料；行已截断）。
+/// M2 扩展：seq = 每会话单调序号（落盘回放/断线补拉的幂等锚点，看门任务内 AtomicU64）；
+/// stream = stdout/stderr（stderr 行仍带 [err] 前缀，stream 用于终端档着色）。
 #[derive(Debug, Clone)]
 pub struct SessionOutput {
     pub session_id: String,
+    pub seq: u64,
+    pub stream: OutputStream,
     pub line: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
 }
 
 /// M1/U1 会话元事件（2026-10-05）：真实模型名 / token 用量 / 退出码，看门任务边读边分派。
@@ -403,6 +413,9 @@ impl SessionManager {
         self.outputs.write().await.insert(session_id.clone(), stdout_buf.clone());
         let out_output_tx = self.output_tx.clone();
         let err_output_tx = self.output_tx.clone();
+        // M2：每会话 seq 单调计数（stdout/stderr 共用一个——seq 是全会话的行序号）
+        let out_seq = Arc::new(AtomicU64::new(0));
+        let err_seq = out_seq.clone();
         let out_session_id = session_id.clone();
         // P0：终止通道（主动 kill / 超时共用）——notify 幂等，重复 kill 无副作用
         let kill_notify = Arc::new(tokio::sync::Notify::new());
@@ -469,6 +482,8 @@ impl SessionManager {
                                 for pl in payload.lines() {
                                     let _ = out_output_tx.send(SessionOutput {
                                         session_id: out_session_id.clone(),
+                                        seq: out_seq.fetch_add(1, Ordering::SeqCst),
+                                        stream: OutputStream::Stdout,
                                         line: pl.chars().take(200).collect(),
                                     });
                                 }
@@ -510,6 +525,8 @@ impl SessionManager {
                                 // 失败可诊断：stderr 也进过程直播（[err] 前缀），任务卡可见死亡原因
                                 let _ = err_output_tx.send(crate::SessionOutput {
                                     session_id: err_id.clone(),
+                                    seq: err_seq.fetch_add(1, Ordering::SeqCst),
+                                    stream: OutputStream::Stderr,
                                     line: format!("[err] {peek}"),
                                 });
                                 line.clear();

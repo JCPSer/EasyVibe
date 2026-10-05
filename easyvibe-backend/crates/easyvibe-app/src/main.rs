@@ -83,6 +83,8 @@ pub struct AppState {
     pub health_repo: Arc<easyvibe_db::SqliteHealthRepository>,
     /// M1/U1：agent 会话持久层（运行页历史回放 + 用量页统计的地基）
     pub agent_session_repo: Arc<easyvibe_db::AgentSessionRepo>,
+    /// M2：会话输出行持久层（历史回放/断线补拉）
+    pub session_output_repo: Arc<easyvibe_db::SessionOutputRepo>,
     pub settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
     pub cipher: Arc<easyvibe_common::SecretCipher>,
     pub task_repo: Arc<easyvibe_db::SqliteTaskRepository>,
@@ -139,7 +141,7 @@ pub enum BusEvent {
     /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
     Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
     /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
-    SessionOutput { session_id: String, line: String },
+    SessionOutput { session_id: String, seq: u64, stream: String, line: String },
     /// R3 C1：巡检终态（健康历史落库后广播）——前端据此解除"巡检中"、刷新看板，
     /// 让"体检报告出来了"成为产品事件而不是用户刷新的猜测
     PatrolFinished { repo: String, run_id: String, status: String },
@@ -198,6 +200,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/git/discard", axum::routing::post(git::post_git_discard))
         .route("/repos/{id}/git/commit-message", axum::routing::post(git::post_git_commit_message))
         .route("/repos/{id}/sessions/{sid}/kill", axum::routing::post(post_session_kill))
+        .route("/repos/{id}/sessions/{sid}/output", get(get_session_output))
         .route("/repos/{id}/tasks/{tid}/kill", axum::routing::post(post_task_kill))
         .route("/repos/{id}/chat", get(get_chat).post(chat))
         .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
@@ -896,6 +899,25 @@ async fn get_usage(
 #[derive(serde::Deserialize)]
 struct UsageQuery {
     days: Option<i64>,
+}
+
+/// M2：会话输出回放/补拉——afterSeq 之后的行（升序，上限 5000）
+async fn get_session_output(
+    State(st): State<AppState>,
+    Path((repo, sid)): Path<(String, String)>,
+    Query(q): Query<OutputQuery>,
+) -> Result<Response, AppError> {
+    let rows = st
+        .session_output_repo
+        .fetch_after(&sid, q.after_seq.unwrap_or(0), q.limit.unwrap_or(5000).min(5000))
+        .await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct OutputQuery {
+    after_seq: Option<i64>,
+    limit: Option<i64>,
 }
 
 /// M1/U1：会话历史（运行页历史回放 / 用量页统计的数据源；M2 输出落盘前的元数据层）
@@ -2392,9 +2414,9 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                     name: "freshness.changed".into(),
                     data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
                 },
-                BusEvent::SessionOutput { session_id, line } => WsMessage {
+                BusEvent::SessionOutput { session_id, seq, stream, line } => WsMessage {
                     name: "session.output".into(),
-                    data: serde_json::json!({ "sessionId": session_id, "line": line }),
+                    data: serde_json::json!({ "sessionId": session_id, "seq": seq, "stream": stream, "line": line }),
                 },
                 BusEvent::PatrolFinished { repo, run_id, status } => WsMessage {
                     name: "patrol.finished".into(),
@@ -2621,11 +2643,13 @@ async fn main() {
     info!("域 2 状态库: {data_dir}/easyvibe.db");
     let health_repo = Arc::new(easyvibe_db::SqliteHealthRepository::new(database.pool().clone()));
     let agent_session_repo = Arc::new(easyvibe_db::AgentSessionRepo::new(database.pool().clone()));
+    let session_output_repo = Arc::new(easyvibe_db::SessionOutputRepo::new(database.pool().clone()));
     // session 管理：会话事件翻译进总线 + 终态落库（channel/manager 在前，桥在此，顺序不可乱）
     {
         let bus = event_bus.clone();
         let mgr_for_final = session_manager.clone();
         let repo_for_final = agent_session_repo.clone();
+        let session_output_repo_final = session_output_repo.clone();
         tokio::spawn(async move {
             while let Some(s) = session_rx.recv().await {
                 // M1/U1 终态收尾：label/kind/terminal_at 落库（INSERT OR IGNORE 兜底 Stub 巡检等无 spawn 会话）
@@ -2637,9 +2661,14 @@ async fn main() {
                     let sid = s.session_id.clone();
                     let repo_id = s.repo.clone();
                     let status = format!("{:?}", s.status).to_lowercase();
+                    let out_repo = session_output_repo_final.clone();
                     tokio::spawn(async move {
                         if let Err(err) = repo.finalize(&sid, &repo_id, &status, &now, None, Some(&label), &kind).await {
                             tracing::warn!("[agent_sessions] finalize 失败 {sid}: {err}");
+                        }
+                        // M2 容量策略：终态后每会话只留最近 50k 行
+                        if let Err(err) = out_repo.prune_session(&sid, 50_000).await {
+                            tracing::warn!("[session_outputs] 修剪失败 {sid}: {err}");
                         }
                     });
                 }
@@ -2653,10 +2682,71 @@ async fn main() {
         let bus = event_bus.clone();
         tokio::spawn(async move {
             while let Ok(o) = rx.recv().await {
-                publish(&bus, BusEvent::SessionOutput { session_id: o.session_id, line: o.line });
+                let stream = match o.stream {
+                    easyvibe_session::OutputStream::Stdout => "stdout",
+                    easyvibe_session::OutputStream::Stderr => "stderr",
+                };
+                publish(&bus, BusEvent::SessionOutput { session_id: o.session_id, seq: o.seq, stream: stream.into(), line: o.line });
             }
         });
     }
+    // M2：会话输出行 → session_outputs 落盘（独立接收器 + 300ms 攒批——
+    // 不占用 WS 桥路径；INSERT OR IGNORE 幂等，重放/补拉不重复）
+    {
+        let mut rx = session_manager.subscribe_output();
+        let repo = session_output_repo.clone();
+        tokio::spawn(async move {
+            let mut pending: Vec<easyvibe_db::SessionOutputRow> = Vec::new();
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(300));
+            ticker.tick().await; // 立即 tick 消耗
+            loop {
+                tokio::select! {
+                    recv = rx.recv() => {
+                        match recv {
+                            Ok(o) => {
+                                let stream = match o.stream {
+                                    easyvibe_session::OutputStream::Stdout => "stdout",
+                                    easyvibe_session::OutputStream::Stderr => "stderr",
+                                };
+                                pending.push(easyvibe_db::SessionOutputRow {
+                                    session_id: o.session_id,
+                                    seq: o.seq as i64,
+                                    ts: chrono::Utc::now().to_rfc3339(),
+                                    stream: stream.into(),
+                                    line: o.line,
+                                });
+                                if pending.len() >= 200 {
+                                    let batch = std::mem::take(&mut pending);
+                                    let repo = repo.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = repo.append_batch(&batch).await {
+                                            tracing::warn!("[session_outputs] 落盘失败: {e}");
+                                        }
+                                    });
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!("[session_outputs] 广播滞后，丢 {n} 行（回放端点兜底）");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                    _ = ticker.tick() => {
+                        if !pending.is_empty() {
+                            let batch = std::mem::take(&mut pending);
+                            let repo = repo.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = repo.append_batch(&batch).await {
+                                    tracing::warn!("[session_outputs] 落盘失败: {e}");
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // M1/U1：会话元事件 → agent_sessions 落盘（model/usage 边读边写；DB 故障只告警不阻流）
     {
         use easyvibe_session::SessionMetaUpdate as Meta;
@@ -2812,6 +2902,7 @@ async fn main() {
         patrol_service,
         health_repo,
         agent_session_repo,
+        session_output_repo,
         settings_repo,
         cipher: Arc::new(cipher),
         task_repo,
@@ -3106,6 +3197,7 @@ mod tests {
             patrol_service,
             health_repo,
             agent_session_repo: Arc::new(easyvibe_db::AgentSessionRepo::new(db.pool().clone())),
+            session_output_repo: Arc::new(easyvibe_db::SessionOutputRepo::new(db.pool().clone())),
             settings_repo,
             cipher: Arc::new(cipher),
             task_repo,
