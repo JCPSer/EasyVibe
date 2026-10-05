@@ -3,13 +3,30 @@
 use crate::state::*;
 use axum::{
     extract::{Path, State},
+    routing::{delete, get, post},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::ApiError;
 use easyvibe_event_bus::{publish, BusEvent};
 use easyvibe_ai_agent::SuggestClient as _;
 use crate::service::{self, CreateTaskRequest};
+
+/// 本域路由（R1 自注册）：任务 CRUD/决策/重试/复审/回看/审批/diff/建议。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
+        .route("/repos/{id}/tasks/{tid}", delete(delete_task))
+        .route("/repos/{id}/tasks/{tid}/decide", post(decide_task))
+        .route("/repos/{id}/tasks/{tid}/retry", post(post_task_retry))
+        .route("/repos/{id}/tasks/{tid}/remediate", post(post_task_remediate))
+        .route("/repos/{id}/tasks/{tid}/rewind", post(post_task_rewind))
+        .route("/repos/{id}/tasks/{tid}/review", post(post_task_review))
+        .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
+        .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
+        .route("/repos/{id}/tasks/{tid}/kill", post(post_task_kill))
+        .route("/repos/{id}/suggest", post(suggest))
+}
 
 /// 按任务终止：解析任务 → 会话 → kill（任务卡的「终止」按钮走这里）
 pub(crate) async fn post_task_kill(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {

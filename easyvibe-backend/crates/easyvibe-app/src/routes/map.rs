@@ -7,9 +7,24 @@ use crate::state::*;
 use axum::{
     extract::{Path, State},
     http::HeaderMap,
+    routing::{get, post},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
+
+/// 本域路由（R1 自注册）：地图读取/子图/成长/保鲜/进度/归纳/巡检。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/repos/{id}/map", get(get_map))
+        .route("/repos/{id}/freshness", get(get_freshness))
+        .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
+        .route("/repos/{id}/modules/{module_id}/analyze-submap", post(analyze_submap))
+        .route("/repos/{id}/growth", get(get_growth))
+        .route("/repos/{id}/progress", get(get_progress))
+        .route("/repos/{id}/modules/{module_id}", get(get_submap))
+        .route("/repos/{id}/reinduce", post(start_reinduce))
+        .route("/repos/{id}/patrol", post(start_patrol))
+}
 
 pub(crate) async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: HeaderMap) -> Result<Response, AppError> {
     // Y1 清债：ETag 条件请求——内容哈希已有，浏览器重连重同步时 If-None-Match 命中即 304

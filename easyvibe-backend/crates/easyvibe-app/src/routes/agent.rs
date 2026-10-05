@@ -4,12 +4,22 @@ use crate::state::*;
 use easyvibe_db::SettingsRepository as _;
 use axum::{
     extract::State,
+    routing::{get, post},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::ApiError;
 use easyvibe_ai_agent::agent_conf;
 use tracing::info;
+
+/// 本域路由（R1 自注册）：agent 探测/测试与 LLM 连通性测试。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/agent/status", get(agent_status))
+        .route("/agent/detect", post(agent_detect))
+        .route("/agent/test", post(agent_test))
+        .route("/llm/test", post(llm_test))
+}
 
 /// M1 配置体系：agent 状态面（探测 + 生效配置 + 预设目录 + 最近测试结果）
 /// 预设目录由后端唯一提供——前端单选组不硬编码（初审修订点）

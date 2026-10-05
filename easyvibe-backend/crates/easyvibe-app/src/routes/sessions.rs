@@ -1,13 +1,36 @@
 //! 资源域：运行会话/用量/健康看板/使用证据埋点。
 
 use crate::state::*;
+use crate::session_queue_routes;
 use axum::{
     extract::{Path, Query, State},
+    routing::{get, post},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::{ApiError, ApiResponse};
 use tracing::info;
+
+/// 本域路由（R1 自注册）：运行会话/队列/用量/健康看板/使用证据埋点/巡检历史。
+/// session-queue 与 sessions/overview 的 handler 留 `crate::session_queue_routes`（仅注册）。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/repos/{id}/session-queue",
+            get(session_queue_routes::get_session_queue)
+                .post(session_queue_routes::post_session_queue)
+                .delete(session_queue_routes::delete_session_queue),
+        )
+        .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
+        .route("/sessions/overview", get(session_queue_routes::get_sessions_overview))
+        .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
+        .route("/repos/{id}/usage", get(get_usage))
+        .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
+        .route("/repos/{id}/events", post(ingest_event))
+        .route("/repos/{id}/events/summary", get(events_summary))
+        .route("/repos/{id}/sessions/{sid}/kill", post(post_session_kill))
+        .route("/repos/{id}/sessions/{sid}/output", get(get_session_output))
+}
 
 /// 健康历史：巡检运行列表（域 2 的第一个读接口）
 /// R3 D1：前端交互埋点入库（dot.case 事件名 + JSON 计数维度；服务端事件由总线持久化任务代写）

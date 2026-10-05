@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { toast } from '@/runtime/toast'
 import { enqueue } from '@/runtime/sessionQueue'
+import { patrol } from '@/api/canvas'
 
 /** 巡检触发（M4-1 从 Canvas 上移：顶栏"巡检"按钮由壳层持有） */
 export function usePatrol(backendRepo: string | null) {
@@ -8,7 +9,7 @@ export function usePatrol(backendRepo: string | null) {
   const startPatrol = useCallback(() => {
     if (!backendRepo || patrolling) return
     setPatrolling(true)
-    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
+    patrol(backendRepo)
       .then((r) => {
         // S2：抛 Response 本体——catch 里判别 409（单会话纪律）入队
         if (!r.ok) throw r

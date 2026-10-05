@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { putSetting, listSettings } from '@/api/settings'
 
 /**
  * 每项目 UI 偏好：右栏开合/宽度随项目持久化（M4-1 状态持久化，防刷新丢位置）+ 通用 ui.* 写入。
@@ -11,11 +12,7 @@ export function useUiPrefs(backendRepo: string | null, resetToMap: () => void) {
   const saveUiPref = useCallback(
     (key: string, value: unknown) => {
       if (!backendRepo) return
-      fetch('/api/settings/set', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: backendRepo, key, value }),
-      }).catch(() => {})
+      putSetting({ scope: backendRepo, key, value }).catch(() => {})
     },
     [backendRepo],
   )
@@ -24,7 +21,7 @@ export function useUiPrefs(backendRepo: string | null, resetToMap: () => void) {
     if (!backendRepo) return
     resetToMap() // 切仓库先回架构地图，数据到达前不闪旧页
     let stale = false
-    fetch(`/api/settings?scope=${encodeURIComponent(backendRepo)}`)
+    listSettings(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { key: string; value: unknown }[] } | null) => {
         if (stale || !d?.data) return

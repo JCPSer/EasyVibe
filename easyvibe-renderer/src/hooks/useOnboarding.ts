@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PageId } from '@/components/AppShell'
+import { listTasks, taskApprovals } from '@/api/task'
 import { toast } from '@/runtime/toast'
 import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
 import { loadOnboarding, markCheck, completeAll, CHECK_KEYS } from '@/lib/onboarding'
@@ -30,10 +31,10 @@ export function useOnboarding(ctx: { page: PageId; hasMap: boolean; repoCount: n
     let dead = false
     const probe = async () => {
       try {
-        const r = await fetch(`/api/repos/${backendRepo}/tasks`)
+        const r = await listTasks(backendRepo)
         const d: { data?: { id: string }[] } = r.ok ? await r.json() : null
         for (const t of (d?.data ?? []).slice(0, 5)) {
-          const ra = await fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(t.id)}/approvals`)
+          const ra = await taskApprovals(backendRepo, t.id)
           if (!ra.ok) continue
           const da: { data?: unknown[] } = await ra.json()
           if ((da?.data?.length ?? 0) > 0) {

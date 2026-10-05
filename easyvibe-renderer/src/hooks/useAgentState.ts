@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { agentStatus, agentTest } from '@/api/system'
+import { putSetting } from '@/api/settings'
 
 export type AgentDetected = { command: string; path: string; version: string | null }
 export type AgentState = { found: boolean | null; detected: AgentDetected[] }
@@ -13,7 +15,7 @@ export function useAgentState(backendOnline: boolean | null) {
   const [agentState, setAgentState] = useState<AgentState>({ found: null, detected: [] })
 
   const loadAgentState = useCallback(() => {
-    fetch('/api/agent/status')
+    agentStatus()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { effective?: { found: boolean }; detected?: AgentDetected[] } } | null) => {
         if (d?.data?.effective) {
@@ -36,11 +38,10 @@ export function useAgentState(backendOnline: boolean | null) {
     async (command: string) => {
       try {
         const presetId = ['claude', 'codex', 'opencode'].includes(command) ? command : 'custom'
-        const put = (key: string, value: unknown) =>
-          fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key, value }) })
+        const put = (key: string, value: unknown) => putSetting({ scope: 'global', key, value })
         const [r1, r2] = await Promise.all([put('agent.command', command), put('agent.preset', presetId)])
         if (!r1.ok || !r2.ok) throw new Error('配置写入失败')
-        const r3 = await fetch('/api/agent/test', { method: 'POST' })
+        const r3 = await agentTest()
         const d3 = await r3.json().catch(() => null)
         toast(
           d3?.data?.ok ? `已采用 ${command}，协议兼容（${d3.data.latencyMs}ms）` : `已采用 ${command}，但协议测试未通过：${d3?.data?.protocol ?? '未知'}`,

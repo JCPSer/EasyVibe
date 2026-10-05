@@ -169,6 +169,9 @@ fn task_exec_submodules_have_no_reverse_refs() {
 
 /// 冻结的 route 清单（拆分前 build_router 的全部 `.route("…")` 字面量，含跨行写法）。
 /// 拆分是纯重组：少一条=线上 404，多一条=意外暴露。
+///
+/// R2（c-arch-1）：自注册后本清单不再由 router.rs 直接比对，而由 `FROZEN_DOMAIN_ROUTES`
+/// 的并集**聚合导出**（断言组 B）——单一事实源是域表，本表只做「总数不增不减」的交叉校验。
 const FROZEN_ROUTES: &[&str] = &[
     "/agent/detect",
     "/agent/status",
@@ -236,20 +239,192 @@ const FROZEN_ROUTES: &[&str] = &[
     "/ws",
 ];
 
+/// R1/R2（c-arch-1）：域 → 路由集合冻结表（**单一事实源**）。
+/// 由原 router.rs 内联 65 处 `.route(` 按 **handler 归属**拆分后逐条复核：
+/// 路由随 handler 所在文件归属，避免 routes 兄弟域横向引用（守卫 `route_modules_have_no_horizontal_deps`）。
+///   - repo.rs：仓库域 + git 子资源（git handler 留 crate::git，仅注册）
+///   - sessions.rs：会话/队列/用量/看板/埋点/巡检历史（含 /repos/{id}/patrol-runs——
+///     其 handler list_patrol_runs/prune_patrol_runs 实际定义在 sessions.rs）
+///   - router.rs：装配层仅 `/ws`
+/// 键集必须与 routes/ 磁盘文件集（除 mod.rs）+ router.rs **全等**（新增域未登记 → 断言 A 红）。
+const FROZEN_DOMAIN_ROUTES: &[(&str, &[&str])] = &[
+    (
+        "repo.rs",
+        &[
+            "/health",
+            "/repos",
+            "/repos/{id}",
+            "/repos/{id}/git/status",
+            "/repos/{id}/git/log",
+            "/repos/{id}/git/commit",
+            "/repos/{id}/git/pull",
+            "/repos/{id}/git/push",
+            "/repos/{id}/git/discard",
+            "/repos/{id}/git/commit-message",
+        ],
+    ),
+    (
+        "map.rs",
+        &[
+            "/repos/{id}/map",
+            "/repos/{id}/freshness",
+            "/repos/{id}/modules/{module_id}/health-history",
+            "/repos/{id}/modules/{module_id}/analyze-submap",
+            "/repos/{id}/growth",
+            "/repos/{id}/progress",
+            "/repos/{id}/modules/{module_id}",
+            "/repos/{id}/reinduce",
+            "/repos/{id}/patrol",
+        ],
+    ),
+    (
+        "sessions.rs",
+        &[
+            "/repos/{id}/session-queue",
+            "/repos/{id}/patrol-runs",
+            "/sessions/overview",
+            "/repos/{id}/agent-sessions",
+            "/repos/{id}/usage",
+            "/repos/{id}/health-dashboard",
+            "/repos/{id}/events",
+            "/repos/{id}/events/summary",
+            "/repos/{id}/sessions/{sid}/kill",
+            "/repos/{id}/sessions/{sid}/output",
+        ],
+    ),
+    (
+        "chat.rs",
+        &[
+            "/repos/{id}/chat",
+            "/repos/{id}/conversations",
+            "/repos/{id}/conversations/{cid}",
+            "/repos/{id}/chat/compact",
+            "/repos/{id}/chat/reset",
+            "/repos/{id}/views",
+            "/repos/{id}/views/{slug}",
+        ],
+    ),
+    (
+        "task.rs",
+        &[
+            "/repos/{id}/tasks",
+            "/repos/{id}/tasks/{tid}",
+            "/repos/{id}/tasks/{tid}/decide",
+            "/repos/{id}/tasks/{tid}/retry",
+            "/repos/{id}/tasks/{tid}/remediate",
+            "/repos/{id}/tasks/{tid}/rewind",
+            "/repos/{id}/tasks/{tid}/review",
+            "/repos/{id}/tasks/{tid}/approvals",
+            "/repos/{id}/tasks/{tid}/diff",
+            "/repos/{id}/tasks/{tid}/kill",
+            "/repos/{id}/suggest",
+        ],
+    ),
+    ("dev_docs.rs", &["/repos/{id}/dev-docs", "/repos/{id}/dev-doc"]),
+    (
+        "settings.rs",
+        &[
+            "/settings",
+            "/settings/set",
+            "/settings/{scope}/{key}",
+            "/harness",
+            "/harness/custom/files",
+            "/harness/custom/file",
+            "/harness/custom/toggle",
+            "/harness/custom/template",
+            "/harness/custom/generate",
+            "/diagnostics",
+        ],
+    ),
+    (
+        "agent.rs",
+        &["/agent/status", "/agent/detect", "/agent/test", "/llm/test"],
+    ),
+    ("router.rs", &["/ws"]),
+];
+
+/// 读某个域文件的 `.route(` 路径集合（去重升序）。router.rs 走装配层路径。
+fn domain_route_set(file: &str) -> Vec<String> {
+    let txt = if file == "router.rs" { read("router.rs") } else { read(&format!("routes/{file}")) };
+    let mut v: Vec<String> = extract_routes(&txt);
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// 断言组 A：域表 ↔ 磁盘自注册**双向全等**（键集 + 每域路径集）。
+/// 新增域未登记、某域路由增删改名，必失败。
 #[test]
-fn router_route_list_is_frozen() {
-    let txt = read("router.rs");
-    let mut actual: Vec<String> = extract_routes(&txt);
-    actual.sort();
-    actual.dedup();
+fn domain_route_table_is_frozen() {
+    // 键集全等：routes/ 实况（除 mod.rs）+ router.rs
+    let mut actual_keys: Vec<String> = rs_files(&app_src().join("routes"))
+        .into_iter()
+        .filter(|f| f != "mod.rs")
+        .collect();
+    actual_keys.push("router.rs".to_string());
+    actual_keys.sort();
+    let mut expected_keys: Vec<String> = FROZEN_DOMAIN_ROUTES.iter().map(|(f, _)| f.to_string()).collect();
+    expected_keys.sort();
+    assert_eq!(
+        actual_keys, expected_keys,
+        "域表键集漂移——routes/ 文件集与 FROZEN_DOMAIN_ROUTES 不一致（新增/删除/改名域须同步登记）"
+    );
+
+    for (file, paths) in FROZEN_DOMAIN_ROUTES {
+        let mut expected: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
+        expected.sort();
+        expected.dedup();
+        let actual = domain_route_set(file);
+        assert_eq!(
+            actual, expected,
+            "routes/{file} 自注册路由漂移——少一条=404，多一条=意外暴露（未登记即失败）"
+        );
+    }
+}
+
+/// 断言组 B：域表并集 == 全局冻结清单 64 条（单一事实源在域表，本表只交叉校验）。
+#[test]
+fn domain_routes_union_matches_global_frozen_list() {
+    let mut union: Vec<String> = FROZEN_DOMAIN_ROUTES
+        .iter()
+        .flat_map(|(_, paths)| paths.iter().map(|s| s.to_string()))
+        .collect();
+    union.sort();
+    union.dedup();
     let mut frozen: Vec<String> = FROZEN_ROUTES.iter().map(|s| s.to_string()).collect();
     frozen.sort();
     frozen.dedup();
-    let missing: Vec<_> = frozen.iter().filter(|r| !actual.contains(r)).collect();
-    let extra: Vec<_> = actual.iter().filter(|r| !frozen.contains(r)).collect();
-    assert!(missing.is_empty() && extra.is_empty(),
-        "route 清单漂移——缺失(404风险): {missing:?}；新增(意外暴露): {extra:?}");
-    assert_eq!(actual.len(), frozen.len(), "route 数量不一致");
+    assert_eq!(
+        union, frozen,
+        "域表并集与全局 FROZEN_ROUTES 漂移——两处清单必须恒等（防双轨维护）"
+    );
+    assert_eq!(union.len(), 64, "route 总数应为 64（含 /ws）");
+}
+
+/// 断言组 C（防假绿·关键）：每个域模块自注册非空（≥1）。
+/// 杜绝「某域 router() 被删/清空但域表仍写着、extract 空集与空集对比」的静默失效。
+#[test]
+fn every_domain_self_registers_at_least_one_route() {
+    for (file, _) in FROZEN_DOMAIN_ROUTES {
+        let actual = domain_route_set(file);
+        assert!(
+            !actual.is_empty(),
+            "routes/{file} 自注册路由为空——router() 被删/清空或 extract_routes 静默失效（R2 断言 C）"
+        );
+    }
+}
+
+/// 断言组 D（防假绿·关键）：装配层 router.rs 除 `/ws` 外零资源域 `.route(`。
+/// 保证「新增域必去各域模块」，也为断言 A 的 router.rs 条目兜底。
+#[test]
+fn router_assembly_registers_only_ws() {
+    assert_eq!(
+        domain_route_set("router.rs"),
+        vec!["/ws".to_string()],
+        "router.rs 只应注册 /ws——资源域路由须落各自 routes/<域>.rs（R1 收敛）"
+    );
+    let count = read("router.rs").matches(".route(").count();
+    assert_eq!(count, 1, "router.rs 出现 {count} 处 .route(（应为 1，仅 /ws）——路由回流装配层");
 }
 
 /// routes/*.rs 的纵向编排依赖禁止串（方案 R8①）——handler 只做 HTTP 边界，

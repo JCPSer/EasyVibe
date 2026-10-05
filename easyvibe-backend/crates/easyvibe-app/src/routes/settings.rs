@@ -3,14 +3,30 @@
 use crate::state::*;
 use axum::{
     extract::{Path, State},
+    routing::{delete, get, post, put},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::ApiError;
 use tracing::info;
 use crate::VERSION;
 use crate::task_exec;
 use easyvibe_db::{SettingRow, SettingsRepository as _};
+
+/// 本域路由（R1 自注册）：设置/密钥/harness 管理与诊断导出。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/settings", get(list_settings))
+        .route("/settings/set", put(put_setting))
+        .route("/settings/{scope}/{key}", delete(delete_setting))
+        .route("/harness", get(get_harness))
+        .route("/harness/custom/files", get(list_custom_files))
+        .route("/harness/custom/file", get(get_custom_file).put(put_custom_file).delete(delete_custom_file))
+        .route("/harness/custom/toggle", put(toggle_custom_file))
+        .route("/harness/custom/template", get(get_custom_template))
+        .route("/harness/custom/generate", post(generate_custom))
+        .route("/diagnostics", get(export_diagnostics))
+}
 
 /// 敏感 key 规则：以 .apiKey / apiKey 结尾自动加密 at rest
 pub(crate) fn is_sensitive_key(key: &str) -> bool {

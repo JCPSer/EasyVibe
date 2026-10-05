@@ -7,11 +7,24 @@ use crate::state::*;
 use crate::service::{self, resolve_adv_i64, resolve_conv, conversation_summary, maybe_compact, ChatHttpRequest, DEFAULT_CONTEXT_BUDGET};
 use axum::{
     extract::{Path, State},
+    routing::{delete, get, post, put},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::ApiError;
 use easyvibe_db::{ConversationRepository as _, TaskRepository as _};
+
+/// 本域路由（R1 自注册）：对话/会话/压缩/视图。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/repos/{id}/chat", get(get_chat).post(chat))
+        .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
+        .route("/repos/{id}/conversations/{cid}", put(rename_conversation).delete(delete_conversation))
+        .route("/repos/{id}/chat/compact", post(compact_chat))
+        .route("/repos/{id}/chat/reset", post(reset_chat))
+        .route("/repos/{id}/views", get(list_views).post(save_view))
+        .route("/repos/{id}/views/{slug}", delete(delete_view).put(rename_view))
+}
 
 
 pub(crate) async fn list_conversations(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {

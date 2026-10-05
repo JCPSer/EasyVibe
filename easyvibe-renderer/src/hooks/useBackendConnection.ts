@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CodeMap } from '@/types/map'
 import { toast } from '@/runtime/toast'
+import { listRepos, addRepo as addRepoApi, removeRepo as removeRepoApi, repoMap } from '@/api/repos'
+import { health } from '@/api/system'
+import { fetchStatic } from '@/api/core'
 
 export type Repo = { id: string; name: string }
 
@@ -27,7 +30,7 @@ export function useBackendConnection() {
     let timer: number | undefined
     // 后端探测：/api/repos 取仓库列表；探测成功前每 5 秒重试，永不死心
     const probe = () => {
-      fetch('/api/repos')
+      listRepos()
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
         .then((d: { data?: Repo[] }) => {
           if (!d.data || d.data.length === 0) {
@@ -40,7 +43,7 @@ export function useBackendConnection() {
           setRepos(d.data)
           setBackendRepo((cur) => cur ?? d.data![0].id) // 保留当前选择（切换器驱动）
           // 版本感知（Y7）：仅取 version，不参与后端模式判定
-          fetch('/api/health')
+          health()
             .then((r) => (r.ok ? r.json() : null))
             .then((h: { data?: { version?: string } } | null) => {
               if (!cancelled && h?.data?.version) serverVersionRef.current = h.data.version
@@ -62,8 +65,8 @@ export function useBackendConnection() {
   }, [])
 
   useEffect(() => {
-    const url = backendRepo ? `/api/repos/${backendRepo}/map` : '/data/map.json'
-    fetch(url)
+    const req = backendRepo ? repoMap(backendRepo) : fetchStatic('/data/map.json')
+    req
       .then((r) => {
         // 404 = 仓库尚未归纳——合法状态，走 MapGate 的"尚未生成"引导（开始归纳），不是错误
         if (r.status === 404 && backendRepo) return null
@@ -79,7 +82,7 @@ export function useBackendConnection() {
 
   // D5 仓库管理：刷新列表（添加/移除后）；后端事实源是 /api/repos
   const refreshRepos = useCallback(() => {
-    fetch('/api/repos')
+    listRepos()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Repo[] } | null) => {
         if (!d?.data) return
@@ -105,11 +108,7 @@ export function useBackendConnection() {
     }
     if (!path?.trim()) return false
     try {
-      const r = await fetch('/api/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: path.trim() }),
-      })
+      const r = await addRepoApi(path.trim())
       const d = await r.json().catch(() => null)
       if (!r.ok) {
         toast(d?.error ?? '添加失败（目录不可读或已挂载）', 'error')
@@ -128,7 +127,7 @@ export function useBackendConnection() {
   // 重审 P1：移除仓库会杀活动会话；wipe=true 额外抹掉该仓库在本地库的全部痕迹
   const removeRepo = useCallback(async (id: string, wipe: boolean): Promise<boolean> => {
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(id)}${wipe ? '?wipe=true' : ''}`, { method: 'DELETE' })
+      const r = await removeRepoApi(id, wipe)
       if (!r.ok) {
         toast('移除失败', 'error')
         return false

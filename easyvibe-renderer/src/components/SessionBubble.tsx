@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
-import { onQueueChanged, onSessionEvent } from '@/runtime/growthBus'
+import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/runtime/growthBus'
 import { toast } from '@/runtime/toast'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel } from '@/runtime/sessionQueue'
@@ -33,8 +33,10 @@ interface Overview {
   queued: OverviewQueued[]
 }
 
-export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: (sessionId?: string) => void }) {
+export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTasks }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: (sessionId?: string) => void; onOpenTasks?: () => void }) {
   const [ov, setOv] = useState<Overview | null>(null)
+  // 任务槽排队（与会话队列并列的第二类排队：任务 permit 满退回 pending，从未进会话队列）
+  const [pendingTasks, setPendingTasks] = useState(0)
   // 终态红态：failed → 记住 label，红态 5s 后消失
   const [failed, setFailed] = useState<{ label: string } | null>(null)
   const ovRef = useRef<Overview | null>(null)
@@ -47,17 +49,29 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { back
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Overview } | null) => setOv(d?.data ?? { active: [], queued: [] }))
       .catch(() => {})
-  }, [])
+    // 任务槽排队数：当前仓库 pending 任务（任务 permit 满退回 pending，不在会话队列里）
+    if (backendRepo) {
+      fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { data?: { status?: string }[] } | null) =>
+          setPendingTasks((d?.data ?? []).filter((t) => t.status === 'pending').length),
+        )
+        .catch(() => {})
+    }
+  }, [backendRepo])
 
   // I5 刷新三挂钩：① 会话/队列事件；② WS 重连（resyncKey）；③ 20s 低频兜底
   useEffect(() => {
     pull()
     const offQ = onQueueChanged(() => pull())
     const offS = onSessionEvent(() => pull())
+    // 任务事件（排队/执行/终态）也驱动任务槽排队数刷新——否则只靠 20s 兜底滞后
+    const offT = onTaskEvent(() => pull())
     const t = window.setInterval(pull, 20000)
     return () => {
       offQ()
       offS()
+      offT()
       window.clearInterval(t)
     }
   }, [pull, resyncKey])
@@ -209,6 +223,22 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { back
             </button>
           </span>
         ))}
+        {/* 任务槽排队 chip：任务并发 permit 满退回 pending 的任务（不在会话队列，单列） */}
+        {pendingTasks > 0 && (
+          <span
+            role={onOpenTasks ? 'button' : undefined}
+            onClick={(e) => {
+              if (!onOpenTasks) return
+              e.stopPropagation()
+              onOpenTasks()
+            }}
+            className={`flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 py-0.5 pl-1.5 pr-2 text-micro font-medium leading-none text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 ${onOpenTasks ? 'cursor-pointer hover:border-amber-400' : ''}`}
+            title="有任务在排队等待执行槽位（并发满自动开始）——点击查看任务"
+          >
+            <Clock size={9} />
+            任务排队×{pendingTasks}
+          </span>
+        )}
       </div>
 
       {/* 悬停详情卡：跨仓库列出全部活动会话（仓库 · label · 起止 · 各自取消） */}

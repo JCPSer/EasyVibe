@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { onTaskEvent } from '@/runtime/growthBus'
+import { listTasks } from '@/api/task'
 
 export type Attention = { count: number; sample: string } | null
 
@@ -20,7 +21,7 @@ export function useAttention(backendRepo: string | null) {
     }
     const GL: Record<string, string> = { plan: '任务书审批', analysis: '需求矩阵评审', solution: '方案评审', diff: 'Diff 审批', report: '审查报告' }
     const load = () =>
-      fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+      listTasks(backendRepo)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { status: string; title: string; gate?: string | null }[] } | null) => {
           const ts = d?.data ?? []

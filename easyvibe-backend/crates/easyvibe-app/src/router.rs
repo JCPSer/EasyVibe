@@ -1,94 +1,57 @@
-//! 路由表装配：唯一「路径/方法 ↔ handler」对照点 + 静态回落。
+//! 路由表装配：聚合各资源域自注册路由 + 静态回落。
+//!
+//! R1（c-arch-1 双枢纽收敛）：路由「路径/方法 ↔ handler」对照点已下沉各
+//! `routes/<域>.rs` 的 `router()`；本文件退化为 **merge 聚合 + `/ws` + 中间件 + 静态回落**，
+//! 不含任何资源域路由（守卫 `module_size_guard.rs` 断言组 D 兜底）。
+//!
+//! 域 → 路径前缀 → 文件索引（读侧索引，由守卫与各域自注册清单交叉校验）：
+//!   repo.rs     `/health` `/repos*` `/repos/{id}/git/*`（git 仅注册，handler 留 crate::git）
+//!   map.rs      `/repos/{id}/map|freshness|growth|progress|reinduce|patrol|modules/*`
+//!   sessions.rs `/repos/{id}/session-queue|patrol-runs|agent-sessions|usage|health-dashboard|events*|sessions/*` `/sessions/overview`
+//!   chat.rs     `/repos/{id}/chat*` `/repos/{id}/conversations*` `/repos/{id}/views*`
+//!   task.rs     `/repos/{id}/tasks*` `/repos/{id}/suggest`
+//!   dev_docs.rs `/repos/{id}/dev-doc*`
+//!   settings.rs `/settings*` `/harness*` `/diagnostics`
+//!   agent.rs    `/agent/*` `/llm/test`
+//!   本文件      `/ws`
+//!
+//! R4（版本锚）：`/api/*` 响应统一带只读响应头 `X-EasyVibe-Api-Version`（复用 Y7 的
+//! `crate::VERSION`，与 `/api/health` 的 `version` 字段同源，不另造第二套版本语义）。
 
 use axum::{
     response::{IntoResponse, Response},
     routing::get, Router,
 };
 use crate::state::*;
+use crate::VERSION;
 use crate::assets;
 use crate::assets::embedded_ui_available;
 use crate::ws::ws_handler;
-use crate::{git, session_queue_routes};
-use crate::routes::{repo::*, map::*, sessions::*, task::*, chat::*, settings::*, agent::*, dev_docs::*};
+use crate::routes::{agent, chat, dev_docs, map, repo, sessions, settings, task};
+
+/// R4：为 `/api/*` 响应注入契约版本头（additive，不改任何 JSON 形状/状态码/ETag）。
+async fn api_version_header(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut resp = next.run(req).await;
+    resp.headers_mut()
+        .insert("x-easyvibe-api-version", axum::http::HeaderValue::from_static(VERSION));
+    resp
+}
 
 pub fn build_router(state: AppState) -> Router {
+    // 各资源域自注册（新增域 = 新增 routes/<new>.rs + 此处 1 行 merge，既有域文件零改动）
     let api = Router::new()
-        .route("/health", get(health))
-        .route("/repos", get(list_repos).post(add_repo))
-        .route("/repos/{id}", axum::routing::delete(remove_repo))
-        .route("/repos/{id}/map", get(get_map))
-        .route("/repos/{id}/freshness", get(get_freshness))
-        .route("/repos/{id}/modules/{module_id}/health-history", get(get_health_history))
-        .route("/repos/{id}/modules/{module_id}/analyze-submap", axum::routing::post(analyze_submap))
-        .route("/repos/{id}/growth", get(get_growth))
-        .route("/repos/{id}/progress", get(get_progress))
-        .route("/repos/{id}/modules/{module_id}", get(get_submap))
-        .route("/repos/{id}/reinduce", axum::routing::post(start_reinduce))
-        .route("/repos/{id}/patrol", axum::routing::post(start_patrol))
-        // 运行会话排队（需求 v1 §5/§8：GET 查 active+queued；POST 原子裁决入队/代执行；DELETE 取消）
-        .route(
-            "/repos/{id}/session-queue",
-            get(session_queue_routes::get_session_queue)
-                .post(session_queue_routes::post_session_queue)
-                .delete(session_queue_routes::delete_session_queue),
-        )
-        .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
-        // 全局运行指示（2026-10-05）：跨仓库活动会话 + 队列——d928389 实现 handler 但漏注册，
-        // 前端 404 静默兜底 = 巡检/归纳进行中状态丸与运行页永远空白（实弹 bug）。
-        .route("/sessions/overview", get(session_queue_routes::get_sessions_overview))
-        .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
-        .route("/repos/{id}/usage", get(get_usage))
-        .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
-        // R3 D1：使用证据埋点——前端交互事件入库 + 门控计数读数
-        .route("/repos/{id}/events", axum::routing::post(ingest_event))
-        .route("/repos/{id}/events/summary", get(events_summary))
-        .route("/repos/{id}/git/status", get(git::get_git_status))
-        .route("/repos/{id}/git/log", get(git::get_git_log))
-        .route("/repos/{id}/git/commit", get(git::get_git_commit))
-        .route("/repos/{id}/git/commit", axum::routing::post(git::post_git_commit))
-        .route("/repos/{id}/git/pull", axum::routing::post(git::post_git_pull))
-        .route("/repos/{id}/git/push", axum::routing::post(git::post_git_push))
-        .route("/repos/{id}/git/discard", axum::routing::post(git::post_git_discard))
-        .route("/repos/{id}/git/commit-message", axum::routing::post(git::post_git_commit_message))
-        .route("/repos/{id}/sessions/{sid}/kill", axum::routing::post(post_session_kill))
-        .route("/repos/{id}/sessions/{sid}/output", get(get_session_output))
-        .route("/repos/{id}/tasks/{tid}/kill", axum::routing::post(post_task_kill))
-        .route("/repos/{id}/chat", get(get_chat).post(chat))
-        .route("/repos/{id}/conversations", get(list_conversations).post(create_conversation))
-        .route("/repos/{id}/conversations/{cid}", axum::routing::put(rename_conversation).delete(delete_conversation))
-        .route("/repos/{id}/chat/compact", axum::routing::post(compact_chat))
-        .route("/repos/{id}/chat/reset", axum::routing::post(reset_chat))
-        .route("/repos/{id}/views", get(list_views).post(save_view))
-        .route("/repos/{id}/views/{slug}", axum::routing::delete(delete_view).put(rename_view))
-        .route("/repos/{id}/tasks", get(list_tasks).post(create_task))
-        .route("/repos/{id}/tasks/{tid}", axum::routing::delete(delete_task))
-        .route("/repos/{id}/tasks/{tid}/decide", axum::routing::post(decide_task))
-        .route("/repos/{id}/tasks/{tid}/retry", axum::routing::post(post_task_retry))
-        .route("/repos/{id}/tasks/{tid}/remediate", axum::routing::post(post_task_remediate))
-        // 管道回看·节点重开（2026-10-05 方案 §3.1）：把任务放回目标评审关，复用 decide/打回闭环
-        .route("/repos/{id}/tasks/{tid}/rewind", axum::routing::post(post_task_rewind))
-        // 代码审查节点的人工复审（2026-10-05 用户裁定）：审查-修复闭环，非一键通过
-        .route("/repos/{id}/tasks/{tid}/review", axum::routing::post(post_task_review))
-        .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
-        .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
-        .route("/repos/{id}/dev-docs", get(get_dev_docs))
-        .route("/repos/{id}/dev-doc", get(get_dev_doc).delete(delete_dev_doc))
-        .route("/repos/{id}/suggest", axum::routing::post(suggest))
-        .route("/settings", get(list_settings))
-        .route("/settings/set", axum::routing::put(put_setting))
-        .route("/settings/{scope}/{key}", axum::routing::delete(delete_setting))
-        .route("/harness", get(get_harness))
-        // 自定义层端点（方案 v2 §5——出厂层端点全删：files/file/reset/backups/restore）
-        .route("/harness/custom/files", get(list_custom_files))
-        .route("/harness/custom/file", get(get_custom_file).put(put_custom_file).delete(delete_custom_file))
-        .route("/harness/custom/toggle", axum::routing::put(toggle_custom_file))
-        .route("/harness/custom/template", get(get_custom_template))
-        .route("/harness/custom/generate", axum::routing::post(generate_custom))
-        .route("/agent/status", get(agent_status))
-        .route("/agent/detect", axum::routing::post(agent_detect))
-        .route("/agent/test", axum::routing::post(agent_test))
-        .route("/llm/test", axum::routing::post(llm_test))
-        .route("/diagnostics", get(export_diagnostics))
+        .merge(repo::router())
+        .merge(map::router())
+        .merge(sessions::router())
+        .merge(chat::router())
+        .merge(task::router())
+        .merge(dev_docs::router())
+        .merge(settings::router())
+        .merge(agent::router())
+        .layer(axum::middleware::from_fn(api_version_header))
         .with_state(state.clone());
 
     let router = Router::new()

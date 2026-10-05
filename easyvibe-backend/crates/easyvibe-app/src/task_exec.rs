@@ -146,7 +146,9 @@ impl TaskExecutor {
                 };
                 info!("[task-exec] 任务 {} 写互斥退回复跑：p:{} 阶段原地重跑（不回计划关）", task.id, phase_gate);
                 let _ = self.task_repo.update_status(&task.id, "running", None).await;
-                self.publish_status(&task.repo, &task.id, "running", task.gate.as_deref()).await;
+                // 不在这里广播 running——spawn 未必成功（permit/槽位仍满会退回 pending），
+                // 早产广播 = 前端每 5s 看到一次 running→pending 闪跳（2026-10-06 实弹）。
+                // running 由 spawn 成功后的广播统一宣布；失败路径广播 pending。
                 self.spawn_and_watch(task, phase).await;
                 return;
             }

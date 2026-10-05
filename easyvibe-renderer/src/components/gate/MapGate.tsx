@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, Play, RotateCcw } from 'lucide-react'
 import { toast } from '@/runtime/toast'
 import { InductionWaiting } from './InductionWaiting'
+import { mapProgress, reinduce } from '@/api/canvas'
 
 // P0 审查前端#1：地图加载守门员——区分三种真实状态，消灭"出错也转圈"死锁：
 // · progress 显示归纳进行中 → 等待页（原行为）
@@ -14,7 +15,7 @@ export function MapGate({ repo, error, onRetry, agentReady }: { repo: string; er
   useEffect(() => {
     let stale = false
     const tick = () => {
-      fetch(`/api/repos/${encodeURIComponent(repo)}/progress`)
+      mapProgress(repo)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((d: { data: { phase: string } | null }) => {
           if (stale) return
@@ -44,7 +45,7 @@ export function MapGate({ repo, error, onRetry, agentReady }: { repo: string; er
   const startInduce = async () => {
     setStarting(true)
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(repo)}/reinduce`, { method: 'POST' })
+      const r = await reinduce(repo)
       const d = await r.json().catch(() => null)
       if (!r.ok) {
         toast(d?.error ?? '归纳发起失败', 'error')

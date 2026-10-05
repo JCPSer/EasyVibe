@@ -3,10 +3,18 @@
 use crate::state::*;
 use axum::{
     extract::{Path, State},
+    routing::get,
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_common::ApiError;
+
+/// 本域路由（R1 自注册）：development_docs 产物读写删。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/repos/{id}/dev-docs", get(get_dev_docs))
+        .route("/repos/{id}/dev-doc", get(get_dev_doc).delete(delete_dev_doc))
+}
 
 /// 任务产物文档（方案 v3 §4.4）：扫描 .easyvibe/development_docs/**，按任务时间窗过滤。
 /// 右端规则（复审意见落地）：running/pending 任务用 now()——updatedAt 在 running 期间

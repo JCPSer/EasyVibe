@@ -1,11 +1,13 @@
-//! 资源域：仓库注册/注销与健康。
+//! 资源域：仓库注册/注销与健康（含 git 子资源路由注册）。
 
 use crate::state::*;
 use crate::pipeline::spawn_repo_pipeline;
+use crate::git;
 use axum::{
     extract::{Path, State},
+    routing::{delete, get, post},
     response::{IntoResponse, Response},
-    Json,
+    Json, Router,
 };
 use easyvibe_api_types::{HealthResponse, RepoInfo};
 use easyvibe_common::{ApiError, ApiResponse};
@@ -13,6 +15,23 @@ use easyvibe_map::repo_from_root;
 use tracing::info;
 use crate::VERSION;
 use crate::state::{read_desktop_repos, write_desktop_repos};
+
+/// 本域路由（R1 自注册）：仓库注册/注销/健康 + git 子资源。
+/// git handler 留 `crate::git`（仅注册不搬实现，见方案 §2.1.3(d) 决策 A）。
+pub(crate) fn router() -> Router<AppState> {
+    Router::new()
+        .route("/health", get(health))
+        .route("/repos", get(list_repos).post(add_repo))
+        .route("/repos/{id}", delete(remove_repo))
+        .route("/repos/{id}/git/status", get(git::get_git_status))
+        .route("/repos/{id}/git/log", get(git::get_git_log))
+        .route("/repos/{id}/git/commit", get(git::get_git_commit))
+        .route("/repos/{id}/git/commit", post(git::post_git_commit))
+        .route("/repos/{id}/git/pull", post(git::post_git_pull))
+        .route("/repos/{id}/git/push", post(git::post_git_push))
+        .route("/repos/{id}/git/discard", post(git::post_git_discard))
+        .route("/repos/{id}/git/commit-message", post(git::post_git_commit_message))
+}
 
 pub(crate) async fn health() -> Json<ApiResponse<HealthResponse>> {
     Json(ApiResponse::ok(HealthResponse { status: "ok".into(), version: VERSION.into() }))
