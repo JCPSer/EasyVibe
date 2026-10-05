@@ -406,6 +406,56 @@ impl TaskExecutor {
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
 
+    /// 人工触发子 agent 复审（2026-10-05 用户裁定：代码审查节点 = 审查-修复闭环，
+    /// 不是一键通过）：在 Diff（代码审查）关对当前工作区改动再审一轮。
+    /// 与实施完成后的自动审查同一机制（run_subagent_review + review 槽配置）；
+    /// fail 不自动打回——人工触发的复审是「人想再看一眼」，裁决仍由人做
+    /// （未通过 → 前端 prominent「修改并复审」→ remediate 修复后自动再审，循环闭合）。
+    /// 异步执行（审查是分钟级）——HTTP 立即返回，结论经 result.review + 留痕 + 事件送达。
+    pub async fn review_now(self: &Arc<Self>, task_id: &str) -> Result<TaskRow, ApiError> {
+        use easyvibe_db::TaskRepository as _;
+        let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if task.status != "awaiting_approval" || task.gate.as_deref() != Some("diff") {
+            return Err(ApiError::Conflict(format!(
+                "仅「代码审查（Diff）」关可发起复审（当前 {} / {:?}）——实施完成后系统已自动审查一轮",
+                task.status, task.gate
+            )));
+        }
+        let repo = self
+            .map_service
+            .find_repo(&task.repo)
+            .await
+            .ok_or_else(|| ApiError::NotFound(format!("仓库 {} 未注册", task.repo)))?;
+        // review 槽整体替换（可换便宜模型/收紧权限）——与自动审查同款解析链
+        let resolved = easyvibe_ai_agent::agent_conf::resolve_agent(&self.settings_repo, Some("review"), &self.agent_command, &self.agent_args).await;
+        info!("[task-exec] 任务 {} 人工触发子 agent 复审（会话即将启动）", task_id);
+        let this = self.clone();
+        let tid = task_id.to_string();
+        tokio::spawn(async move {
+            let verdict = run_subagent_review(
+                &this.session_manager,
+                &resolved.command,
+                &resolved.args,
+                &repo.id,
+                &repo.root,
+                &task,
+            )
+            .await;
+            let note = match &verdict {
+                Some(v) => {
+                    merge_review_verdict(&this.task_repo, &tid, v).await;
+                    format!("人工复审：{} — {}", if v.verdict == "pass" { "通过" } else { "未通过" }, v.summary)
+                }
+                None => "人工复审：审查会话不可用（失败/超时/结论非法）——不阻断，可重试或人工审 Diff".to_string(),
+            };
+            this.record_approval(&tid, "diff", "flagged", Some(&note)).await;
+            // 同状态广播——前端据 task 事件 reload，result.review 新结论（at 时间戳）随之到达
+            this.publish_status(&task.repo, &tid, "awaiting_approval", Some("diff")).await;
+            info!("[task-exec] 任务 {} 人工复审结束：{}", tid, note);
+        });
+        self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
     /// 任务状态广播统一出口（执行引擎侧）——前端列表/徽标/注意力条的事件源。
     /// P0 教训（ui-test-2026-10-03）：只写库不广播 = 任务在前端"凭空消失"。
     async fn publish_status(&self, repo: &str, task_id: &str, status: &str, gate: Option<&str>) {
@@ -665,16 +715,7 @@ impl TaskExecutor {
                                         }
                                         Some(v) => {
                                             // 审查通过：结论并入 result（④格"子agent初审"卡的数据源），照常进 diff 关
-                                            if let Ok(Some(row)) = this.task_repo.get(&task_id).await {
-                                                if let Some(res) = &row.result {
-                                                    if let Ok(mut rv) = serde_json::from_str::<serde_json::Value>(res) {
-                                                        rv["review"] = serde_json::json!({ "verdict": v.verdict, "summary": v.summary });
-                                                        if let Ok(s) = serde_json::to_string(&rv) {
-                                                            let _ = this.task_repo.set_result(&task_id, &s).await;
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                            merge_review_verdict(&this.task_repo, &task_id, &v).await;
                                             ("awaiting_approval", Some("diff"))
                                         }
                                         None => {
@@ -1004,6 +1045,24 @@ fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str) -> String
         dir = dir,
         focus = focus,
     )
+}
+
+/// 实施审查结论并入 tasks.result.review（含 at 毫秒时间戳——前端「人工复审」
+/// 轮次完成判定的依据：点击发起后轮询到 at ≥ 点击时刻即知本轮已出结论）。
+/// result 可能不存在（复审发生在采集前），此时新建 JSON 骨架。
+async fn merge_review_verdict(task_repo: &easyvibe_db::SqliteTaskRepository, task_id: &str, v: &ReviewVerdict) {
+    use easyvibe_db::TaskRepository as _;
+    let Ok(Some(row)) = task_repo.get(task_id).await else { return };
+    let mut rv: serde_json::Value = row
+        .result
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    rv["review"] = serde_json::json!({ "verdict": v.verdict, "summary": v.summary, "at": at });
+    if let Ok(s) = serde_json::to_string(&rv) {
+        let _ = task_repo.set_result(task_id, &s).await;
+    }
 }
 
 /// 初审结论并入 tasks.result.phaseReviews（key = analysis / solution）——

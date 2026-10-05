@@ -35,6 +35,12 @@ export function rewindTask(repo: string, taskId: string, gate: 'analysis' | 'sol
   return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}/rewind`, 'POST', JSON.stringify({ gate }), 'application/json')
 }
 
+/** 人工触发子 agent 复审（代码审查节点）：仅 Diff 关可发起，202 异步——
+ *  结论经 result.review（at 时间戳）+ 留痕 + 事件送达，不迁移任务状态 */
+export function reviewTask(repo: string, taskId: string): Promise<void> {
+  return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}/review`, 'POST')
+}
+
 export function deleteTask(repo: string, taskId: string): Promise<void> {
   return call(`/api/repos/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(taskId)}`, 'DELETE')
 }

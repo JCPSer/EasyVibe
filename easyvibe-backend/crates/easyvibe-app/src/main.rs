@@ -216,6 +216,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/repos/{id}/tasks/{tid}/remediate", axum::routing::post(post_task_remediate))
         // 管道回看·节点重开（2026-10-05 方案 §3.1）：把任务放回目标评审关，复用 decide/打回闭环
         .route("/repos/{id}/tasks/{tid}/rewind", axum::routing::post(post_task_rewind))
+        // 代码审查节点的人工复审（2026-10-05 用户裁定）：审查-修复闭环，非一键通过
+        .route("/repos/{id}/tasks/{tid}/review", axum::routing::post(post_task_review))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/dev-docs", get(get_dev_docs))
@@ -1061,6 +1063,18 @@ async fn post_task_rewind(
     let target = body["gate"].as_str().ok_or_else(|| ApiError::BadRequest("缺少 gate 字段（analysis/solution）".into()))?;
     let task = st.executor.rewind(&tid, target).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })).into_response())
+}
+
+/// 人工触发子 agent 复审（代码审查节点的审查-修复闭环）：异步执行，结论经
+/// result.review + 留痕 + 事件送达（见 TaskExecutor::review_now 的语义注释）
+async fn post_task_review(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.executor.review_now(&tid).await?;
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "success": true, "data": { "status": task.status, "gate": task.gate } })),
+    )
+        .into_response())
 }
 
 // ---------- M2-5：入口对话（F2）+ 存为视图（F1b） ----------
@@ -4151,6 +4165,78 @@ mod tests {
         let t = state.task_repo.get(&tid).await.unwrap().unwrap();
         assert_eq!(t.status, "running");
         assert_eq!(t.gate.as_deref(), Some("p:implement"));
+    }
+
+    #[tokio::test]
+    async fn task_manual_review_at_diff_gate() {
+        // 2026-10-05 用户裁定：代码审查节点 = 审查-修复闭环——人工可在 diff 关
+        // 发起子 agent 复审（实施后的自动审查之外），结论落 result.review + 留痕。
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("task-manual-review").await;
+        let app = build_router(state.clone());
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "title": "人工复审", "description": "代码审查闭环", "trust": "manual" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let tid = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string();
+        let decide = |gate: &str| {
+            let app = app.clone();
+            let repo = repo.clone();
+            let tid = tid.clone();
+            let gate = gate.to_string();
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/decide"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(serde_json::json!({ "decision": "approved", "note": "过", "gate": gate }).to_string()))
+                        .unwrap(),
+                ).await.unwrap()
+            }
+        };
+        // 非 diff 关发起复审 → 409
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/review")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "非 diff 关不得发起复审");
+
+        // 推进到 diff 关
+        assert_eq!(decide("plan").await.status(), axum::http::StatusCode::OK);
+        async fn wait_gate(state: &AppState, tid: &str, gate: &str) -> easyvibe_db::TaskRow {
+            let mut t = state.task_repo.get(tid).await.unwrap().unwrap();
+            for _ in 0..40 {
+                if t.status == "awaiting_approval" && t.gate.as_deref() == Some(gate) { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                t = state.task_repo.get(tid).await.unwrap().unwrap();
+            }
+            t
+        }
+        wait_gate(&state, &tid, "analysis").await;
+        decide("analysis").await;
+        wait_gate(&state, &tid, "solution").await;
+        decide("solution").await;
+        let t = wait_gate(&state, &tid, "diff").await;
+        assert_eq!(t.gate.as_deref(), Some("diff"));
+
+        // diff 关发起人工复审 → 202；会话（"true" 无结论）→ 不可用留痕，不阻断
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/review")).body(axum::body::Body::empty()).unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED, "diff 关发起复审应 202");
+        let mut ok = false;
+        for _ in 0..40 {
+            let aps = state.approval_repo.list_by_task(&tid).await.unwrap();
+            if aps.iter().any(|a| a.gate == "diff" && a.decision == "flagged" && a.note.as_deref().unwrap_or("").contains("人工复审")) {
+                ok = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        assert!(ok, "复审结束必须留痕（人工复审：…），flagged 决策");
+        let t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        assert_eq!(t.status, "awaiting_approval", "人工复审不迁移状态（裁决仍由人做）");
     }
 
     #[tokio::test]

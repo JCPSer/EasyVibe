@@ -5,7 +5,7 @@ import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { terminalLines } from '@/lib/terminalBuffer'
 import { stageOf, gateLabel, STAGES } from '@/lib/taskStage'
-import { rewindTask } from '@/lib/taskAdmin'
+import { rewindTask, reviewTask, remediateTask } from '@/lib/taskAdmin'
 import { StagePipeline } from '@/components/StagePipeline'
 import { TaskAdminButtons } from '@/components/TaskAdminButtons'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
@@ -447,7 +447,7 @@ interface TaskItem {
     diffStat?: string
     contractViolations?: string[]
     warnings?: string[]
-    review?: { verdict: string; summary: string }
+    review?: { verdict: string; summary: string; at?: number }
     /** 阶段初审结论（2026-10-03）：key = analysis（需求矩阵）/ solution（方案设计） */
     phaseReviews?: Record<string, { verdict: string; summary: string }>
   } | null
@@ -686,6 +686,34 @@ export function TaskWorkflowPage({
       .catch((e) => toast(e instanceof Error ? e.message : '回退失败', 'error'))
       .finally(() => setRewinding(null))
   }
+  // 代码审查节点的审查-修复闭环（2026-10-05 用户裁定）：人工发起子 agent 复审
+  const [reviewing, setReviewing] = useState(false)
+  const reviewClickAt = useRef(0)
+  const doReview = () => {
+    if (!backendRepo || !sel || reviewing) return
+    reviewClickAt.current = Date.now()
+    setReviewing(true)
+    reviewTask(backendRepo, sel.id)
+      .then(() => toast('子 agent 复审已发起——结论出来后自动刷新（分钟级）', 'info'))
+      .catch((e) => {
+        setReviewing(false)
+        toast(e instanceof Error ? e.message : '发起复审失败', 'error')
+      })
+  }
+  const doRemediate = () => {
+    if (!backendRepo || !sel) return
+    remediateTask(backendRepo, sel.id)
+      .then(() => {
+        toast('已带审查意见进入修改复审——完成后子 agent 自动再审')
+        load()
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : '操作失败', 'error'))
+  }
+  // 复审完成判定：result.review.at（服务端毫秒时间戳）≥ 点击时刻即本轮已出结论
+  useEffect(() => {
+    const at = sel?.result?.review?.at
+    if (reviewing && typeof at === 'number' && at >= reviewClickAt.current) setReviewing(false)
+  }, [sel?.result?.review?.at, reviewing])
 
   if (!backendRepo) {
     return <p className="p-8 text-center text-[12px] text-slate-400 dark:text-slate-500">需要本地后端在线</p>
@@ -1054,6 +1082,53 @@ export function TaskWorkflowPage({
                         <p className="py-8 text-center text-[11px] text-slate-400 dark:text-slate-500">该任务无变更归档</p>
                       )}
                     </div>
+                    </div>
+                    {/* 2026-10-05 用户裁定：代码审查节点 = 审查-修复闭环——
+                        人工发起子 agent 复审；未通过 → 带意见修改并复审（修复后自动再审），直到通过 */}
+                    <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-2.5">
+                      {sel.result?.review && (
+                        <div
+                          className={`mb-2 flex items-start gap-2 rounded-lg border px-3 py-2 ${
+                            sel.result.review.verdict === 'pass'
+                              ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/40'
+                              : 'border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/40'
+                          }`}
+                        >
+                          <ShieldAlert size={11} className={`mt-0.5 shrink-0 ${sel.result.review.verdict === 'pass' ? 'text-emerald-600' : 'text-red-600'}`} />
+                          <div className="min-w-0">
+                            <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : 'text-red-700'}`}>
+                              子 agent 审查{sel.result.review.verdict === 'pass' ? '通过' : '未通过'}
+                              {typeof sel.result.review.at === 'number' && (
+                                <span className="ml-1 font-normal text-slate-400">{absTime(String(sel.result.review.at))}</span>
+                              )}
+                            </p>
+                            <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{sel.result.review.summary}</p>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={doReview}
+                          disabled={reviewing || !!deciding}
+                          className="flex items-center gap-1 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-bold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-40"
+                          title="对当前工作区改动再审一轮（走 review 槽配置，分钟级）"
+                        >
+                          {reviewing ? <Loader2 size={12} className="animate-spin" /> : <ShieldAlert size={12} />} 发起子agent复审
+                        </button>
+                        {sel.result?.review?.verdict === 'fail' && (
+                          <button
+                            onClick={doRemediate}
+                            disabled={reviewing || !!deciding}
+                            className="flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-violet-700 disabled:opacity-40"
+                            title="注入审查意见直达实施阶段重跑；完成后子 agent 自动再审——循环直至通过"
+                          >
+                            <Hammer size={12} /> 带意见修改并复审
+                          </button>
+                        )}
+                        <span className="ml-auto text-[10px] text-slate-300 dark:text-slate-600">
+                          {reviewing ? '复审进行中…' : '审查-修复闭环：发现问题 → 自动修复 → 再审，直到通过'}
+                        </span>
+                      </div>
                     </div>
                     {/* 2026-10-03 实弹 bug：Diff 关此前没有裁决按钮——任务卡死在代码审查关无法推进。
                         2026-10-05 打回语义修订：通过 = 进审查报告关（终审）；
