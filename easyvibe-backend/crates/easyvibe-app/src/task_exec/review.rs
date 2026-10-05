@@ -10,7 +10,7 @@ pub struct ReviewVerdict {
 }
 
 /// 跑独立审查会话并等终态。25 分钟上限（审查是分钟级任务；超时判不可用不阻断）。
-/// custom：自定义层补充（注入点 #3——global + development 块拼进审查 prompt）。
+/// custom：自定义层补充（review 槽）；rules：出厂规则内嵌副本（开发/修复两份，直接进 prompt）。
 pub(crate) async fn run_subagent_review(
     session_manager: &SessionManager,
     agent_command: &str,
@@ -19,9 +19,10 @@ pub(crate) async fn run_subagent_review(
     repo_root: &std::path::Path,
     task: &TaskRow,
     custom: &HarnessCustom,
+    rules: (&str, &str),
 ) -> Option<ReviewVerdict> {
     let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
-    let prompt = assemble_review_prompt(task, &user, custom);
+    let prompt = assemble_review_prompt(task, &user, custom, rules);
     // 审查会话沿用任务槽 CLI 参数（可经 settings `agent.args.review` 单独收紧/换模型）
     let session = session_manager
         .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(25 * 60)))

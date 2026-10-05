@@ -1,11 +1,14 @@
-//! task_exec::harness —— harness 出厂层密封部署、一次性迁移、自定义层装载与透明模式中和（文件 IO + 纯函数）。
+//! task_exec::harness —— harness 出厂层（只读圣物）+ 自定义层装载与透明模式中和（文件 IO + 纯函数）。
 //!
-//! 两层分离（2026-10-05 方案 v2，用户裁定）：
-//! - 出厂层（~/.easyvibe/harness/）：编译期内嵌底账的换姓形态，**密封**——每次启动幂等
-//!   全量覆写，不对用户展示、不可修改（deploy_sealed）；
-//! - 自定义层（~/.easyvibe/harness-custom/）：用户可编辑的补充规则（global.md /
-//!   rule_development.md 两槽），只追加不修改，带独立开关（state.json）。
-//! 老版本用户对出厂层的修改经一次性迁移（哨兵防重入）整体挪入自定义层。
+//! 两层分离（2026-10-05，用户裁定）：
+//! - 出厂层（~/.easyvibe/harness/）：**任何方式不动**——只在首次缺失时部署一份换姓参考副本
+//!   （给框架内 cat 指令的落点），之后运行时零写入；装配事实源是编译期内嵌底账
+//!   （assemble_from_builtin），磁盘出厂文件被改不影响任何装配产物；
+//! - 自定义层（~/.easyvibe/harness-custom/）：用户可编辑的补充规则，五个 harness 类型
+//!   （global 通用 / analysis 需求分析 / design 方案设计 / implement 代码开发 / review 代码审查）
+//!   各加各的规则、只增不碰原规则；旧版四阶段共用槽 development 仅作新槽兜底；
+//!   state.json 总开关（停用≠删除）。
+//! 老版本用户对出厂层的修改经一次性迁移（哨兵防重入，只读播种）整体挪入自定义层。
 
 use super::*;
 
@@ -24,9 +27,15 @@ const TRANSPARENT_MODE_LINE: &str = "（透明执行模式：禁止向用户提�
 /// 自定义补充引导句（装配约定：与出厂冲突时以补充为准）
 pub const CUSTOM_BLOCK_HEADER: &str = "【用户补充规则——优先级高于出厂规则，与出厂冲突时以补充为准】";
 
-/// 自定义层槽位：(文件名, state.json 键)。bugfix 槽待任务类型字段落地后追加。
+/// 自定义层槽位：(文件名, state.json 键)。
+/// 五个 harness 类型（global 通用 + analysis/design/implement/review）+ 旧版四阶段
+/// 共用槽 development（用户裁定 18:10：各类型分别加规则；development 仅作新槽的兜底）。
 pub const CUSTOM_SLOTS: &[(&str, &str)] = &[
     ("global.md", "global"),
+    ("rule_analysis.md", "analysis"),
+    ("rule_design.md", "design"),
+    ("rule_implement.md", "implement"),
+    ("rule_review.md", "review"),
     ("rule_development.md", "development"),
 ];
 
@@ -40,6 +49,11 @@ const MIGRATION_SENTINEL: &str = ".migrated-v2";
 #[derive(Debug, Clone, Default)]
 pub struct HarnessCustom {
     pub global: Option<String>,
+    pub analysis: Option<String>,
+    pub design: Option<String>,
+    pub implement: Option<String>,
+    pub review: Option<String>,
+    /// 旧版四阶段共用槽：仅作新类型槽的兜底（新槽为空时回落用它）
     pub development: Option<String>,
 }
 
@@ -76,6 +90,10 @@ pub struct Harness {
     pub user_entry_skills: Vec<String>,
     /// 自定义层（harness-custom/）：仅启用的槽有内容
     pub custom: HarnessCustom,
+    /// 出厂规则正文内嵌副本（审查 prompt 直接内嵌，agent 不再 cat 磁盘文件——
+    /// 用户裁定 17:58：任何方式不动原 harness，磁盘参考副本被改也不影响审查行为）
+    pub rule_development: String,
+    pub rule_bugfix: String,
 }
 
 pub fn harness_dir() -> PathBuf {
@@ -100,62 +118,37 @@ fn custom_dir_for(factory_dir: &std::path::Path) -> PathBuf {
     factory_dir.with_file_name("harness-custom")
 }
 
-/// 出厂层密封部署（v2 语义，替代旧"缺失才补 + 版本迁移"）：幂等全量覆写。
-/// 比较基准 = 换姓后的底账（磁盘稳态就是换姓形态；手工写入未换姓原文也必然不等，照覆写）。
+/// 出厂层首次部署（用户裁定 17:58：任何方式不动原 harness）：
+/// **只在文件缺失时写一份换姓参考副本**（给框架内 cat 指令的落点），
+/// 已存在的文件一律不碰——软件运行时对出厂层零写入，用户磁盘手改也不覆写。
 pub fn deploy_sealed(dir: &std::path::Path) -> Result<(), ApiError> {
     for (rel, content) in BUILTIN_HARNESS {
         let p = dir.join(rel);
+        if p.exists() {
+            continue;
+        }
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ApiError::Internal(format!("harness 目录创建失败: {e}")))?;
         }
-        let expected = adapt_builtin_content(content);
-        let same = std::fs::read_to_string(&p).map(|d| d == expected).unwrap_or(false);
-        if !same {
-            std::fs::write(&p, &expected)
-                .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
-        }
+        std::fs::write(&p, adapt_builtin_content(content))
+            .map_err(|e| ApiError::Internal(format!("harness 底账写入失败 {}: {e}", p.display())))?;
     }
     Ok(())
 }
 
-/// 一次性迁移（§3.3）：老版本用户对出厂层的修改 → 整体挪入自定义层。
+/// 一次性迁移（§3.3，17:58 修订：**只读**出厂差异播 custom，不 rename、不重铺、不动原 harness）。
 /// 哨兵防重入；播种"槽文件已存在则不覆盖"保证崩溃重入安全。
-/// 步骤 2 内部窗口（rename 后重铺前崩溃）：重入时出厂目录缺失 → tampered 判定重铺；
-/// 播种原料回退读最新 harness.backup-*。
+/// 原料读取：出厂目录优先，缺失回退最新 harness.backup-*（老版本归档形态）。
 pub(crate) fn migrate_builtin_to_custom(factory_dir: &std::path::Path, custom_dir: &std::path::Path) {
     let sentinel = custom_dir.join(MIGRATION_SENTINEL);
     if sentinel.exists() {
         return;
     }
     let backup = latest_harness_backup(factory_dir);
-    // 播种原料必须在 rename/重铺**之前**读进内存——重铺后出厂目录里已是新内容
-    // （步骤 2 内部崩溃窗口：目录缺失时回退读最新备份，旧内容仍找得回）
     let read_old = |rel: &str| -> Option<String> {
         std::fs::read_to_string(factory_dir.join(rel)).ok()
             .or_else(|| backup.as_ref().and_then(|b| std::fs::read_to_string(b.join(rel)).ok()))
     };
-    let old_contents: Vec<(String, Option<String>)> = BUILTIN_HARNESS.iter().map(|(rel, _)| (rel.to_string(), read_old(rel))).collect();
-    // 出厂层是否偏离出厂内容（文件缺失 = 偏离；目录缺失 = 偏离，须重铺）
-    let factory_tampered = !factory_dir.exists() || BUILTIN_HARNESS.iter().any(|(rel, content)| {
-        match std::fs::read_to_string(factory_dir.join(rel)) {
-            Ok(d) => d != adapt_builtin_content(content),
-            Err(_) => true,
-        }
-    });
-    if factory_tampered {
-        if factory_dir.exists() {
-            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-            let backup_path = factory_dir.with_file_name(format!("harness.backup-{ts}"));
-            if let Err(e) = std::fs::rename(factory_dir, &backup_path) {
-                warn!("[harness] 迁移归档失败（继续重铺，旧内容可能丢失）: {e}");
-            } else {
-                info!("[harness] 迁移：旧出厂层已归档到 {}", backup_path.display());
-            }
-        }
-        if let Err(e) = deploy_sealed(factory_dir) {
-            warn!("[harness] 迁移重铺失败: {e}");
-        }
-    }
     // 播种（不覆盖既有槽文件——崩溃重入也不重复播种）
     const SEEDS: &[(&str, &str)] = &[
         ("inject-prompt.md", "global.md"),
@@ -166,8 +159,7 @@ pub(crate) fn migrate_builtin_to_custom(factory_dir: &std::path::Path, custom_di
         if slot_path.exists() {
             continue;
         }
-        let old = old_contents.iter().find(|(r, _)| r == rel).and_then(|(_, c)| c.clone());
-        let Some(old) = old else { continue };
+        let Some(old) = read_old(rel) else { continue };
         let differs = BUILTIN_HARNESS
             .iter()
             .find(|(r, _)| r == rel)
@@ -181,12 +173,11 @@ pub(crate) fn migrate_builtin_to_custom(factory_dir: &std::path::Path, custom_di
             }
         }
     }
-    // manifest / grill-me 的差异不在 custom 范围：提示但不播种
-    let old_manifest = old_contents.iter().find(|(r, _)| r == "manifest.json").and_then(|(_, c)| c.clone());
-    if let Some(old) = old_manifest {
+    // manifest / grill-me 的差异不在 custom 范围：仅日志提示
+    if let Some(old) = read_old("manifest.json") {
         let builtin = BUILTIN_HARNESS.iter().find(|(r, _)| *r == "manifest.json").map(|(_, c)| *c).unwrap_or("");
         if old != builtin {
-            info!("[harness] 迁移：manifest.json 的用户字段随出厂重置（可在 harness.backup-* 找回）");
+            info!("[harness] 迁移：manifest.json 的用户字段不入 custom 槽（可在 harness.backup-* 找回）");
         }
     }
     let _ = std::fs::create_dir_all(custom_dir);
@@ -209,17 +200,51 @@ fn latest_harness_backup(factory_dir: &std::path::Path) -> Option<PathBuf> {
     best
 }
 
-/// harness 生产装载：迁移（哨兵短路）→ 密封自检重铺 → 纯装载
+/// harness 生产装载（17:58 修订：装配事实源 = 编译期内嵌底账，**不读磁盘出厂文件**；
+/// 磁盘出厂层只是首次部署的参考副本，运行时零写入、零依赖）：
+/// 首次部署（缺失才写）→ 迁移（只读播种）→ 内嵌装配 + custom 层装载
 pub fn load_harness() -> Result<Harness, ApiError> {
     let dir = harness_dir();
     let custom_dir = custom_dir_for(&dir);
-    migrate_builtin_to_custom(&dir, &custom_dir);
     deploy_sealed(&dir)?;
-    load_harness_from_parts(&dir, &custom_dir)
+    migrate_builtin_to_custom(&dir, &custom_dir);
+    assemble_from_builtin(&dir, &custom_dir)
 }
 
-/// 从指定目录纯装载（**不 deploy、不迁移**——测试注入点，避免 env 变量在并行测试间的竞态
-/// 与"手工写入的文件被密封覆写"的相互干扰）。v2 拆分：生产入口 load_harness 才做密封。
+/// 从内嵌底账装配（生产事实源）。manifest/框架/skills/规则正文全部来自 BUILTIN_HARNESS，
+/// 只经过 adapt_builtin_content 换姓与 neutralize 中和——磁盘上的出厂文件被用户改动
+/// 不影响任何装配产物。
+pub(crate) fn assemble_from_builtin(dir: &std::path::Path, custom_dir: &std::path::Path) -> Result<Harness, ApiError> {
+    let entry = |rel: &str| -> &'static str {
+        BUILTIN_HARNESS.iter().find(|(r, _)| r == &rel).map(|(_, c)| *c).unwrap_or("")
+    };
+    let manifest: HarnessManifest = serde_json::from_str(entry("manifest.json"))
+        .map_err(|e| ApiError::Internal(format!("内嵌 harness manifest 解析失败: {e}")))?;
+    let adapted = entry("inject-prompt.md")
+        .replace("~/.claude/hooks/", &format!("{}/", dir.to_string_lossy().trim_end_matches('/')));
+    let framework_transparent = neutralize_transparent(&adapted, &manifest.transparent_neutralize);
+    let mut user_entry_skills = vec![];
+    for rel in &manifest.skills.user_entry {
+        let content = entry(rel);
+        if content.is_empty() {
+            return Err(ApiError::Internal(format!("内嵌 user_entry 插槽缺失: {rel}")));
+        }
+        user_entry_skills.push(content.to_string());
+    }
+    let custom = load_custom(custom_dir);
+    Ok(Harness {
+        dir: dir.to_path_buf(),
+        manifest,
+        framework_transparent,
+        user_entry_skills,
+        custom,
+        rule_development: adapt_builtin_content(entry("rule_development.md")),
+        rule_bugfix: adapt_builtin_content(entry("rule_bugfix.md")),
+    })
+}
+
+/// 从指定目录纯装载（**不 deploy、不迁移**——测试注入点：手工写 manifest/框架验证
+/// 换姓与中和的语义；生产装配见 assemble_from_builtin）。
 pub fn load_harness_from(dir: &std::path::Path) -> Result<Harness, ApiError> {
     load_harness_from_parts(dir, &custom_dir_for(dir))
 }
@@ -243,7 +268,15 @@ fn load_harness_from_parts(dir: &std::path::Path, custom_dir: &std::path::Path) 
         user_entry_skills.push(content);
     }
     let custom = load_custom(custom_dir);
-    Ok(Harness { dir: dir.to_path_buf(), manifest, framework_transparent, user_entry_skills, custom })
+    Ok(Harness {
+        dir: dir.to_path_buf(),
+        manifest,
+        framework_transparent,
+        user_entry_skills,
+        custom,
+        rule_development: String::new(),
+        rule_bugfix: String::new(),
+    })
 }
 
 /// 自定义层装载：state.json 控制各槽开关（缺失默认启用）；停用或缺文件 = None。
@@ -266,6 +299,10 @@ fn load_custom(custom_dir: &std::path::Path) -> HarnessCustom {
         let adapted = adapt_builtin_content(&content);
         match *key {
             "global" => custom.global = Some(adapted),
+            "analysis" => custom.analysis = Some(adapted),
+            "design" => custom.design = Some(adapted),
+            "implement" => custom.implement = Some(adapted),
+            "review" => custom.review = Some(adapted),
             "development" => custom.development = Some(adapted),
             _ => {}
         }

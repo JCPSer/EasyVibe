@@ -44,6 +44,8 @@ use super::*;
             framework_transparent: framework.into(),
             user_entry_skills: vec![],
             custom: HarnessCustom::default(),
+            rule_development: String::new(),
+            rule_bugfix: String::new(),
         }))
     }
 

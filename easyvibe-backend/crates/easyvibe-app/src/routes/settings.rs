@@ -298,7 +298,10 @@ pub(crate) async fn generate_custom(
     }
     let (slot_name, where_text, factory_rule) = match slot.as_str() {
         "global" => ("global.md", "全部 agent 上下文（任务流水线、归纳、巡检、入口对话）", "inject-prompt.md（透明执行框架）"),
-        "development" => ("rule_development.md", "development 流程（需求分析/方案设计/实施/代码审查）", "rule_development.md（开发流程规则）"),
+        "analysis" => ("rule_analysis.md", "需求分析阶段（阶段 1 需求矩阵 agent）", "rule_development.md（开发流程规则）"),
+        "design" => ("rule_design.md", "方案设计阶段（阶段 2 方案设计 agent）", "rule_development.md（开发流程规则）"),
+        "implement" => ("rule_implement.md", "代码开发阶段（阶段 3 实施 agent）", "rule_development.md（开发流程规则）"),
+        "review" => ("rule_review.md", "代码审查（独立审查 agent 与阶段产物初审）", "rule_development.md / rule_bugfix.md（审查依据规则）"),
         _ => return Err(AppError(ApiError::BadRequest(format!("未知槽位: {slot}")))),
     };
     let cfg = resolve_llm(&st, "", "chat").await;

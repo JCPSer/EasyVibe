@@ -37,9 +37,37 @@ pub(crate) fn custom_block(c: &Option<String>) -> String {
     }
 }
 
-/// 阶段 prompt 共用的补充块：global（团队通用）+ development（流程规则）。
-pub(crate) fn custom_blocks_dev(custom: &HarnessCustom) -> String {
-    format!("{}{}", custom_block(&custom.global), custom_block(&custom.development))
+/// 类型槽选取：新类型槽有内容用新槽，否则回落旧版四阶段共用槽 development（用户裁定 18:10 的兼容语义）
+fn stage_slot<'a>(slot: &'a Option<String>, legacy: &'a Option<String>) -> &'a Option<String> {
+    match slot.as_deref().map(str::trim) {
+        Some(t) if !t.is_empty() => slot,
+        _ => legacy,
+    }
+}
+
+/// 五个 harness 类型的补充块（用户裁定 18:10：analysis/design/implement/review 各加各的规则、不混淆）：
+/// global=全部上下文；analysis=阶段1 需求分析；design=阶段2 方案设计；
+/// implement=阶段3 实施；review=审查+初审。每块 = global + 该类型槽（空则回落 development 兜底槽）。
+pub(crate) fn blocks_analysis(custom: &HarnessCustom) -> String {
+    format!("{}{}", custom_block(&custom.global), custom_block(stage_slot(&custom.analysis, &custom.development)))
+}
+pub(crate) fn blocks_design(custom: &HarnessCustom) -> String {
+    format!("{}{}", custom_block(&custom.global), custom_block(stage_slot(&custom.design, &custom.development)))
+}
+pub(crate) fn blocks_implement(custom: &HarnessCustom) -> String {
+    format!("{}{}", custom_block(&custom.global), custom_block(stage_slot(&custom.implement, &custom.development)))
+}
+pub(crate) fn blocks_review(custom: &HarnessCustom) -> String {
+    format!("{}{}", custom_block(&custom.global), custom_block(stage_slot(&custom.review, &custom.development)))
+}
+/// 初审（阶段产物预筛）：同时对照需求与方案两类产物，取 analysis + design 两槽
+pub(crate) fn blocks_phase_review(custom: &HarnessCustom) -> String {
+    format!(
+        "{}{}{}",
+        custom_block(&custom.global),
+        custom_block(stage_slot(&custom.analysis, &custom.development)),
+        custom_block(stage_slot(&custom.design, &custom.development)),
+    )
 }
 
 /// 阶段 1 prompt：只产出需求矩阵，禁改代码（rule_development 2.1）。
@@ -66,7 +94,7 @@ pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str, custom: &Harnes
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         feedback = remediation_section(&task.context),
-        custom = custom_blocks_dev(custom),
+        custom = blocks_analysis(custom),
         user = user,
     )
 }
@@ -99,7 +127,7 @@ pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str, custom: &Harnes
         modules = if modules.is_empty() { "（未指定，由你分析）".into() } else { modules.join(", ") },
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         feedback = remediation_section(&task.context),
-        custom = custom_blocks_dev(custom),
+        custom = blocks_design(custom),
         user = user,
     )
 }
@@ -110,7 +138,9 @@ pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str, custom: &Harnes
 /// （与 A 案协议同一规范路径，dev-docs 端点自动捞取）。
 /// 结论行协议：`[EASYVIBE-REVIEW] {"verdict":"pass|fail","summary":"一句话"}`
 /// 审查自身失败/超时 → None（不阻断：diff 关照常，人机审查兜底）。
-pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
+/// 出厂规则正文直接内嵌（rules = (rule_development, rule_bugfix) 的内嵌副本——
+/// 17:58 裁定：agent 不再 cat 磁盘文件，磁盘出厂副本被改不影响审查）。
+pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom, rules: (&str, &str)) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是独立代码审查 agent（harness 2.3.2 的执行者），只做审查，不做实现。
@@ -123,8 +153,14 @@ pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &Harnes
 
 ## 审查材料
 - 改动全文：工作目录即仓库根目录，执行 `git diff` 查看（不要 git checkout/stash 等任何写操作）
-- 规则正文：cat {harness_dir}/rule_development.md（功能开发）或 {harness_dir}/rule_bugfix.md（Bug 修复），按任务性质择一
 - 模块职责与边界：.easyvibe/map/map.json
+
+## 审查依据的出厂规则（内嵌副本，按被审任务性质对照其一）
+### 「功能开发」规则（rule_development）
+{rule_dev}
+
+### 「Bug 修复」规则（rule_bugfix）
+{rule_fix}
 
 ## 审查维度（逐项给出结论）
 代码规范、代码结构、可读性、可维护性、性能；对照影响面合约检查越界改动；
@@ -140,8 +176,9 @@ pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &Harnes
         acceptance = if task.acceptance.is_empty() { "（未指定）".into() } else { task.acceptance.clone() },
         user = user,
         task_id = task.id,
-        harness_dir = harness_dir().to_string_lossy(),
-        custom = custom_blocks_dev(custom),
+        rule_dev = rules.0,
+        rule_fix = rules.1,
+        custom = blocks_review(custom),
     )
 }
 
@@ -186,7 +223,7 @@ pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str
         name = name,
         dir = dir,
         focus = focus,
-        custom = custom_blocks_dev(custom),
+        custom = blocks_phase_review(custom),
     )
 }
 

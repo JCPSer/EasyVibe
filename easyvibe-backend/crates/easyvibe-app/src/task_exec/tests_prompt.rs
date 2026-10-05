@@ -54,35 +54,51 @@ use super::test_util::*;
     }
 
     #[test]
-    fn phase_prompts_inject_global_and_development_blocks() {
-        // 注入点 #2/#9：阶段 prompt 与初审 prompt 注 global + development 两槽
+    fn type_slots_inject_per_stage_without_mixing() {
+        // 用户裁定 18:10：analysis/design/implement/review 各加各的规则、不混淆；
+        // development 仅作各类型槽的兜底（新槽为空时回落）
         let custom = HarnessCustom {
-            global: Some("团队规则A".into()),
-            development: Some("开发规则B".into()),
+            global: Some("通用规则G".into()),
+            analysis: Some("分析规则A".into()),
+            design: Some("设计规则D".into()),
+            implement: Some("开发规则I".into()),
+            review: Some("审查规则R".into()),
+            development: None,
         };
         let t = sample_task("running");
+        // 阶段 1：global + analysis，不含 design/implement/review
         let p1 = assemble_phase1_prompt(&t, "liyuhang", &custom);
-        assert!(p1.contains(CUSTOM_BLOCK_HEADER));
-        assert!(p1.contains("团队规则A") && p1.contains("开发规则B"), "阶段1 prompt 应含两槽");
+        assert!(p1.contains("通用规则G") && p1.contains("分析规则A"), "阶段1 应注 global+analysis");
+        assert!(!p1.contains("设计规则D") && !p1.contains("开发规则I") && !p1.contains("审查规则R"), "阶段1 不得混入其他类型");
         assert!(p1.contains("[EASYVIBE-RESULT]"), "输出契约不得被破坏");
+        // 阶段 2：global + design
         let p2 = assemble_phase2_prompt(&t, "liyuhang", &custom);
-        assert!(p2.contains("团队规则A") && p2.contains("开发规则B"));
+        assert!(p2.contains("通用规则G") && p2.contains("设计规则D"));
+        assert!(!p2.contains("分析规则A") && !p2.contains("开发规则I"));
+        // 初审：global + analysis + design（对照两类产物），不含 implement/review
         let pr = assemble_phase_review_prompt(&t, 1, "liyuhang", &custom);
-        assert!(pr.contains(CUSTOM_BLOCK_HEADER) && pr.contains("团队规则A") && pr.contains("开发规则B"), "初审 prompt 应含两槽");
+        assert!(pr.contains("分析规则A") && pr.contains("设计规则D"), "初审应含 analysis+design");
+        assert!(!pr.contains("开发规则I") && !pr.contains("审查规则R"), "初审不得混入 implement/review");
         assert!(pr.contains("[EASYVIBE-REVIEW]"));
-        // 无 custom：产物与现状一致（块为空串）
+        // 空槽：产物与现状一致（块为空串）
         let empty = HarnessCustom::default();
         let bare = assemble_phase1_prompt(&t, "liyuhang", &empty);
         assert!(!bare.contains(CUSTOM_BLOCK_HEADER), "空槽不得注入引导句");
+        // 兜底：analysis 槽为空时回落 development 槽
+        let legacy = HarnessCustom { global: None, development: Some("旧版共用补充".into()), ..Default::default() };
+        let p1l = assemble_phase1_prompt(&t, "liyuhang", &legacy);
+        assert!(p1l.contains("旧版共用补充"), "新槽为空应回落 development 兜底槽");
     }
 
     #[test]
-    fn review_prompt_injects_custom_blocks() {
-        // 注入点 #3：审查 prompt 注 global + development（v1 唯一规则槽）
-        let custom = HarnessCustom { global: Some("团队规则A".into()), development: Some("开发规则B".into()) };
+    fn review_prompt_inlines_factory_rules_and_custom() {
+        // 注入点 #3：审查 prompt 注 review 槽 + 出厂规则正文内嵌（不再 cat 磁盘文件）
+        let custom = HarnessCustom { global: Some("通用规则G".into()), review: Some("审查规则R".into()), ..Default::default() };
         let t = sample_task("running");
-        let p = assemble_review_prompt(&t, "liyuhang", &custom);
-        assert!(p.contains("团队规则A") && p.contains("开发规则B"));
+        let p = assemble_review_prompt(&t, "liyuhang", &custom, ("出厂开发规则正文片段", "出厂修复规则正文片段"));
+        assert!(p.contains("通用规则G") && p.contains("审查规则R"));
+        assert!(p.contains("出厂开发规则正文片段") && p.contains("出厂修复规则正文片段"), "出厂规则须内嵌进审查 prompt");
+        assert!(!p.contains("cat ~/.easyvibe/harness/rule_development.md"), "不得再让 agent cat 磁盘出厂文件");
         assert!(p.contains("[EASYVIBE-REVIEW]"));
     }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Pencil, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, X, Zap,
+  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { Select } from '@/components/ui/SelectMenu'
@@ -730,14 +730,31 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   )
 }
 
-/// Harness 分区（两栏改造 2026-10-05 方案 v2 + 用户裁定）：出厂层不对用户展示，
-/// 单栏只呈现「自定义补充」——两槽卡片（iOS 开关：停用≠删除）、示例模板/AI 生成
-/// 都走"不落盘、不保存不生效"纪律；✨ AI 辅助生成 = 自然语言需求 → LLM 草稿 → 编辑器待审。
-const SLOT_WHERE: Record<string, string> = {
-  'global.md': '全部 9 个 agent 上下文——任务流水线（需求分析 / 方案设计 / 实施 / 审查 / 初审）、归纳、子图分析、巡检、自动归纳、入口对话',
-  'rule_development.md': 'development 流程——阶段 1/2 需求与方案、实施任务、独立代码审查、阶段产物初审',
+/// Harness 分区（v4 黑盒 2026-10-05 用户裁定）：规则本体完全不展示——
+/// 出厂 harness 是只读圣物（任何方式不动原规则）；用户只有「增」的权限：
+/// 五个 harness 类型（global/analysis/design/implement/review）各加各的规则。
+/// 界面 = 一个总开关 + 一个 AI 生成按钮 + 排查兜底微链接（导出/清空/生效范围）。
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-[22px] w-[38px] flex-shrink-0 rounded-full transition-colors duration-200 ${checked ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+    >
+      <span className={`absolute top-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-all duration-200 ${checked ? 'left-[18px]' : 'left-[2px]'}`} />
+    </button>
+  )
 }
-const SLOT_LABEL: Record<string, string> = { global: 'global.md', development: 'rule_development.md' }
+
+const SCOPES: { key: string; label: string; file: string; desc: string }[] = [
+  { key: 'global', label: '通用', file: 'global.md', desc: '全部 agent 上下文（任务流水线、归纳、巡检、入口对话）' },
+  { key: 'analysis', label: '需求分析', file: 'rule_analysis.md', desc: '仅需求分析阶段（阶段 1 需求矩阵 agent）' },
+  { key: 'design', label: '方案设计', file: 'rule_design.md', desc: '仅方案设计阶段（阶段 2 方案设计 agent）' },
+  { key: 'implement', label: '代码开发', file: 'rule_implement.md', desc: '仅代码开发阶段（阶段 3 实施 agent）' },
+  { key: 'review', label: '代码审查', file: 'rule_review.md', desc: '仅代码审查（独立审查 agent 与阶段产物初审）' },
+]
 
 interface CustomSlot {
   path: string
@@ -748,37 +765,25 @@ interface CustomSlot {
   enabled: boolean
 }
 
-function IosToggle({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+function IosToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`relative h-[25px] w-[42px] flex-shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40 ${
-        on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-      }`}
+      className={`relative h-[25px] w-[42px] flex-shrink-0 rounded-full transition-colors duration-200 ${on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
     >
-      <span
-        className={`absolute top-[2px] h-[21px] w-[21px] rounded-full bg-white shadow transition-all duration-200 ${
-          on ? 'left-[19px]' : 'left-[2px]'
-        }`}
-      />
+      <span className={`absolute top-[2px] h-[21px] w-[21px] rounded-full bg-white shadow transition-all duration-200 ${on ? 'left-[19px]' : 'left-[2px]'}`} />
     </button>
   )
 }
 
 function HarnessSection({ about, onVersionChange }: { about: { backend: string; harness: string } | null; onVersionChange: (v: string) => void }) {
   const [slots, setSlots] = useState<CustomSlot[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  // 编辑态：mode=create 时是"尚未落盘的草稿"（模板/AI 预填），保存才真正创建
-  const [editing, setEditing] = useState<{ path: string; content: string; loaded: string; mode: 'edit' | 'create'; source: 'template' | 'ai' | null } | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [ai, setAi] = useState<{ scope: string; description: string; generating: boolean } | null>(null)
+  const [showScopes, setShowScopes] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
-  // AI 生成弹窗
-  const [ai, setAi] = useState<{ slot: string; description: string; generating: boolean } | null>(null)
 
   const load = useCallback(() => {
     fetch('/api/harness/custom/files')
@@ -795,209 +800,109 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
   }, [onVersionChange])
   useEffect(load, [load])
 
-  const refresh = () => {
-    setBusy(true)
-    load()
-    setTimeout(() => setBusy(false), 300)
-  }
+  const slotOf = (key: string) => slots?.find((s) => s.slot === key)
+  // 总开关 = 五个类型的槽全部启用（legacy development 也随总开关）
+  const allKeys = [...SCOPES.map((s) => s.key), 'development']
+  const masterOn = slots !== null && allKeys.every((k) => (slots.find((s) => s.slot === k)?.enabled ?? true))
 
-  const openCreate = (slotKey: string) => {
-    const path = SLOT_LABEL[slotKey]
-    fetch(`/api/harness/custom/template?slot=${encodeURIComponent(slotKey)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data?: { content?: string } }) => {
-        const content = d?.data?.content ?? ''
-        setEditing({ path, content, loaded: '', mode: 'create', source: 'template' })
-      })
-      .catch(() => toast('示例模板加载失败', 'error'))
-  }
-
-  const openEdit = (path: string) => {
-    fetch(`/api/harness/custom/file?path=${encodeURIComponent(path)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { data?: { content?: string } }) => {
-        const content = d?.data?.content ?? ''
-        setEditing({ path, content, loaded: content, mode: 'edit', source: null })
-      })
-      .catch(() => toast('文件加载失败', 'error'))
-  }
-
-  const save = () => {
-    if (!editing) return
-    setSaving(true)
-    fetch('/api/harness/custom/file', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: editing.path, content: editing.content }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+  const toggleMaster = (on: boolean) => {
+    Promise.all(
+      allKeys.map((k) =>
+        fetch('/api/harness/custom/toggle', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: slotFile(k), enabled: on }),
+        })
+      )
+    )
       .then(() => {
-        toast(`已保存并热装载——${editing.path} 立即注入 agent 上下文`, 'info')
-        setEditing(null)
-        refresh()
-      })
-      .catch(() => toast('保存失败（路径防线或磁盘错误）', 'error'))
-      .finally(() => setSaving(false))
-  }
-
-  const remove = (path: string) => {
-    fetch(`/api/harness/custom/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then(() => {
-        toast(`已删除 ${path}，agent 上下文恢复为出厂规则`, 'info')
-        if (editing?.path === path) setEditing(null)
-        refresh()
-      })
-      .catch(() => toast('删除失败', 'error'))
-      .finally(() => setConfirmDel(null))
-  }
-
-  const toggle = (path: string, enabled: boolean) => {
-    fetch('/api/harness/custom/toggle', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, enabled }),
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then(() => {
-        toast(enabled ? `${path} 已启用，立即注入 agent 上下文` : `${path} 已停用（文件保留，仅停止注入）`, 'info')
-        refresh()
+        toast(on ? '团队规则已启用——立即注入对应 agent 上下文' : '团队规则已停用（规则保留，随时恢复）', 'info')
+        load()
       })
       .catch(() => toast('开关切换失败', 'error'))
   }
 
-  const clearAll = () => {
-    const paths = (slots ?? []).filter((s) => s.exists).map((s) => s.path)
-    Promise.all(paths.map((p) => fetch(`/api/harness/custom/file?path=${encodeURIComponent(p)}`, { method: 'DELETE' })))
+  const slotFile = (key: string) => SCOPES.find((s) => s.key === key)?.file ?? 'rule_development.md'
+
+  const activeRules = (slots ?? []).filter((s) => s.exists && s.slot !== 'development')
+  const lastGen = activeRules.reduce((m, s) => Math.max(m, s.mtimeMs), 0)
+
+  const openAi = (scope: string) => setAi({ scope, description: '', generating: false })
+
+  const runAi = () => {
+    if (!ai || !ai.description.trim()) return
+    setAi({ ...ai, generating: true })
+    const scope = SCOPES.find((s) => s.key === ai.scope) ?? SCOPES[0]
+    fetch('/api/harness/custom/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot: scope.key, description: ai.description.trim() }),
+    })
+      .then((r) => (r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? String(r.status))))))
+      .then((d: { data?: { content?: string } }) =>
+        fetch('/api/harness/custom/file', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: scope.file, content: d?.data?.content ?? '' }),
+        })
+      )
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then(() => {
-        toast('已清空全部自定义补充', 'info')
-        setEditing(null)
-        refresh()
+        toast(`「${scope.label}」规则已生成并生效——${scope.desc}`, 'info')
+        setAi(null)
+        load()
+      })
+      .catch((e: Error) => toast(`生成失败：${e.message}`, 'error'))
+      .finally(() => setAi((a) => (a ? { ...a, generating: false } : null)))
+  }
+
+  const exportRules = () => {
+    const existing = (slots ?? []).filter((s) => s.exists)
+    if (existing.length === 0) {
+      toast('还没有任何自定义规则', 'info')
+      return
+    }
+    Promise.all(
+      existing.map((s) =>
+        fetch(`/api/harness/custom/file?path=${encodeURIComponent(s.path)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d: { data?: { content?: string } } | null) => `## ${s.path}\n\n${d?.data?.content ?? ''}`)
+      )
+    )
+      .then((sections) => {
+        const blob = new Blob([`# EasyVibe 团队自定义规则导出\n\n${sections.join('\n\n---\n\n')}\n`], { type: 'text/markdown' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'easyvibe-custom-rules.md'
+        a.click()
+        URL.revokeObjectURL(a.href)
+        toast('已导出当前自定义规则', 'info')
+      })
+      .catch(() => toast('导出失败', 'error'))
+  }
+
+  const clearRules = () => {
+    const existing = (slots ?? []).filter((s) => s.exists)
+    Promise.all(existing.map((s) => fetch(`/api/harness/custom/file?path=${encodeURIComponent(s.path)}`, { method: 'DELETE' })))
+      .then(() => {
+        toast('已清空全部自定义规则——agent 上下文恢复为纯出厂规则', 'info')
+        setConfirmClear(false)
+        load()
       })
       .catch(() => toast('清空失败', 'error'))
       .finally(() => setConfirmClear(false))
   }
 
-  const openAi = (slotKey: string) => setAi({ slot: slotKey, description: '', generating: false })
-
-  const runAi = () => {
-    if (!ai || !ai.description.trim()) return
-    setAi({ ...ai, generating: true })
-    fetch('/api/harness/custom/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slot: ai.slot, description: ai.description.trim() }),
-    })
-      .then((r) => (r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? String(r.status))))))
-      .then((d: { data?: { content?: string } }) => {
-        const content = d?.data?.content ?? ''
-        const path = SLOT_LABEL[ai.slot]
-        // 与示例模板同一纪律：填入编辑器待审，不落盘；不覆盖未保存的既有草稿
-        setEditing((prev) =>
-          prev && prev.path === path
-            ? { ...prev, content, source: 'ai' }
-            : { path, content, loaded: '', mode: prev?.path === path ? prev.mode : 'create', source: 'ai' }
-        )
-        setAi(null)
-        toast('AI 草稿已填入编辑器——审阅后保存才生效', 'info')
-      })
-      .catch((e: Error) => toast(`AI 生成失败：${e.message}`, 'error'))
-      .finally(() => setAi((a) => (a ? { ...a, generating: false } : null)))
-  }
-
-  const slotCards = (slots ?? []).map((s) => {
-    const statePill = !s.exists ? (
-      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-micro font-bold text-slate-400">未设置</span>
-    ) : s.enabled ? (
-      <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-bold text-emerald-600">● 已生效</span>
-    ) : (
-      <span className="rounded-full bg-red-50 dark:bg-red-950/40 px-2 py-0.5 text-micro font-bold text-red-500">已停用</span>
-    )
-    return (
-      <div
-        key={s.path}
-        className={`rounded-md border p-3 transition-colors ${
-          s.exists && !s.enabled
-            ? 'border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40'
-            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <span className={`mono text-[12px] font-bold ${s.exists && !s.enabled ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>
-            {s.path}
-          </span>
-          {statePill}
-          <span className="ml-auto flex items-center gap-2">
-            {s.exists && (
-              <span className="hidden text-micro text-slate-300 dark:text-slate-600 sm:inline">
-                {(s.size / 1024).toFixed(1)} KB · {s.mtimeMs ? new Date(s.mtimeMs).toLocaleString() : '—'} {!s.enabled && '· 文件保留'}
-              </span>
-            )}
-            {s.exists && <IosToggle on={s.enabled} onChange={(v) => toggle(s.path, v)} />}
-          </span>
-        </div>
-        <p className="mt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
-          <b className="font-semibold text-slate-500 dark:text-slate-400">生效位置：</b>
-          {SLOT_WHERE[s.path]}
-        </p>
-        <div className="mt-2 flex items-center gap-1.5">
-          {s.exists ? (
-            <>
-              <button
-                onClick={() => openEdit(s.path)}
-                className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
-              >
-                <Pencil size={11} /> 编辑
-              </button>
-              {confirmDel === s.path ? (
-                <button
-                  onClick={() => remove(s.path)}
-                  className="rounded-md bg-red-500 px-2 py-1 text-micro font-bold text-white hover:bg-red-600"
-                >
-                  确认删除
-                </button>
-              ) : (
-                <button
-                  onClick={() => setConfirmDel(s.path)}
-                  onMouseLeave={() => setConfirmDel(null)}
-                  className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-red-300 hover:text-red-500"
-                >
-                  <Trash2 size={11} /> 删除
-                </button>
-              )}
-            </>
-          ) : (
-            <button
-              onClick={() => openCreate(s.slot)}
-              className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700"
-            >
-              <Plus size={11} /> 创建
-            </button>
-          )}
-          <button
-            onClick={() => openAi(s.slot)}
-            className="flex items-center gap-1 rounded-md border border-violet-200 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/30 px-2 py-1 text-micro font-bold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40"
-          >
-            <Sparkles size={11} /> AI 辅助生成
-          </button>
-          {editing?.path === s.path && (
-            <span className="text-micro font-semibold text-blue-500">编辑中…</span>
-          )}
-        </div>
-      </div>
-    )
-  })
-
   return (
     <div className="space-y-3">
-      {/* 头部：标题 + 副文案 + 出厂版本（出厂层不展示，只留版本事实） */}
+      {/* 头部：标题 + 副文案 + 出厂版本（规则本体一律不展示） */}
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Harness 自定义补充</h3>
+          <h3 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Harness 团队规则</h3>
           <p className="text-cap mt-0.5 leading-4 text-slate-400 dark:text-slate-500">
-            出厂工作流护栏随软件版本自动更新，不在此展示、不可修改；
+            出厂工作流护栏随软件版本自动更新、不可见不可改；
             <br />
-            以下内容追加到所有 agent 上下文，与出厂规则冲突时以补充为准
+            你可以用 AI 按环节生成团队规则补充，追加到对应 agent 上下文
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-micro font-bold text-blue-600">
@@ -1005,156 +910,138 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
         </span>
       </div>
 
-      {/* 概念条：追加不是修改；停用不是删除 */}
-      <div className="flex items-start gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-slate-100/60 dark:from-slate-900 dark:to-slate-900/60 px-3 py-2.5">
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-[11px]">🧩</span>
-        <p className="text-cap leading-4 text-slate-500 dark:text-slate-400">
-          <b className="font-semibold text-slate-600 dark:text-slate-300">追加，不是修改；停用，不是删除。</b>
-          补充写在出厂规则之后，agent 同时看到两者；拨动开关可临时停用（文件保留，随时恢复）；✨ AI 辅助生成帮你起草，保存前不会生效。
-        </p>
-      </div>
-
-      {/* 槽位卡片 */}
-      <div className="space-y-2">
-        {slots === null && <p className="text-cap py-2 text-slate-400 dark:text-slate-500">加载中…</p>}
-        {slotCards}
-        {/* bugfix 槽占位：依赖任务类型字段 */}
-        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 p-3 opacity-70">
-          <div className="flex items-center gap-2">
-            <span className="mono text-[12px] font-bold text-slate-400 dark:text-slate-500">rule_bugfix.md</span>
-            <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-bold text-amber-600">即将推出</span>
+      {/* 开关卡：总开关（停用≠删除） */}
+      <div className="flex items-center gap-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-[16px]">🛡</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[13px] font-bold text-slate-700 dark:text-slate-200">
+            启用团队规则补充
+            {slots !== null && (
+              <span className={`rounded-full px-2 py-0.5 text-micro font-bold ${masterOn ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+                {masterOn ? '● 生效中' : '已停用'}
+              </span>
+            )}
           </div>
-          <p className="mt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
-            <b className="font-semibold text-slate-400 dark:text-slate-500">生效位置：</b>
-            bugfix 类任务与审查 —— 依赖「任务类型」字段，落地后开放
+          <p className="text-cap mt-1 leading-4 text-slate-400 dark:text-slate-500">
+            开启后，你的补充规则追加在出厂规则之后，对应环节的 agent 同时看到两者，冲突时以补充为准。随时可关闭——规则保留，重开立即恢复。
           </p>
         </div>
+        <IosToggle on={masterOn} onChange={toggleMaster} />
       </div>
 
-      {/* 编辑器：创建（模板/AI 预填）与编辑共用；不落盘纪律在顶部提示条明示 */}
-      {editing && (
-        <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-          <div className="flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 px-3 py-2">
-            <span className="mono text-[11px] font-bold text-slate-600 dark:text-slate-300">{editing.path}</span>
-            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">≤ 64 KB</span>
-            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">Markdown</span>
-            <span className="rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro text-slate-400">.claude 路径自动换姓</span>
-            <button
-              onClick={() => setEditing(null)}
-              className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-micro font-semibold text-slate-400 hover:text-slate-600"
-            >
-              <X size={11} /> {editing.mode === 'create' ? '取消创建' : '关闭'}
-            </button>
+      {/* AI 生成卡 */}
+      <div className="flex items-center gap-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/15 to-indigo-500/15 text-[16px]">✨</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[13px] font-bold text-slate-700 dark:text-slate-200">
+            团队规则
+            {activeRules.length > 0 ? (
+              <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-bold text-emerald-600">已生成 · {activeRules.length} 类</span>
+            ) : (
+              <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-micro font-bold text-slate-400">未生成</span>
+            )}
           </div>
-          {editing.source && (
-            <div className="flex items-center gap-1.5 border-b border-violet-100 dark:border-violet-900/50 bg-violet-50 dark:bg-violet-950/30 px-3 py-1.5 text-micro text-violet-700 dark:text-violet-300">
-              <Sparkles size={11} className="shrink-0" />
-              {editing.source === 'template'
-                ? '示例模板已填入——按需删减后保存；不保存则不会创建，对 agent 无任何影响'
-                : 'AI 生成草稿——请审阅修改后保存；不保存则不会生效，也不会覆盖现有规则'}
+          <p className="text-cap mt-1 leading-4 text-slate-400 dark:text-slate-500">
+            {activeRules.length > 0
+              ? `上次生成：${lastGen ? new Date(lastGen).toLocaleString() : '—'} · 规则原文不在界面展示，不满意可重新生成，或用上方开关整体停用`
+              : '用自然语言描述你的团队要求（如审查维度、方案必备章节），AI 起草规则并立即生效'}
+          </p>
+        </div>
+        <button
+          onClick={() => openAi('global')}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 px-4 py-2.5 text-[12px] font-bold text-white shadow-md shadow-violet-500/25 hover:from-violet-600 hover:to-indigo-600"
+        >
+          <Sparkles size={13} /> {activeRules.length > 0 ? '管理规则' : '生成规则'}
+        </button>
+      </div>
+
+      {/* 排查兜底微链接 */}
+      <div className="flex items-center gap-3 px-1">
+        <button onClick={exportRules} className="text-micro text-slate-300 underline decoration-slate-200 underline-offset-2 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400">
+          导出当前规则
+        </button>
+        <span className="text-slate-200 dark:text-slate-700">·</span>
+        {confirmClear ? (
+          <button onClick={clearRules} className="text-micro font-bold text-red-500 hover:text-red-600">
+            确认清空？
+          </button>
+        ) : (
+          <button onClick={() => setConfirmClear(true)} onMouseLeave={() => setConfirmClear(false)} className="text-micro text-slate-300 underline decoration-slate-200 underline-offset-2 hover:text-red-500 dark:text-slate-600">
+            清空自定义规则
+          </button>
+        )}
+        <span className="text-slate-200 dark:text-slate-700">·</span>
+        <button onClick={() => setShowScopes((v) => !v)} className="text-micro text-slate-300 underline decoration-slate-200 underline-offset-2 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400">
+          查看生效范围
+        </button>
+      </div>
+
+      {/* 生效范围面板：只显示状态点，不展示规则内容 */}
+      {showScopes && (
+        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60 px-4 py-3">
+          {SCOPES.map((s) => {
+            const sl = slotOf(s.key)
+            const on = sl?.exists && sl.enabled
+            return (
+              <div key={s.key} className="flex items-center gap-2 py-1.5">
+                <span className={`h-1.5 w-1.5 rounded-full ${on ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                <span className="w-16 text-[11px] font-semibold text-slate-600 dark:text-slate-300">{s.label}</span>
+                <span className="text-cap text-slate-400 dark:text-slate-500">{s.desc}</span>
+                <span className="ml-auto text-micro text-slate-300 dark:text-slate-600">{on ? '已生效' : '未设置'}</span>
+              </div>
+            )
+          })}
+          {slotOf('development')?.exists && (
+            <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 py-1.5 mt-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              <span className="w-16 text-[11px] font-semibold text-slate-500 dark:text-slate-400">兜底规则</span>
+              <span className="text-cap text-slate-400 dark:text-slate-500">旧版通用补充（新规则未覆盖的环节回落使用）</span>
             </div>
           )}
-          <textarea
-            value={editing.content}
-            onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-            rows={14}
-            spellCheck={false}
-            className="mono select-text w-full resize-y bg-slate-900 p-3 text-[11px] leading-5 text-slate-200 outline-none transition-colors focus:ring-2 focus:ring-blue-500/30 focus:ring-inset"
-          />
-          <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-2">
-            <p className="text-micro text-slate-400 dark:text-slate-500">
-              {editing.mode === 'create' ? (
-                <span className="font-bold text-amber-500">● 未保存 · 槽位尚未创建</span>
-              ) : editing.content === editing.loaded ? (
-                '未修改'
-              ) : (
-                <span className="font-bold text-amber-500">● 有未保存修改</span>
-              )}
-              <span className="ml-1">保存后 agent 上下文立即生效，无需重启</span>
-            </p>
-            <button
-              onClick={save}
-              disabled={saving || (editing.mode === 'edit' ? editing.content === editing.loaded : !editing.content.trim())}
-              className="ml-auto flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
-            >
-              {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存并热装载
-            </button>
-          </div>
         </div>
       )}
 
-      {/* 危险区：清空全部 */}
-      <div className="rounded-md border border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/20 p-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-[12px] font-bold text-red-700 dark:text-red-400">清空全部自定义补充</div>
-            <p className="text-cap mt-0.5 text-red-500/80 dark:text-red-400/60">所有槽位文件与开关状态一并清除，agent 上下文恢复为纯出厂规则</p>
-          </div>
-          {confirmClear ? (
-            <button
-              onClick={clearAll}
-              disabled={busy}
-              className="shrink-0 rounded-md bg-red-500 px-3 py-1.5 text-micro font-bold text-white hover:bg-red-600 disabled:opacity-40"
-            >
-              确认清空
-            </button>
-          ) : (
-            <button
-              onClick={() => setConfirmClear(true)}
-              onMouseLeave={() => setConfirmClear(false)}
-              className="shrink-0 rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40"
-            >
-              清空
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* AI 生成弹窗 */}
+      {/* AI 生成弹窗：选择环节 → 描述需求 → 生成并生效 */}
       {ai && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setAi(null)}>
-          <div
-            className="w-[520px] max-w-[92vw] rounded-xl bg-white dark:bg-slate-900 shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="w-[560px] max-w-[92vw] rounded-xl bg-white dark:bg-slate-900 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 px-4 pt-4">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-[13px] text-white">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white">
                 <Sparkles size={14} />
               </span>
-              <b className="text-[13px] text-slate-800 dark:text-slate-100">AI 辅助生成</b>
-              <span className="rounded-full border border-violet-200 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/30 px-2 py-0.5 text-micro text-violet-700 dark:text-violet-300">
-                {SLOT_LABEL[ai.slot]}
-              </span>
+              <b className="text-[13px] text-slate-800 dark:text-slate-100">AI 生成团队规则</b>
+              {slotOf(ai.scope)?.exists && <span className="rounded bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 text-micro font-bold text-red-500">将替换该范围现有规则</span>}
             </div>
-            <p className="px-4 pt-1.5 text-cap leading-4 text-slate-400 dark:text-slate-500">
-              描述你的团队规则需求，AI 起草补充规则填入编辑器。
-              <b className="text-violet-600 dark:text-violet-300">生成内容需你审阅并保存后才生效。</b>
+            {/* 环节选择：五个 harness 类型 */}
+            <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+              {SCOPES.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setAi({ ...ai, scope: s.key })}
+                  className={`rounded-full border px-3 py-1.5 text-micro font-bold transition-colors ${
+                    ai.scope === s.key
+                      ? 'border-violet-400 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-violet-200 hover:text-violet-500'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <p className="px-4 pt-2 text-micro leading-4 text-slate-400 dark:text-slate-500">
+              {SCOPES.find((s) => s.key === ai.scope)?.desc}——规则原文不在界面展示；与出厂规则冲突时以补充为准。
             </p>
             <textarea
               autoFocus
               value={ai.description}
               onChange={(e) => setAi({ ...ai, description: e.target.value })}
               rows={5}
-              placeholder="例：我们团队做金融系统，所有数据库查询必须参数化，代码审查必须额外检查越权访问和敏感数据日志……"
+              placeholder="例：我们团队做金融系统。所有数据库查询必须参数化；代码审查必须额外检查越权访问和敏感数据日志；方案文档必须包含性能影响与回滚方式两节……"
               className="mx-4 mt-3 w-[calc(100%-2rem)] resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500/30"
             />
-            <div className="flex flex-wrap gap-1.5 px-4 pt-2">
-              {['所有 DB 查询必须参数化', '方案必须含性能与回滚章节', '公开 API 必须有文档注释'].map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setAi({ ...ai, description: `例：我们要求${c}` })}
-                  className="rounded-full border border-violet-100 dark:border-violet-900/40 bg-violet-50/60 dark:bg-violet-950/20 px-2.5 py-1 text-micro text-violet-600 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30"
-                >
-                  例：{c}
-                </button>
-              ))}
-            </div>
             <div className="flex items-center gap-2 px-4 py-3.5">
-              <span className="text-micro text-slate-300 dark:text-slate-600">将由已配置的 LLM 生成 · 不会自动生效</span>
-              <button
-                onClick={() => setAi(null)}
-                className="ml-auto rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700"
-              >
+              <span className="text-micro text-slate-300 dark:text-slate-600">将由已配置的 LLM 生成 · 生成即生效</span>
+              <button onClick={() => setAi(null)} className="ml-auto rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700">
                 取消
               </button>
               <button
@@ -1162,27 +1049,12 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
                 disabled={ai.generating || !ai.description.trim()}
                 className="flex items-center gap-1 rounded-md bg-gradient-to-br from-violet-500 to-indigo-500 px-3.5 py-1.5 text-micro font-bold text-white hover:from-violet-600 hover:to-indigo-600 disabled:opacity-40"
               >
-                {ai.generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} 生成草稿
+                {ai.generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} 生成并生效
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
-  )
-}
-
-/** 开关组件（替代裸 checkbox：企业级表单控件最低要求） */
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150 ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}
-    >
-      <i
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white dark:bg-slate-900 elev-1 transition-all duration-150 ${checked ? 'left-[18px]' : 'left-0.5'}`}
-      />
-    </button>
   )
 }

@@ -443,7 +443,10 @@ impl TaskExecutor {
         let this = self.clone();
         let tid = task_id.to_string();
         tokio::spawn(async move {
-            let custom = this.harness.read().await.custom.clone();
+            let (custom, rule_dev, rule_fix) = {
+                let h = this.harness.read().await;
+                (h.custom.clone(), h.rule_development.clone(), h.rule_bugfix.clone())
+            };
             let verdict = run_subagent_review(
                 &this.session_manager,
                 &resolved.command,
@@ -452,6 +455,7 @@ impl TaskExecutor {
                 &repo.root,
                 &task,
                 &custom,
+                (&rule_dev, &rule_fix),
             )
             .await;
             let note = match &verdict {
@@ -703,6 +707,10 @@ impl TaskExecutor {
                                 } else if review_after {
                                     // manual/supervised：执行成功 → 独立子agent审查（B案，harness 2.3.2）
                                     // → 通过才回审批流（diff 关）；fail 自动打回（rejected，理由入留痕）
+                                    let (custom, rule_dev, rule_fix) = {
+                                        let h = this.harness.read().await;
+                                        (h.custom.clone(), h.rule_development.clone(), h.rule_bugfix.clone())
+                                    };
                                     let review_v = run_subagent_review(
                                         &this.session_manager,
                                         &review_resolved.command,
@@ -710,7 +718,8 @@ impl TaskExecutor {
                                         &repo_name,
                                         &repo_root,
                                         &task_for_review,
-                                        &this.harness.read().await.custom,
+                                        &custom,
+                                        (&rule_dev, &rule_fix),
                                     )
                                     .await;
                                     match review_v

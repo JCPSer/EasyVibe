@@ -52,6 +52,8 @@ use tower::ServiceExt;
             framework_transparent: "框架".into(),
             user_entry_skills: vec![],
             custom: task_exec::HarnessCustom::default(),
+            rule_development: String::new(),
+            rule_bugfix: String::new(),
         }));
         let executor = task_exec::TaskExecutor::new(
             task_repo.clone(),
