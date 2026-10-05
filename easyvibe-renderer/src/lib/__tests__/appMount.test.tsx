@@ -5,10 +5,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import { render } from '@testing-library/react'
 import App from '@/App'
 
-// @ts-expect-error vitest 运行时支持 node:fs（tsconfig 无 node 类型）
-import { readFileSync } from 'node:fs'
-// 真实 hover-client 地图（12 模块 / 77 边 / 6 层 / 5 逆向违规）——小地图测不出的渲染分支靠它
-const REAL_MAP = readFileSync('/Users/liyuhang/Documents/git_projects/language-band/hover-client/.easyvibe/map/map.json', 'utf-8')
+// 仓库内的真实项目地图 fixture，避免依赖维护者本机的绝对路径。
+import REAL_MAP from '../../../../fixtures/hover-client-v2.1-pilot/expected/map.json?raw'
 
 
 // jsdom 缺 ResizeObserver / DOMMatrix——ReactFlow（ZoomPane）需要，打桩即可
