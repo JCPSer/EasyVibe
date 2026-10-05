@@ -1,5 +1,6 @@
 //! 地图领域：仓库注册、map.json/growth.log 读取、轻量校验、内容哈希监听。
 //! 原则：不出残图——校验失败的事件以 map.invalid 上报，合法缓存继续服务。
+pub mod synthesis;
 use easyvibe_common::ApiError;
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;

@@ -316,6 +316,13 @@ pub(crate) async fn run() {
         assets::SUBMAP_PROMPT,
         true,
     );
+    // 增量归纳 prompt（B 方案）：独立 env 名，不干扰 EASYVIBE_PROMPT_PATH
+    let (incremental_prompt, _) = resolve_text_asset(
+        "EASYVIBE_INCREMENTAL_PROMPT_PATH",
+        "easyvibe-map-prompt-incremental-v1.md",
+        assets::INCREMENTAL_PROMPT,
+        true,
+    );
 
     // M3-3/S1-3：harness 已在管线挂载前装载（见上），此处仅打日志 + 任务执行引擎 + pending 恢复
     info!(
@@ -403,6 +410,7 @@ pub(crate) async fn run() {
         llm_mode: Arc::new(llm_mode),
         patrol_prompt: Arc::new(patrol_prompt),
         submap_prompt: Arc::new(submap_prompt),
+        incremental_prompt: Arc::new(incremental_prompt),
         schema_path: Arc::new(schema_path),
         event_bus,
         pool: database.pool().clone(),

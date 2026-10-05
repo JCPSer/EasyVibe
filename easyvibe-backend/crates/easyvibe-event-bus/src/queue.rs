@@ -41,6 +41,8 @@ pub struct QueuedJob {
     /// 展示用：「巡检」「归纳」「分析模块 <id>」
     pub label: String,
     pub enqueued_at: DateTime<Utc>,
+    /// 增量回退专用：为 true 时 drain 执行强制全量归纳（跳过增量判定，防"增量失败→再判增量"无限环）
+    pub force_full: bool,
 }
 
 /// 队列变更（每次变更都经 queue.changed 广播，payload 见 ws_handler 的翻译）
@@ -244,7 +246,7 @@ mod tests {
 
     #[test]
     fn queue_change_payload_carries_type_and_extras() {
-        let job = QueuedJob { kind: JobKind::Reinduce, module_id: None, label: "归纳".into(), enqueued_at: Utc::now() };
+        let job = QueuedJob { kind: JobKind::Reinduce, module_id: None, label: "归纳".into(), enqueued_at: Utc::now(), force_full: false };
         let p = QueueChange::Enqueued { job: job.clone() }.to_payload("r1");
         assert_eq!(p["type"], "enqueued");
         assert_eq!(p["job"]["kind"], "reinduce");

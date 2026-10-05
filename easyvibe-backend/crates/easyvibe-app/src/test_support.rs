@@ -93,6 +93,7 @@ use tower::ServiceExt;
             llm_mode: Arc::new(LlmMode::Stub),
             patrol_prompt: Arc::new("test".into()),
             submap_prompt: Arc::new("test".into()),
+            incremental_prompt: Arc::new("test".into()),
             schema_path: Arc::new("schema.json".into()),
             event_bus: bus,
             pool: db.pool().clone(),

@@ -28,6 +28,57 @@ pub enum ApiError {
     Internal(String),
 }
 
+/// 简易时间戳解析：接受 "YYYY-MM-DDTHH:MM:SS" 带时区后缀（Z / ±HH:MM）。
+/// 时区必须参与换算——不换算会把 +08:00 的本地时间当成 UTC，地图凭空"新 8 小时"，
+/// 刚生成的地图有后续提交也被判 fresh（2026-10-05 实弹：落后 3 提交却显示 fresh）。
+/// 位于 common：freshness（保鲜判定）与 easyvibe-map::synthesis（增量合成 generated_at
+/// 单调性校验）共用同一解析，口径不得漂移。
+pub fn parse_ts_like(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 {
+        return None;
+    }
+    let num = |r: &[u8]| -> Option<i64> {
+        if r.iter().all(|c| c.is_ascii_digit()) {
+            std::str::from_utf8(r).ok()?.parse().ok()
+        } else {
+            None
+        }
+    };
+    if b[4] != b'-' || b[7] != b'-' || (b[10] != b'T' && b[10] != b' ') || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let y = num(&b[0..4])?;
+    let mo = num(&b[5..7])?;
+    let d = num(&b[8..10])?;
+    let h = num(&b[11..13])?;
+    let mi = num(&b[14..16])?;
+    let se = num(&b[17..19])?;
+    if !(1970..=2100).contains(&y) || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // civil → days（Howard Hinnant 算法，UTC 近似）
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    let utc = days * 86_400 + h * 3600 + mi * 60 + se;
+    // 时区后缀：'Z' = 0；±HH:MM 从第 19 字节起
+    match b.get(19) {
+        None | Some(b'Z') | Some(b'z') => Some(utc),
+        Some(sign @ (b'+' | b'-')) => {
+            let hh = num(b.get(20..22)?)?;
+            let mm = if b.get(22) == Some(&b':') { num(b.get(23..25)?)? } else { 0 };
+            let off = hh * 3600 + mm * 60;
+            Some(if sign == &b'+' { utc - off } else { utc + off })
+        }
+        _ => Some(utc),
+    }
+}
+
 /// 统一成功响应包
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T: Serialize> {

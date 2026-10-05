@@ -48,6 +48,8 @@ pub struct AppState {
     pub patrol_prompt: Arc<String>,
     /// 子图分析提示词模板（含 <REPO_ROOT>/<MODULE_ID>/<MODULE_JSON> 占位）
     pub submap_prompt: Arc<String>,
+    /// 增量归纳 prompt（B 方案；含 <REPO_ROOT>/<CURRENT_MAP>/<COMMIT_LOG>/<DIFF_NUMSTAT>/<DIFF_CONTENT>/<SCHEMA_PATH> 占位）
+    pub incremental_prompt: Arc<String>,
     pub schema_path: Arc<String>,
     /// 后端 → 前端事件总线（broadcast；WS handler 订阅）
     pub event_bus: broadcast::Sender<BusEvent>,

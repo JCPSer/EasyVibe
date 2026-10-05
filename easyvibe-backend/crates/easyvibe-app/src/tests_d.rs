@@ -325,20 +325,20 @@ use tower::ServiceExt;
         assert_eq!(v["data"]["replaced"]["label"], "巡检");
 
         // drain 的 patrol 项撞 Conflict（TOCTOU：任务槽抢注）→ 不得覆盖用户新排的「归纳」
-        let patrol = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
+        let patrol = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now(), force_full: false };
         state.session_queue.handle_failure(&state, &repo, patrol, ApiError::Conflict("仓库有活动会话".into())).await;
         let kept = state.session_queue.peek(&repo).await.expect("Conflict 不得丢项");
         assert_eq!(kept.kind, JobKind::Reinduce, "不得覆盖期间用户新排的队: {:?}", kept.kind);
         // 槽位空时 Conflict → 放回原项（不丢）
         let _ = state.session_queue.cancel(&state, &repo).await;
-        let patrol2 = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
+        let patrol2 = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now(), force_full: false };
         state.session_queue.handle_failure(&state, &repo, patrol2, ApiError::Conflict("抢注".into())).await;
         assert_eq!(state.session_queue.peek(&repo).await.unwrap().label, "巡检");
 
         // 确定性失败 → 丢弃 + 广播 queue.changed{type:"failed", error}
         // （先清槽模拟 drain 已 pop 出该项——handle 只处置被弹出的项，不动槽内其他排队）
         let _ = state.session_queue.cancel(&state, &repo).await;
-        let doomed = QueuedJob { kind: JobKind::Submap, module_id: Some("exam-core".into()), label: "分析模块 exam-core".into(), enqueued_at: chrono::Utc::now() };
+        let doomed = QueuedJob { kind: JobKind::Submap, module_id: Some("exam-core".into()), label: "分析模块 exam-core".into(), enqueued_at: chrono::Utc::now(), force_full: false };
         state.session_queue.handle_failure(&state, &repo, doomed, ApiError::BadRequest("agent 缺失".into())).await;
         assert!(state.session_queue.is_empty().await, "确定性失败必须丢弃（不留死信）");
         // 广播核验：从事件流里捞 queue.changed（enqueued/replaced/requeued/failed 都应出现过）
@@ -403,7 +403,7 @@ use tower::ServiceExt;
             (BusEvent::SessionOutput { session_id: "s".into(), seq: 1, stream: "stdout".into(), line: "x".into() }, "session.output"),
             (BusEvent::PatrolFinished { repo: "r".into(), run_id: "run".into(), status: "ok".into() }, "patrol.finished"),
             (BusEvent::QueueChanged { repo: "r".into(), change: easyvibe_event_bus::queue::QueueChange::Enqueued {
-                job: QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() } } }, "queue.changed"),
+                job: QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now(), force_full: false } } }, "queue.changed"),
         ];
         for (ev, want) in cases {
             assert_eq!(translate(ev).name, want);
@@ -414,7 +414,7 @@ use tower::ServiceExt;
         assert_eq!(m.data["status"], "running");
         assert_eq!(m.data["gate"], "p:implement");
         let q = translate(BusEvent::QueueChanged { repo: "r".into(), change: easyvibe_event_bus::queue::QueueChange::Failed {
-            job: QueuedJob { kind: JobKind::Submap, module_id: Some("m".into()), label: "分析模块 m".into(), enqueued_at: chrono::Utc::now() },
+            job: QueuedJob { kind: JobKind::Submap, module_id: Some("m".into()), label: "分析模块 m".into(), enqueued_at: chrono::Utc::now(), force_full: false },
             error: "boom".into() } });
         assert_eq!(q.data["type"], "failed");
         assert_eq!(q.data["repo"], "r");

@@ -184,24 +184,62 @@ pub(crate) async fn analyze_submap_inner(st: AppState, id: String, module_id: St
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 pub(crate) async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    start_reinduce_inner(st, id).await
+    start_reinduce_inner(st, id, false).await
 }
 
-/// 重新归纳执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）
-pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Response, AppError> {
+/// 重新归纳执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）。
+/// `force_full`：增量 patch 失败后的回退任务置 true——跳过增量判定直接全量，
+/// 防"增量失败 → drain 再判增量"无限环（B 方案）。
+pub(crate) async fn start_reinduce_inner(st: AppState, id: String, force_full: bool) -> Result<Response, AppError> {
     let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     ensure_agent_available(&st)?;
     // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
     // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
-    let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
+    // 同时为增量判定（旧图合法性/体积）与全量 strict 失败还原旧图备好快照。
+    let snap_before = st.map_service.load_map(&repo).await.ok();
+    let hash_before = snap_before.as_ref().map(|s| s.content_hash);
+    // B 方案判定：drain 到执行时现判（不在入队时判——session_queue_routes 不改）。
+    // 全部满足才增量：旧图合法 + 锚点合法 + ≤3 提交 + 变更 ≤20 文件/2000 行 + git 仓库 + 旧图 ≤512KB。
+    let mode = if force_full {
+        crate::reinduce::ReinduceMode::Full
+    } else {
+        crate::reinduce::decide(&repo.root, snap_before.as_ref().map(|s| &s.json))
+    };
+    // 决策时 HEAD：增量时复用判定内读到的 HEAD（读一次、两用——diff 上界即成功后要写的锚点）；
+    // 全量模式单独读一次，供终态锚点推进比对。非 git 为 None（不推进锚点）。
+    let decision_head = match &mode {
+        crate::reinduce::ReinduceMode::Incremental(ctx) => Some(ctx.head.clone()),
+        crate::reinduce::ReinduceMode::Full => crate::reinduce::head_sha(&repo.root),
+    };
     let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
-    // 注入点 #5：自定义 global 块追加到归纳 prompt 尾部
-    let prompt = format!("{}{}", st.prompt_template, global_custom_block(&st.harness).await);
+    // prompt：增量模式预渲染全部占位符（<REPO_ROOT> 留给会话层，仿 patrol 先例），
+    // custom global 块拼在增量 prompt 尾部（白名单纪律段之后——custom 若要求全量扫描，以增量白名单为准）
+    let prompt = match &mode {
+        crate::reinduce::ReinduceMode::Incremental(ctx) => {
+            // 每次 spawn 重读（与 submap 同一纪律：提示词迭代免重启）
+            let (template, _) = resolve_text_asset(
+                "EASYVIBE_INCREMENTAL_PROMPT_PATH",
+                "easyvibe-map-prompt-incremental-v1.md",
+                &st.incremental_prompt,
+                false,
+            );
+            let current_map = snap_before
+                .as_ref()
+                .and_then(|s| serde_json::to_string(&s.json).ok())
+                .unwrap_or_default();
+            let rendered = crate::reinduce::render_incremental_prompt(&template, ctx, &current_map, &st.schema_path);
+            format!("{rendered}{}", global_custom_block(&st.harness).await)
+        }
+        crate::reinduce::ReinduceMode::Full => {
+            // 注入点 #5：自定义 global 块追加到归纳 prompt 尾部
+            format!("{}{}", st.prompt_template, global_custom_block(&st.harness).await)
+        }
+    };
     let session = st
         .session_manager
         .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
         .await?;
-    // I1：气泡标签「归纳」
+    // I1：气泡标签「归纳」（增量回退的全量任务同样——前端契约不感知模式）
     st.session_manager.note_label(&session.session_id, "归纳".into()).await;
 
     // 终态后产物核验
@@ -224,6 +262,15 @@ pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Res
                                     s.session_id, s.status
                                 );
                             }
+                        }
+                    }
+                    // 终态按 mode 执行收尾：增量 = 读 patch→合成→校验→落盘/回退入队；全量 = strict 终态校验
+                    match &mode {
+                        crate::reinduce::ReinduceMode::Incremental(ctx) => {
+                            crate::reinduce::handle_incremental_terminal(&st2, &repo2, ctx, &decision_head).await;
+                        }
+                        crate::reinduce::ReinduceMode::Full => {
+                            crate::reinduce::handle_full_terminal(&st2, &repo2, &snap_before, &decision_head).await;
                         }
                     }
                     // 归纳终态：立即重估保鲜并推送 freshness.changed——否则头部"落后提示"要等
@@ -462,7 +509,7 @@ impl QueueHost for AppState {
     async fn run_job(&self, repo: &str, job: &QueuedJob) -> Result<(), ApiError> {
         match job.kind {
             JobKind::Patrol => start_patrol_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
-            JobKind::Reinduce => start_reinduce_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
+            JobKind::Reinduce => start_reinduce_inner(self.clone(), repo.to_string(), job.force_full).await.map(|_| ()).map_err(|e| e.0),
             JobKind::Submap => {
                 let module_id = job.module_id.clone().unwrap_or_default();
                 analyze_submap_inner(self.clone(), repo.to_string(), module_id).await.map(|_| ()).map_err(|e| e.0)

@@ -155,7 +155,7 @@ fn build_job(body: &EnqueueBody) -> Result<QueuedJob, AppError> {
         JobKind::Reinduce => "归纳".to_string(),
         JobKind::Submap => format!("分析模块 {}", module_id.as_deref().unwrap_or("?")),
     };
-    Ok(QueuedJob { kind, module_id, label, enqueued_at: Utc::now() })
+    Ok(QueuedJob { kind, module_id, label, enqueued_at: Utc::now(), force_full: false })
 }
 
 // ---------- 请求面小件单测（HTTP/drain 集成用例在 main.rs tests，复用 chat_state 工厂） ----------

@@ -6,6 +6,8 @@ use crate::state::data_dir;
 /// 解析链兜底到这里。单一事实源仍是仓库根的这四个文件：改提示词后重编后端即更新内嵌快照。
 /// DIST 由 build.rs 决定内嵌真身还是占位页（渲染器未构建的 CI 场景），见 EMBEDDED_UI_REAL。
 pub const MAP_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-v2.2.md");
+/// 小步增量归纳（B 方案）prompt——与 v2.2 平级，env 覆盖走独立 EASYVIBE_INCREMENTAL_PROMPT_PATH
+pub const INCREMENTAL_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-incremental-v1.md");
 pub const PATROL_PROMPT: &str = include_str!("../../../../easyvibe-map-patrol-prompt-v2.md");
 pub const MAP_SCHEMA: &str = include_str!("../../../../easyvibe-map-schema-v1.1.json");
 pub const SUBMAP_PROMPT: &str = include_str!("../../../../easyvibe-module-submap-prompt.md");

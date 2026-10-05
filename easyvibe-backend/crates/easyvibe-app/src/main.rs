@@ -9,6 +9,7 @@ mod freshness;
 mod git;
 mod map_concerns;
 mod pipeline;
+mod reinduce;
 mod router;
 mod routes;
 mod service;
