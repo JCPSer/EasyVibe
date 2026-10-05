@@ -1,119 +1,62 @@
 import { ToastHost, toast } from '@/lib/toast'
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { ReactFlowProvider } from '@xyflow/react'
-import { Activity, BookOpen, Bot, CircleHelp, FileDown, FolderOpen, LayoutGrid, Lightbulb, Loader2, Plug, Plus, ScrollText, Settings, WifiOff, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
-import type { CodeMap } from '@/types/map'
-import { markWelcomeShown, dismiss, resetForReview, clearTaskIdea, loadTaskIdea } from '@/lib/onboarding'
+import { markWelcomeShown, dismiss, resetForReview } from '@/lib/onboarding'
 import { AppShell, type PageId } from '@/components/AppShell'
-import { PlaceholderPage } from '@/components/PlaceholderPage'
-import { ModulesPage } from '@/components/ModulesPage'
-import { WorkbenchPage } from '@/components/WorkbenchPage'
-import { TaskPage } from '@/components/TaskPage'
-import { DriftPage } from '@/components/DriftPage'
-import { HealthPage } from '@/components/HealthPage'
-import { ChangesPage } from '@/components/ChangesPage'
-import { GitPage } from '@/components/GitPage'
-import { ViewsPanel } from '@/components/ViewsPanel'
-import { SuggestPanel } from '@/components/SuggestPanel'
-import { SettingsPanel } from '@/components/SettingsPanel'
-import { TaskFormPanel } from '@/components/TaskFormPanel'
-import { ThemeToggle } from '@/components/ThemeToggle'
+import { TopBar } from '@/components/shell/TopBar'
+import { AttentionBar } from '@/components/shell/AttentionBar'
+import { buildPages } from '@/pages/routes'
 import { SessionBubble } from '@/components/SessionBubble'
-import { DepsPage } from '@/components/DepsPage'
-import { RunsPage } from '@/components/RunsPage'
-import { UsagePage } from '@/components/UsagePage'
-import { WelcomePage } from '@/components/WelcomePage'
 import { OnboardingChecklist } from '@/components/OnboardingChecklist'
 import { MapGate } from '@/components/gate/MapGate'
 import { CanvasBoundary } from '@/components/canvas/CanvasBoundary'
-import { Canvas } from '@/components/canvas/Canvas'
+import { ViewsDrawer } from '@/components/overlays/ViewsDrawer'
+import { SuggestDrawer } from '@/components/overlays/SuggestDrawer'
+import { WelcomeOverlay } from '@/components/overlays/WelcomeOverlay'
+import { TaskDraftOverlay } from '@/components/overlays/TaskDraftOverlay'
 import type { TaskDraft } from '@/lib/taskContext'
-import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/lib/growthBus'
-import { enqueue } from '@/lib/sessionQueue'
-import { sysNotify } from '@/lib/notify'
 import { isTauriRuntime } from '@/lib/env'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
 import { connectWs } from '@/lib/ws'
 import { useAgentState } from '@/hooks/useAgentState'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { useBackendConnection } from '@/hooks/useBackendConnection'
+import { useTheme } from '@/hooks/useTheme'
+import { useAttention } from '@/hooks/useAttention'
+import { usePatrol } from '@/hooks/usePatrol'
+import { useUiPrefs } from '@/hooks/useUiPrefs'
+import { useSystemNotifications } from '@/hooks/useSystemNotifications'
 export default function App() {
-  const [map, setMap] = useState<CodeMap | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  // 后端模式：探测 /api/health 成功且仓库列表非空则启用；失败降级静态 demo 数据
-  const [backendRepo, setBackendRepo] = useState<string | null>(null)
-  const [repos, setRepos] = useState<{ id: string; name: string }[]>([])
-  // 重审 P2 bug：后端离线与"在线但未选仓库"此前共用 backendRepo=null 一个状态——
-  // 离线时切换器显示"未选择仓库/尚未挂载"与画布上的演示数据自相矛盾（用户截图的困惑点）。
-  // 三态显式化：null=探测中 / true=在线 / false=离线（演示数据模式）
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
-  // M2 引导与降级：执行 agent 状态（探测 + 30s 轮询 + 采用 + 安装命令）抽为 hook
-  const { agentState, adoptAgent, copyInstallCmd } = useAgentState(backendOnline)
-  const [reloadTick, setReloadTick] = useState(0)
+  // 数据源装配域（后端探测 / 仓库管理 / 地图拉取 / 版本锚点）抽为 hook
+  const {
+    map,
+    error,
+    backendRepo,
+    repos,
+    backendOnline,
+    setReloadTick,
+    serverVersionRef,
+    addRepo,
+    removeRepo,
+    switchRepo,
+  } = useBackendConnection()
   // 运行会话气泡重拉信号：WS onopen（重连）时递增，作为 resyncKey 传给 SessionBubble（I5②）
   const [queueResyncTick, setQueueResyncTick] = useState(0)
-  // Y7：后端版本感知——WS 重连（全量重同步点）比对版本，变化提示刷新
-  // R3 #4：WS effect 不重跑，onopen 闭包读 state 永远是初值——版本比对存 ref
-  // （首次连接为 null 时比较被短路、后端热重启后前端永远拿不到"请刷新"提示的问题）
-  const serverVersionRef = useRef<string | null>(null)
 
+  // M2 引导与降级：执行 agent 状态（探测 + 30s 轮询 + 采用 + 安装命令）抽为 hook
+  const { agentState, adoptAgent, copyInstallCmd } = useAgentState(backendOnline)
   // D5-2：桌面壳自动更新（仅 Tauri 环境生效，浏览器 no-op）
   useEffect(() => {
     initUpdater()
   }, [])
 
-  // P1 审查 2#16：AppShell 徽标曾是被定义却从不传入的死功能——
-  // 待审批计数实时接通：初始拉取 + WS 任务事件驱动（信息架构明写"评审（徽标）"）
-  // v4 扩展：双计数（待审批 + 执行中）+ 注意力条数据（第一个待审批任务的话术）
-  const [pendingApprovals, setPendingApprovals] = useState(0)
-  const [runningCount, setRunningCount] = useState(0)
-  const [attention, setAttention] = useState<{ count: number; sample: string } | null>(null)
-  useEffect(() => {
-    if (!backendRepo) {
-      setPendingApprovals(0)
-      setRunningCount(0)
-      setAttention(null)
-      return
-    }
-    const GL: Record<string, string> = { plan: '任务书审批', analysis: '需求矩阵评审', solution: '方案评审', diff: 'Diff 审批', report: '审查报告' }
-    const load = () =>
-      fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: { data?: { status: string; title: string; gate?: string | null }[] } | null) => {
-          const ts = d?.data ?? []
-          setPendingApprovals(ts.filter((t) => t.status === 'awaiting_approval').length)
-          setRunningCount(ts.filter((t) => t.status === 'running').length)
-          const waiting = ts.filter((t) => t.status === 'awaiting_approval')
-          setAttention(
-            waiting.length > 0
-              ? { count: waiting.length, sample: `「${waiting[0].title}」停在${GL[waiting[0].gate ?? ''] ?? '审批'}` }
-              : null,
-          )
-        })
-        .catch(() => {})
-    load()
-    return onTaskEvent(load)
-  }, [backendRepo])
-
+  // 应用壳徽标/注意力条数据 + 主题（各自 hook）
+  const { pendingApprovals, runningCount, attention } = useAttention(backendRepo)
+  const { dark, setDark } = useTheme()
   // M4-1 应用壳状态：页面 / 顶栏抽屉 / 仓库管理面板 / 引导卡 / 任务表单 / 视图定位请求
   const [page, setPage] = useState<PageId>('map')
-  // 2026-10-04 暗黑模式：主题状态（localStorage 持久化，默认跟随系统）；html.dark 驱动 Tailwind class 策略
-  const [dark, setDark] = useState(() => {
-    try {
-      const saved = window.localStorage.getItem('ev.theme')
-      if (saved === 'dark' || saved === 'light') return saved === 'dark'
-      return window.matchMedia('(prefers-color-scheme: dark)').matches
-    } catch {
-      return false
-    }
-  })
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-    try {
-      window.localStorage.setItem('ev.theme', dark ? 'dark' : 'light')
-    } catch { /* 静默 */ }
-  }, [dark])
   // v0.2：地图页「就此对话」跨页上下文（消费即清；后写覆盖先写，竞态语义自然）
   const [pendingChatContext, setPendingChatContext] = useState<{ refId: string; refName: string; kind: 'module' | 'layer' } | null>(null)
   /** 2026-10-05 依赖体检：画布边浮卡跳入时的聚焦卡片 id */
@@ -127,8 +70,6 @@ export default function App() {
   // ui-test P1：表单创建成功 → 任务页流水线选中该任务（nonce 区分多次跳入）
   const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
-  const [repoPanelOpen, setRepoPanelOpen] = useState(false)
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null) // 重审 P1：注销双选项确认（保留/清除数据）
   const [guideDismissed, setGuideDismissed] = useState(
     () => typeof window !== 'undefined' && localStorage.getItem('ev.m4.guide') === '1',
   )
@@ -140,48 +81,12 @@ export default function App() {
     setTaskDraft(d)
   }
   const [viewRequest, setViewRequest] = useState<string[] | null>(null)
-  // 右栏开合/宽度提升到 App：随项目持久化（settings_repo 的 repo scope，后端已有设施）
-  const [panelOpen, setPanelOpen] = useState(true)
-  const [panelWidth, setPanelWidth] = useState(340)
-  // 巡检状态（M4-1 从 Canvas 上移：顶栏"巡检"按钮由壳层持有）
-  const [patrolling, setPatrolling] = useState(false)
-  const startPatrol = useCallback(() => {
-    if (!backendRepo || patrolling) return
-    setPatrolling(true)
-    fetch(`/api/repos/${backendRepo}/patrol`, { method: 'POST' })
-      .then((r) => {
-        // S2：抛 Response 本体——catch 里判别 409（单会话纪律）入队
-        if (!r.ok) throw r
-      })
-      .catch(async (e) => {
-        setPatrolling(false)
-        // S2：409 不再静默——入队，当前会话结束后自动接续
-        if ((e as Response)?.status === 409) {
-          const res = await enqueue(backendRepo, 'patrol')
-          if (res?.outcome === 'replaced')
-            toast(`已加入队列：巡检将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
-          else if (res?.outcome === 'queued') toast('已加入队列：巡检将在当前会话结束后自动开始')
-          else if (res?.outcome === 'started') {
-            setPatrolling(true)
-            toast('已直接开始巡检')
-          }
-          return
-        }
-        toast('巡检启动失败（请确认后端在线后重试）。', 'error')
-      })
-  }, [backendRepo, patrolling])
+  // 巡检触发（顶栏"巡检"按钮由壳层持有）
+  const { patrolling, setPatrolling, startPatrol } = usePatrol(backendRepo)
 
-  const saveUiPref = useCallback(
-    (key: string, value: unknown) => {
-      if (!backendRepo) return
-      fetch('/api/settings/set', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: backendRepo, key, value }),
-      }).catch(() => {})
-    },
-    [backendRepo],
-  )
+  // 每项目 UI 偏好（右栏宽度/开合持久化 + ui.* 写入）
+  const resetToMap = useCallback(() => setPage('map'), [])
+  const { saveUiPref, panelOpen, panelWidth, handlePanelOpenChange, handlePanelWidthChange } = useUiPrefs(backendRepo, resetToMap)
 
   const handlePageChange = useCallback(
     (p: PageId) => {
@@ -210,24 +115,8 @@ export default function App() {
     }
   }, [])
 
-  // 2026-10-05 系统级通知：窗口失焦/后台时送达通知中心（toast 只有前台可见）。
-  // 会话失败 = 需要人来看；排队 drained+started = 离开等排队的用户该回来了。
-  useEffect(
-    () =>
-      onSessionEvent((e) => {
-        if (e.repo !== backendRepo || e.status !== 'failed') return
-        void sysNotify('EasyVibe · 会话失败', `会话 ${e.sessionId} 执行失败——回来看看原因`)
-      }),
-    [backendRepo],
-  )
-  useEffect(
-    () =>
-      onQueueChanged((e) => {
-        if (e.repo !== backendRepo || e.type !== 'drained' || !e.started) return
-        void sysNotify('EasyVibe · 排队任务已开始', e.job?.label ?? '')
-      }),
-    [backendRepo],
-  )
+  // 系统级通知（会话失败 / 排队任务已开始）
+  useSystemNotifications(backendRepo)
 
   // v0.2：「就此对话」统一收口——带上下文跳「任务对话」页（Canvas 工具栏/详情视图/占位页签共用）
   const goChatAbout = useCallback(
@@ -236,45 +125,6 @@ export default function App() {
       handlePageChange('workbench')
     },
     [handlePageChange],
-  )
-
-  // 每项目记忆：右栏宽度 / 面板开合随项目持久化（M4-1 状态持久化，防刷新丢位置）。
-  // 页签不恢复（2026-10-03 用户裁定）：切换仓库固定落架构地图——上次在 A 仓库看任务，
-  // 切到 B 仓库还停在任务页是错位的；页签位置由"当前在看什么"决定，跨项目无意义。
-  useEffect(() => {
-    if (!backendRepo) return
-    setPage('map') // 切仓库先回架构地图，数据到达前不闪旧页
-    let stale = false
-    fetch(`/api/settings?scope=${encodeURIComponent(backendRepo)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { key: string; value: unknown }[] } | null) => {
-        if (stale || !d?.data) return
-        const get = (k: string) => d.data!.find((i) => i.key === k)?.value
-        const w = get('ui.panelWidth')
-        if (typeof w === 'number' && Number.isFinite(w)) setPanelWidth(Math.min(560, Math.max(340, w)))
-        const po = get('ui.panelOpen')
-        if (typeof po === 'boolean') setPanelOpen(po)
-      })
-      .catch(() => {})
-    return () => {
-      stale = true
-    }
-  }, [backendRepo])
-
-  const handlePanelOpenChange = useCallback(
-    (open: boolean) => {
-      setPanelOpen(open)
-      saveUiPref('ui.panelOpen', open)
-    },
-    [saveUiPref],
-  )
-
-  const handlePanelWidthChange = useCallback(
-    (w: number) => {
-      setPanelWidth(w)
-      saveUiPref('ui.panelWidth', w)
-    },
-    [saveUiPref],
   )
 
   // 抽屉 Esc 关闭（真人测试 Bug#2：全屏遮罩层 Esc 无效，用户第一反应是"卡住了"）
@@ -286,48 +136,6 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [overlay])
-
-  useEffect(() => {
-    let cancelled = false
-    let timer: number | undefined
-    // 后端探测：/api/repos 取仓库列表（Y7 回归修复——此前误把 /api/health 的响应当 repos 解析，
-    // data 无 length 恒为演示模式，桌面壳与浏览器一并中招）
-    // R2 P0 两轮老账：探测只跑一次，后端晚启动（桌面壳冷启动 30s 内常见）永不可达只能刷新——
-    // 现在探测成功前每 5 秒重试，永不死心。
-    const probe = () => {
-      fetch('/api/repos')
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no backend'))))
-        .then((d: { data?: { id: string; name: string }[] }) => {
-          if (!d.data || d.data.length === 0) {
-            // 在线但零仓库：与离线显式区分（"尚未挂载"是真实状态，不是探测失败）
-            setBackendOnline(true)
-            if (!cancelled) timer = window.setTimeout(probe, 5000)
-            return
-          }
-          setBackendOnline(true)
-          setRepos(d.data)
-          setBackendRepo((cur) => cur ?? d.data![0].id) // 保留当前选择（切换器驱动）
-          // 版本感知（Y7）：仅取 version，不参与后端模式判定
-          fetch('/api/health')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((h: { data?: { version?: string } } | null) => {
-              if (!cancelled && h?.data?.version) serverVersionRef.current = h.data.version
-            })
-            .catch(() => {})
-        })
-        .catch(() => {
-          if (cancelled) return
-          setBackendRepo(null)
-          setBackendOnline(false)
-          timer = window.setTimeout(probe, 5000)
-        })
-    }
-    probe()
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [])
 
   // WS 订阅：连接/重连/协议翻译下沉 lib/ws.ts；App 只把产品事件接进数据源
   // 闭包陷阱对策：repo 经 ref 读取（effect 仍随 backendRepo 重连，语义与拆分前一致）
@@ -350,85 +158,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendRepo])
 
-  useEffect(() => {
-    const url = backendRepo ? `/api/repos/${backendRepo}/map` : '/data/map.json'
-    fetch(url)
-      .then((r) => {
-        // 404 = 仓库尚未归纳——合法状态，走 MapGate 的"尚未生成"引导（开始归纳），不是错误
-        if (r.status === 404 && backendRepo) return null
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<CodeMap>
-      })
-      .then((m) => {
-        setError(null) // 实弹#4 前端根因：成功后必须清错误态，否则 (error && backendRepo) 恒真永远白屏等待
-        if (m) setMap(m)
-      })
-      .catch((e) => setError(String(e)))
-  }, [backendRepo, reloadTick])
-
-  // D5 仓库管理：刷新列表（添加/移除后）；后端事实源是 /api/repos
-  const refreshRepos = useCallback(() => {
-    fetch('/api/repos')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { id: string; name: string }[] } | null) => {
-        if (!d?.data) return
-        setRepos(d.data)
-        setBackendRepo((cur) => (cur && d.data!.some((r) => r.id === cur) ? cur : d.data![0]?.id ?? null))
-      })
-      .catch(() => {})
-  }, [])
-  // 添加本地仓库：桌面壳走系统目录选择器（Tauri dialog），浏览器降级为路径输入
-  const addRepo = useCallback(async (): Promise<boolean> => {
-    let path: string | null = null
-    try {
-      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-        const { open } = await import('@tauri-apps/plugin-dialog')
-        const sel = await open({ directory: true, title: '选择本地仓库目录' })
-        path = typeof sel === 'string' ? sel : null
-      } else {
-        path = window.prompt('输入本地仓库目录的绝对路径')
-      }
-    } catch {
-      path = window.prompt('目录选择器不可用，输入本地仓库目录的绝对路径')
-    }
-    if (!path?.trim()) return false
-    try {
-      const r = await fetch('/api/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: path.trim() }),
-      })
-      const d = await r.json().catch(() => null)
-      if (!r.ok) {
-        toast(d?.error ?? '添加失败（目录不可读或已挂载）', 'error')
-        return false
-      }
-      toast('已添加仓库，正在归纳…')
-      refreshRepos()
-      setBackendRepo(d.data.id)
-      return true
-    } catch {
-      toast('添加失败（需要后端在线）', 'error')
-      return false
-    }
-  }, [refreshRepos])
-  // 重审 P1：移除仓库现在会杀活动会话（此前 running 的 agent 成孤儿占死写互斥）；
-  // wipe=true 额外抹掉该仓库在本地库的全部痕迹（任务/会话/审批/巡检/事件/仓库级设置）
-  const removeRepo = useCallback(async (id: string, wipe: boolean) => {
-    try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(id)}${wipe ? '?wipe=true' : ''}`, { method: 'DELETE' })
-      if (!r.ok) {
-        toast('移除失败', 'error')
-        return
-      }
-      toast(wipe ? '已移除仓库并清除其数据' : '已移除仓库（数据保留，重新添加后可见）')
-      if (id === backendRepo) setMap(null)
-      setConfirmRemove(null)
-      refreshRepos()
-    } catch {
-      toast('移除失败（需要后端在线）', 'error')
-    }
-  }, [backendRepo, refreshRepos])
   // P0 审查前端#1：地图加载失败不再一律渲染"归纳中"——
   const openRunsSession = useCallback((sessionId: string) => {
     setRunsFocus(sessionId)
@@ -442,15 +171,6 @@ export default function App() {
       </div>
     )
   }
-  const switchRepo = (id: string) => {
-    if (id === backendRepo) return
-    setMap(null)
-    setError(null)
-    setBackendRepo(id)
-  }
-
-
-
 
 
   // MapGate 用 /progress 区分"真在归纳"（等待页）与"真出错"（错误卡：重试/开始归纳）
@@ -466,359 +186,92 @@ export default function App() {
   }
 
   // M4-1 顶栏三区（VSCode 范式）：左=品牌（AppShell 内置红绿灯），中=项目切换器（居中），右=全局动作
-  const topCenter = (
-    <div className="relative">
-        <button
-          onClick={() => setRepoPanelOpen((v) => !v)}
-          className={
-            backendOnline === false
-              ? "flex items-center gap-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[12px] font-semibold text-amber-700 hover:border-amber-400"
-              : "flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[12px] font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-300"
-          }
-          title={backendOnline === false ? "后端不在线：当前为演示数据，点击看详情" : "切换/管理仓库"}
-        >
-          {backendOnline === false ? (
-            <>
-              <WifiOff size={11} />
-              演示数据 · 后端离线
-              <span className="text-amber-400">▾</span>
-            </>
-          ) : (
-            <>
-              <span className={`h-2 w-2 rounded-full ${backendOnline === null ? 'animate-pulse bg-slate-300' : 'bg-emerald-500'}`} />
-              {backendOnline === null ? '连接后端中…' : backendRepo ?? '未选择仓库'}
-              <span className="text-slate-300 dark:text-slate-600">▾</span>
-            </>
-          )}
-        </button>
-        {repoPanelOpen && (
-          <>
-            {/* 点外部关闭（真人测试 Bug#1：此前无 outside-click 处理，跨页面悬浮） */}
-            <div className="fixed inset-0 z-30" onClick={() => setRepoPanelOpen(false)} />
-            <div className="glass absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-200 dark:border-slate-700 p-2 shadow-xl">
-            {backendOnline === false ? (
-              /* 重审 P2：离线态的真相面板——不装成"尚未挂载"（那是在线零仓库的状态） */
-              <div className="space-y-1.5 px-1.5 py-1.5">
-                <p className="flex items-center gap-1 text-[12px] font-bold text-amber-700">
-                  <WifiOff size={12} /> 后端不在线
-                </p>
-                <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
-                  当前画布是内置演示数据（hover-client）。归纳 / 巡检 / 任务 / 仓库管理都需要本地后端在线。
-                </p>
-                <p className="text-[10px] leading-4 text-slate-400 dark:text-slate-500">
-                  应用启动后后端在冷加载？每 5 秒自动重连，恢复后此面板自动可用。
-                </p>
-              </div>
-            ) : (
-              <>
-            <p className="px-1.5 pb-1.5 text-micro font-semibold text-slate-400 dark:text-slate-500">已挂载仓库</p>
-            <div className="max-h-52 space-y-0.5 overflow-y-auto">
-              {repos.map((r) => (
-                <div key={r.id} className="rounded-lg px-1.5 py-1 hover:bg-slate-50 dark:hover:bg-slate-800/70">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      className={`min-w-0 flex-1 truncate text-left text-[12px] ${r.id === backendRepo ? 'font-bold text-blue-700' : 'text-slate-700 dark:text-slate-200'}`}
-                      onClick={() => {
-                        switchRepo(r.id)
-                        setRepoPanelOpen(false)
-                      }}
-                      title={r.name}
-                    >
-                      {r.name}
-                    </button>
-                    {confirmRemove === r.id ? (
-                      <button
-                        onClick={() => setConfirmRemove(null)}
-                        className="shrink-0 rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600"
-                        title="取消"
-                      >
-                        <X size={12} />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmRemove(confirmRemove === r.id ? null : r.id)}
-                        className="shrink-0 rounded p-0.5 text-slate-300 dark:text-slate-600 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
-                        title="移除仓库…"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                  {/* 重审 P1：注销确认双选项——数据保留 or 连同清除（后端 wipe_repo），
-                      不再是无差别的 window.confirm（用户不知道数据去了哪） */}
-                  {confirmRemove === r.id && (
-                    <div className="mt-1 space-y-1 rounded-lg border border-red-100 bg-red-50/50 p-1.5">
-                      <p className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
-                        正在运行的任务/归纳会被终止。本地数据怎么处理？
-                      </p>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => void removeRepo(r.id, false)}
-                          className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600"
-                          title="任务/会话/巡检历史留在本地库，重新添加仓库后可见"
-                        >
-                          移除，保留数据
-                        </button>
-                        <button
-                          onClick={() => void removeRepo(r.id, true)}
-                          className="flex-1 rounded-md bg-red-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-red-600"
-                          title="抹掉该仓库的任务/会话/审批/巡检历史/事件/仓库级设置（不可恢复）"
-                        >
-                          移除并清除数据
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {repos.length === 0 && <p className="px-1.5 py-2 text-[11px] text-slate-400 dark:text-slate-500">尚未挂载任何仓库</p>}
-            </div>
-            <button
-              onClick={() => {
-                setRepoPanelOpen(false)
-                addRepo()
-              }}
-              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
-            >
-              <Plus size={11} />
-              打开本地仓库…
-            </button>
-              </>
-            )}
-          </div>
-          </>
-        )}
-    </div>
-  )
   const topBar = (
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {topCenter}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <button
-          onClick={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
-          title="我的视图（对话沉淀的图资产）"
-        >
-          <LayoutGrid size={12} />
-          视图
-        </button>
-        {backendRepo && (
-          <button
-            onClick={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
-            className="flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-            title="AI 主动发现优化建议，逐条可发起修复"
-          >
-            <Lightbulb size={12} />
-            优化建议
-          </button>
-        )}
-        {backendRepo && (
-          <button
-            onClick={startPatrol}
-            disabled={patrolling || agentState.found === false}
-            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-40 ${
-              patrolling ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700' : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 hover:bg-emerald-100'
-            }`}
-            title={agentState.found === false ? '未检测到执行 agent——先安装或在设置中配置' : '巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史'}
-          >
-            <Activity size={12} className={patrolling ? 'animate-pulse' : ''} />
-            {patrolling ? '巡检中…' : '巡检'}
-          </button>
-        )}
-        <button
-          onClick={() => downloadHealthReport(map)}
-          className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70"
-          title="导出架构健康报告（Markdown，零 token 成本）"
-        >
-          <FileDown size={12} />
-          导出
-        </button>
-        {/* 主题开关：亮=太阳 / 暗=月亮滑动拨块（2026-10-04） */}
-        <ThemeToggle dark={dark} onChange={setDark} />
-        {/* 新手引导：帮助入口——重看欢迎页（再点关闭 = 开关语义，2026-10-04 实弹） + 重置上手指引 */}
-        <button
-          onClick={() => {
-            if (welcomeOpen) {
-              setWelcomeOpen(false)
-              return
-            }
-            setOnboarding(resetForReview())
-            setWelcomeOpen(true)
-          }}
-          className={`rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors ${
-            welcomeOpen
-              ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300'
-              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
-          }`}
-          title="新手引导（欢迎页 + 上手指引）——再点关闭"
-        >
-          <CircleHelp size={12} />
-        </button>
-        <button
-          onClick={() => handlePageChange('settings')}
-          className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
-            page === 'settings' ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
-          }`}
-          title="设置（LLM 服务 / 槽位绑定 / 高级）"
-        >
-          <Settings size={12} />
-        </button>
-        </div>
-      </div>
+    <TopBar
+      backendOnline={backendOnline}
+      backendRepo={backendRepo}
+      repos={repos}
+      onSwitchRepo={switchRepo}
+      onAddRepo={addRepo}
+      onRemoveRepo={removeRepo}
+      onToggleViews={() => setOverlay((o) => (o === 'views' ? null : 'views'))}
+      onToggleSuggest={() => setOverlay((o) => (o === 'suggest' ? null : 'suggest'))}
+      patrolling={patrolling}
+      onStartPatrol={startPatrol}
+      agentReady={agentState.found !== false}
+      onExport={() => downloadHealthReport(map)}
+      dark={dark}
+      onToggleDark={setDark}
+      welcomeOpen={welcomeOpen}
+      onToggleWelcome={() => {
+        if (welcomeOpen) {
+          setWelcomeOpen(false)
+          return
+        }
+        setOnboarding(resetForReview())
+        setWelcomeOpen(true)
+      }}
+      page={page}
+      onOpenSettings={() => handlePageChange('settings')}
+    />
   )
 
-  const PAGES: Record<PageId, React.ReactNode> = {
-    map: (
-      <CanvasBoundary>
-        <ReactFlowProvider>
-          <Canvas
-            map={map}
-            backendRepo={backendRepo}
-            onPatrollingChange={setPatrolling}
-            panelOpen={panelOpen}
-            onPanelOpenChange={handlePanelOpenChange}
-            panelWidth={panelWidth}
-            onPanelWidthChange={handlePanelWidthChange}
-            viewRequest={viewRequest}
-            onViewRequestConsumed={() => setViewRequest(null)}
-            agentReady={agentState.found !== false}
-            guide={
-              guideDismissed ? undefined : (
-                <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 dark:bg-blue-950/40 px-3 py-2">
-                  <p className="flex-1 text-[11px] leading-5 text-slate-600 dark:text-slate-300">
-                    <span className="font-semibold text-blue-700">界面已整理：</span>
-                    详情栏页签为 详情/问题；对话在左侧「任务对话」，任务在「任务」，视图与优化建议在顶栏。
-                  </p>
-                  <button
-                    onClick={() => {
-                      setGuideDismissed(true)
-                      localStorage.setItem('ev.m4.guide', '1')
-                    }}
-                    className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                  >
-                    知道了
-                  </button>
-                </div>
-              )
-            }
-            onTaskCreated={(id) => {
-              setTaskFocus({ id, nonce: Date.now() })
-              markFirstTask()
-              handlePageChange('tasks')
-            }}
-            onChatAbout={goChatAbout}
-            onGoWorkbench={() => handlePageChange('workbench')}
-            onInspectEdge={(cardId) => {
-              setDepsFocus(cardId)
-              handlePageChange('deps')
-            }}
-            onOpenRuns={openRunsSession}
-            onOpenDeps={() => handlePageChange('deps')}
-            lensRequest={lensRequest}
-            onLensRequestConsumed={() => setLensRequest(null)}
-            dark={dark}
-          />
-        </ReactFlowProvider>
-      </CanvasBoundary>
-    ),
-    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
-    runs: (
-      <RunsPage
-        backendRepo={backendRepo}
-        initialSessionId={runsFocus}
-        onInitialConsumed={() => setRunsFocus(null)}
-        resyncKey={queueResyncTick}
-      />
-    ),
-    usage: (
-      <UsagePage
-        backendRepo={backendRepo}
-        map={map}
-        onOpenModule={(id) => {
-          setViewRequest([id])
-          handlePageChange('map')
-        }}
-        onOpenSession={(sid) => {
-          setRunsFocus(sid)
-          handlePageChange('runs')
-        }}
-      />
-    ),
-    settings: <SettingsPanel backendRepo={backendRepo} onClose={() => handlePageChange('map')} embedded />,
-    // v0.2 P1：「任务对话」——对话孵化任务（会话=任务上位容器：计划进度条/内联审批/diff 影响面三栏）
-    workbench: (
-      <WorkbenchPage
-        backendRepo={backendRepo}
-        map={map}
-        onCreateTask={openTaskDraft}
-        onLocateModule={(id) => {
-          // v0.2 定位链路升级：选中聚焦 + 切页（此前只切页不选中，地图端找不回模块）
-          setViewRequest([id])
-          handlePageChange('map')
-        }}
-        pendingChatContext={pendingChatContext}
-        onConsumeChatContext={() => setPendingChatContext(null)}
-        initialIdea={page === 'workbench' ? loadTaskIdea() : null}
-        onConsumeIdea={clearTaskIdea}
-        onNavigate={(p) => handlePageChange(p)}
-      />
-    ),
-    // v4 P1：任务编排/任务工作流两个旧页签删除，统一从「任务」页进入（视图切换）；
-    // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
-    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
-    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
-    changes: (
-      <ChangesPage
-        backendRepo={backendRepo}
-        map={map}
-        /* 重审 P2：变更页 → 任务页流水线（选中该任务）——导航闭环，不再靠用户记任务 ID */
-        onOpenTask={(id) => {
-          setTaskFocus({ id, nonce: Date.now() })
-          handlePageChange('tasks')
-        }}
-      />
-    ),
-    drift: <DriftPage />,
-    health: <HealthPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} onOpenDeps={() => handlePageChange('deps')} />,
-    modules: (
-      <ModulesPage
-        map={map}
-        onOpenMap={() => handlePageChange('map')}
-        onCreateTask={openTaskDraft}
-        onLocateModule={(id) => {
-          setViewRequest([id])
-          handlePageChange('map')
-        }}
-      />
-    ),
-    deps: (
-      <DepsPage
-        backendRepo={backendRepo}
-        map={map}
-        onCreateTask={openTaskDraft}
-        onChatAbout={goChatAbout}
-        onOpenMap={() => handlePageChange('map')}
-        onInspectModule={(id) => {
-          // 透镜跳入：选中 + 打开 solo 聚焦（画布已有「✕ 退出聚焦」与底部常驻指示）
-          setLensRequest(id)
-          handlePageChange('map')
-        }}
-        focusCardId={depsFocus}
-        onFocusConsumed={() => setDepsFocus(null)}
-      />
-    ),
-    git: (
-      <GitPage
-        backendRepo={backendRepo}
-        map={map}
-        onOpenChanges={() => handlePageChange('changes')}
-        onOpenReview={() => handlePageChange('review')}
-      />
-    ),
-    'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,
-    'kb-decisions': <PlaceholderPage title="决策记录" milestone="M4-4" description="这个仓库做过的重要技术决策及其来龙去脉。" icon={ScrollText} />,
-    'kb-apis': <PlaceholderPage title="接口目录" milestone="M4-4" description="全部关键入口（路由/函数/任务）的索引：谁对外提供什么能力。" icon={Plug} />,
-  }
+  const PAGES = buildPages({
+    map,
+    backendRepo,
+    onPatrollingChange: setPatrolling,
+    panelOpen,
+    onPanelOpenChange: handlePanelOpenChange,
+    panelWidth,
+    onPanelWidthChange: handlePanelWidthChange,
+    viewRequest,
+    onViewRequestConsumed: () => setViewRequest(null),
+    agentReady: agentState.found !== false,
+    guideDismissed,
+    onDismissGuide: () => {
+      setGuideDismissed(true)
+      localStorage.setItem('ev.m4.guide', '1')
+    },
+    onTaskCreated: (id) => {
+      setTaskFocus({ id, nonce: Date.now() })
+      markFirstTask()
+      handlePageChange('tasks')
+    },
+    onOpenTask: openTaskDraft,
+    onChatAbout: goChatAbout,
+    onGoWorkbench: () => handlePageChange('workbench'),
+    onInspectEdge: (cardId) => {
+      setDepsFocus(cardId)
+      handlePageChange('deps')
+    },
+    onOpenRuns: openRunsSession,
+    onOpenDeps: () => handlePageChange('deps'),
+    lensRequest,
+    onLensRequestConsumed: () => setLensRequest(null),
+    dark,
+    page,
+    taskFocus,
+    runsFocus,
+    onRunsFocusConsumed: () => setRunsFocus(null),
+    queueResyncTick,
+    onOpenChangesToTasks: (id) => {
+      setTaskFocus({ id, nonce: Date.now() })
+      handlePageChange('tasks')
+    },
+    onRequestView: (ids) => {
+      setViewRequest(ids)
+      handlePageChange('map')
+    },
+    onRequestLens: (id) => {
+      setLensRequest(id)
+      handlePageChange('map')
+    },
+    onDepsFocusConsumed: () => setDepsFocus(null),
+    depsFocus,
+    pendingChatContext,
+    onConsumeChatContext: () => setPendingChatContext(null),
+    onNavigate: handlePageChange,
+  })
 
   return (
     <>
@@ -830,66 +283,18 @@ export default function App() {
           topCenter={backendRepo ? <SessionBubble backendRepo={backendRepo} resyncKey={queueResyncTick} onOpenRuns={() => handlePageChange('runs')} /> : undefined}
           badges={{ tasks: { alert: pendingApprovals, info: runningCount } }}
           attentionBar={
-            /* 优先级：零仓库 > agent 缺失引导（M2）> 审批提醒 */
-            backendOnline === true && repos.length === 0 ? (
-              <button
-                onClick={() => addRepo()}
-                className="flex shrink-0 items-center gap-2 border-b border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-4 py-1.5 text-left transition-colors hover:bg-blue-100"
-              >
-                <FolderOpen size={12} className="shrink-0 text-blue-500" />
-                <span className="text-[11px] font-bold text-blue-800">尚未打开任何仓库——当前画布是演示数据</span>
-                <span className="min-w-0 flex-1 truncate text-[11px] text-blue-600">
-                  归纳 / 巡检 / 任务 / 对话都需要一个本地代码仓库
-                </span>
-                <span className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 text-micro font-bold text-white">选择仓库 →</span>
-              </button>
-            ) : backendOnline === true && agentState.found === false ? (
-              /* M2 首跑引导（R5）：检测到可采用的 → 一键采用；全未安装 → 安装指引+一键复制 */
-              agentState.detected.length > 0 ? (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
-                  <Bot size={12} className="shrink-0 text-amber-500" />
-                  <span className="text-[11px] font-bold text-amber-800">
-                    检测到 {agentState.detected[0].command} 已安装
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">采用后即可开始归纳 / 任务</span>
-                  <button
-                    onClick={() => void adoptAgent(agentState.detected[0].command)}
-                    className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-amber-700"
-                  >
-                    采用 {agentState.detected[0].command} →
-                  </button>
-                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 dark:border-amber-800 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40">
-                    去设置
-                  </button>
-                </div>
-              ) : (
-                <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5">
-                  <Bot size={12} className="shrink-0 text-amber-500" />
-                  <span className="text-[11px] font-bold text-amber-800">未检测到执行 agent</span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">
-                    归纳 / 巡检 / 任务需要本地 CLI agent（支持 claude / codex / opencode）
-                  </span>
-                  <button onClick={copyInstallCmd} className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white hover:bg-amber-700">
-                    复制 claude 安装命令
-                  </button>
-                  <button onClick={() => handlePageChange('settings')} className="shrink-0 rounded-md border border-amber-300 dark:border-amber-800 px-2 py-0.5 text-micro font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40">
-                    了解更多
-                  </button>
-                </div>
-              )
-            ) : attention && page !== 'tasks' ? (
-              <button
-                onClick={() => handlePageChange('tasks')}
-                className="flex shrink-0 items-center gap-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-1.5 text-left transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/40"
-              >
-                <span className="flex h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-                <span className="text-[11px] font-bold text-amber-800">
-                  {attention.count} 项任务等你审批
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[11px] text-amber-600">—— {attention.sample}</span>
-                <span className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 text-micro font-bold text-white">去处理 →</span>
-              </button>
-            ) : undefined
+            <AttentionBar
+              backendOnline={backendOnline}
+              repoCount={repos.length}
+              agentState={agentState}
+              attention={attention}
+              page={page}
+              onAddRepo={() => addRepo()}
+              onAdoptAgent={(cmd) => void adoptAgent(cmd)}
+              onCopyInstallCmd={copyInstallCmd}
+              onOpenSettings={() => handlePageChange('settings')}
+              onGoTasks={() => handlePageChange('tasks')}
+            />
           }
         >
           {/* R3 B3：地图页 keep-alive——切页只隐藏不卸载，保住选中/过滤/展开子图/右栏对话草稿。
@@ -907,50 +312,36 @@ export default function App() {
       </CanvasBoundary>
       {/* 视图/优化建议：顶栏抽屉（右栏三页签瘦身后的新居所） */}
       {overlay === 'views' && (
-        <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
-          <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
-              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">我的视图</span>
-              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
-                <X size={15} />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <ViewsPanel
-                backendRepo={backendRepo}
-                onOpenView={(ids) => {
-                  setOverlay(null)
-                  handlePageChange('map')
-                  setViewRequest(ids)
-                }}
-                validModuleIds={new Set(map.modules.map((m) => m.id))}
-              />
-            </div>
-          </div>
-        </div>
+        <ViewsDrawer
+          backendRepo={backendRepo}
+          map={map}
+          onClose={() => setOverlay(null)}
+          onOpenView={(ids) => {
+            setOverlay(null)
+            handlePageChange('map')
+            setViewRequest(ids)
+          }}
+        />
       )}
       {overlay === 'suggest' && (
-        <div className="anim-fade-in-fast fixed inset-0 z-50 flex justify-end bg-slate-900/20" onClick={() => setOverlay(null)}>
-          <div className="glass anim-drawer-in flex h-full w-[460px] flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2">
-              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">智能优化建议</span>
-              <button onClick={() => setOverlay(null)} className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600">
-                <X size={15} />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <SuggestPanel backendRepo={backendRepo} map={map} onCreateTask={(d) => { setOverlay(null); openTaskDraft(d) }} />
-            </div>
-          </div>
-        </div>
+        <SuggestDrawer
+          backendRepo={backendRepo}
+          map={map}
+          onClose={() => setOverlay(null)}
+          onCreateTask={(d) => {
+            setOverlay(null)
+            openTaskDraft(d)
+          }}
+        />
       )}
       {/* 任务表单（全局：地图/建议/工作区页共用） */}
       {taskDraft && (
-        <TaskFormPanel
-          key={`app-draft-${draftSeq}`}
+        <TaskDraftOverlay
           backendRepo={backendRepo}
-          draft={taskDraft}
+          taskDraft={taskDraft}
+          draftSeq={draftSeq}
           map={map}
+          agentReady={agentState.found !== false}
           onClose={() => setTaskDraft(null)}
           onCreated={(id) => {
             setTaskFocus({ id, nonce: Date.now() })
@@ -958,12 +349,11 @@ export default function App() {
             handlePageChange('tasks')
           }}
           onLocateModule={() => handlePageChange('map')}
-          agentReady={agentState.found !== false}
         />
       )}
       {/* 新手引导：首启欢迎工作台（零仓库首启自动出现；顶栏 ? 可重看） */}
       {(welcomeOpen || (backendOnline === true && repos.length === 0 && !onboarding.welcomeShown)) && (
-        <WelcomePage
+        <WelcomeOverlay
           hasRepo={repos.length > 0}
           onAddRepo={async () => {
             const ok = await addRepo()
