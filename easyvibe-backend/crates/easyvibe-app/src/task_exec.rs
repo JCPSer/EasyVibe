@@ -123,6 +123,22 @@ impl TaskExecutor {
     /// Conflict/并发满载的排队语义在 spawn_and_watch。
     pub fn execute(self: Arc<Self>, task: TaskRow) -> impl std::future::Future<Output = ()> + Send {
         async move {
+            // 2026-10-05 实弹 bug（治理任务进度清零）：写互斥/并发满退回 pending 的任务
+            // gate 带着 p: 阶段标记——必须原地重跑该阶段。此前无脑走 trust 分流，
+            // manual 分支把 gate 重置回 plan = 已评审通过的矩阵/方案全部作废、
+            // 文档卡消失，用户被迫从头再走一遍（且每 5s 循环一次直至互斥释放）。
+            if let Some(phase_gate) = task.gate.as_deref().and_then(|g| g.strip_prefix("p:")) {
+                let phase = match phase_gate {
+                    "analysis" => 1u8,
+                    "solution" => 2,
+                    _ => 3,
+                };
+                info!("[task-exec] 任务 {} 写互斥退回复跑：p:{} 阶段原地重跑（不回计划关）", task.id, phase_gate);
+                let _ = self.task_repo.update_status(&task.id, "running", None).await;
+                self.publish_status(&task.repo, &task.id, "running", task.gate.as_deref()).await;
+                self.spawn_and_watch(task, phase).await;
+                return;
+            }
             match task.trust.as_str() {
                 "manual" => {
                     let _ = self.task_repo.update_status(&task.id, "awaiting_approval", None).await;
@@ -2475,6 +2491,29 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(7)).await;
         let t = task_repo.get("task-conflict").await.unwrap().unwrap();
         assert_eq!(t.status, "pending", "retry 重扫撞上持续互斥，任务应排队而非假活");
+
+        // 2026-10-05 实弹回归（治理任务进度清零）：gate 带 p:implement 的 manual 任务
+        // 被写互斥退回后，retry 必须原地保留阶段重跑——不得重置回 plan 关
+        // （此前 manual 分支把 gate 重置回 plan = 已评审的矩阵/方案全部作废）。
+        let mut task2 = sample_task("pending");
+        task2.repo = repo_id.clone();
+        task2.id = "task-conflict-phase".into();
+        task2.trust = "manual".into();
+        task2.gate = Some("p:implement".into());
+        task_repo.create(&task2).await.unwrap();
+        executor.clone().execute(task2).await;
+        let t2 = task_repo.get("task-conflict-phase").await.unwrap().unwrap();
+        assert_eq!(t2.status, "pending", "互斥退回 pending");
+        assert_eq!(t2.gate.as_deref(), Some("p:implement"), "退回不得清阶段标记");
+        tokio::time::sleep(std::time::Duration::from_secs(7)).await;
+        let t2 = task_repo.get("task-conflict-phase").await.unwrap().unwrap();
+        assert_eq!(t2.status, "pending", "持续互斥仍排队");
+        assert_eq!(
+            t2.gate.as_deref(),
+            Some("p:implement"),
+            "retry 重扫不得把 manual 任务重置回 plan 关（进度清零 bug 回归）"
+        );
+        assert_ne!(t2.status, "awaiting_approval", "绝不允许回退到计划审批关");
     }
 
     // ---------- 方案 v3 §4.4：路径换姓 + 版本迁移 ----------

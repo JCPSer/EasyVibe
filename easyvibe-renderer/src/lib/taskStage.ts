@@ -23,6 +23,12 @@ export function stageOf(status: string, gate: string | null | undefined): TaskSt
     case 'done':
       return 'done'
     case 'pending':
+      // 2026-10-05 实弹：写互斥退回 pending 但 gate 保留 p: 阶段——
+      // 归对应阶段（呈现"该阶段排队等待"，不再掉灰态让文档卡消失）
+      if (gate === 'p:analysis') return 0
+      if (gate === 'p:solution') return 1
+      if (gate === 'p:implement') return 2
+      return 'error'
     case 'failed':
     case 'rejected':
     case 'interrupted':

@@ -38,6 +38,15 @@ describe('stageOf', () => {
     expect(stageOf('failed', 'p:analysis')).toBe('error')
   })
 
+  it('写互斥退回的 pending（gate 带 p: 阶段）归对应阶段，不掉灰态', () => {
+    // 2026-10-05 实弹：治理任务被写互斥退回 pending——阶段标记保留，文档卡不得消失
+    expect(stageOf('pending', 'p:analysis')).toBe(0)
+    expect(stageOf('pending', 'p:solution')).toBe(1)
+    expect(stageOf('pending', 'p:implement')).toBe(2)
+    expect(stageOf('pending', null)).toBe('error')
+    expect(stageOf('pending', 'plan')).toBe('error')
+  })
+
   it('未启动/驳回/中断是灰态', () => {
     expect(stageOf('pending', null)).toBe('error')
     expect(stageOf('rejected', 'diff')).toBe('error')
