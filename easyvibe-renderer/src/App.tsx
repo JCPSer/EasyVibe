@@ -1,4 +1,4 @@
-import { ToastHost, dismissToast, toast } from '@/lib/toast'
+import { ToastHost, toast } from '@/lib/toast'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { Activity, BookOpen, Bot, CircleHelp, FileDown, FolderOpen, LayoutGrid, Lightbulb, Loader2, Plug, Plus, ScrollText, Settings, WifiOff, X } from 'lucide-react'
@@ -30,14 +30,13 @@ import { MapGate } from '@/components/gate/MapGate'
 import { CanvasBoundary } from '@/components/canvas/CanvasBoundary'
 import { Canvas } from '@/components/canvas/Canvas'
 import type { TaskDraft } from '@/lib/taskContext'
-import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitQueueChanged, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onQueueChanged, onSessionEvent, onTaskEvent } from '@/lib/growthBus'
+import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/lib/growthBus'
 import { enqueue } from '@/lib/sessionQueue'
 import { sysNotify } from '@/lib/notify'
 import { isTauriRuntime } from '@/lib/env'
-import { pushTerminalLine } from '@/lib/terminalBuffer'
-import { track } from '@/lib/analytics'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
+import { connectWs } from '@/lib/ws'
 export default function App() {
   const [map, setMap] = useState<CodeMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -425,139 +424,24 @@ export default function App() {
     }
   }, [])
 
-  // WS 订阅：map.changed 触发重取 / growth 与 session 事件转发；指数退避重连 + 重连后全量重同步
+  // WS 订阅：连接/重连/协议翻译下沉 lib/ws.ts；App 只把产品事件接进数据源
+  // 闭包陷阱对策：repo 经 ref 读取（effect 仍随 backendRepo 重连，语义与拆分前一致）
+  const repoRef = useRef(backendRepo)
+  repoRef.current = backendRepo
   useEffect(() => {
     if (!backendRepo) return
-    let closed = false
-    let ws: WebSocket | null = null
-    let retry = 0
-    let timer: number | undefined
-
-    const connect = () => {
-      if (closed) return
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      ws = new WebSocket(`${proto}://${location.host}/ws`)
-      ws.onopen = () => {
-        retry = 0
+    return connectWs({
+      getRepo: () => repoRef.current,
+      versionRef: serverVersionRef,
+      onMapChanged: () => setReloadTick((t) => t + 1),
+      onReconnected: () => {
         setReloadTick((t) => t + 1) // 全量重同步（覆盖断线期间的变更）
-        // I5②：WS 重连 → 触发运行会话气泡重拉队列快照（resyncKey 递增，SessionBubble 消费）
-        setQueueResyncTick((t) => t + 1)
-        // Y7：重连点比对后端版本——热重启/更新后前端是旧契约，提示刷新
-        fetch('/api/health')
-          .then((r) => r.json())
-          .then((h: { data?: { version?: string } }) => {
-            const v = h.data?.version
-            const prev = serverVersionRef.current
-            if (v && prev && v !== prev) {
-              toast(`后端已更新（${prev} → ${v}），刷新页面以加载新界面`, 'error')
-            }
-            if (v) {
-              serverVersionRef.current = v
-            }
-          })
-          .catch(() => {})
-      }
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data)
-          if (msg.name === 'map.changed' && msg.data?.repo === backendRepo) setReloadTick((t) => t + 1)
-          if (msg.name === 'growth.event' && msg.data?.repo === backendRepo) emitGrowthEvent(msg.data.event)
-          if (msg.name === 'session.statusChanged') {
-            const d = msg.data
-            if (d?.repo === backendRepo) emitSessionEvent({ repo: d.repo, sessionId: d.sessionId, status: d.status })
-          }
-          if (msg.name === 'queue.changed') {
-            // 会话排队变更（入队/替换/取消/排空/失败）——SessionBubble 与 drained 接管逻辑消费
-            const d = msg.data
-            if (d?.repo === backendRepo)
-              emitQueueChanged({ repo: d.repo, type: d.type, job: d.job, started: d.started, error: d.error })
-          }
-          if (msg.name === 'session.output') {
-            emitSessionOutput({ sessionId: msg.data.sessionId, seq: msg.data.seq ?? 0, stream: msg.data.stream ?? 'stdout', line: msg.data.line })
-            // 方案 v3 §4.2：终端推送挂在常驻的 App 层（页面卸载也在攒）——
-            // 工作流页的终端缓冲因此切走再回来不丢
-            pushTerminalLine(msg.data.sessionId, msg.data.line)
-          }
-          if (msg.name === 'patrol.finished') {
-            // R3 C1：巡检终态成为产品事件（真实模式会话 id 是 ind-N，靠事件而非前缀判定）
-            emitPatrolFinished({ repo: msg.data.repo, runId: msg.data.runId, status: msg.data.status })
-          }
-          if (msg.name === 'freshness.changed' && msg.data?.repo === backendRepo) {
-            emitFreshnessEvent({
-              repo: msg.data.repo,
-              status: msg.data.status,
-              latestCommitAt: msg.data.latestCommitAt,
-              commitsSinceMap: msg.data.commitsSinceMap,
-            })
-          }
-          if (msg.name === 'task.contractAlert') {
-            // L2 过程预警：任务执行中哨兵抓到的新增越界——比终态红线早 N 分钟到达
-            // R3 D1：埋点（过程预警曝光）+ 操作按钮直达评审（此前裸 toast 无入口）；info 色与终态红区分
-            // ui-test-2026-10-03 P1：措辞去内部 task id（用户看不懂），任务终态即撤下（见 statusChanged）
-            const d = msg.data
-            if (d?.repo !== backendRepo) return
-            track(d.repo, 'ui.contractAlert.shown', { taskId: d.taskId })
-            toast(`影响面预警：有任务正在越界改动（${(d.files ?? []).slice(0, 2).join('、')}${(d.files?.length ?? 0) > 2 ? ' 等' : ''}）`, 'info', {
-              label: '去处理',
-              onClick: () => {
-                track(d.repo, 'ui.contractAlert.click', { taskId: d.taskId })
-                handlePageChange('tasks')
-              },
-            }, true, `contract:${d.taskId}`)
-            if (document.hidden) void sysNotify('EasyVibe · 影响面预警', `有任务正在越界：${(d.files ?? []).slice(0, 3).join('、')}`)
-          }
-          if (msg.name === 'task.contractViolated') {
-            // R2 裂缝#3：auto/supervised 任务无审批关——越界经 WS 主动送达（与审批通知同双通道）
-            // R3 D1：埋点（终态红线曝光）+ 直达评审操作
-            const d = msg.data
-            if (d?.repo !== backendRepo) return
-            track(d.repo, 'ui.contractViolated.shown', { taskId: d.taskId })
-            toast(`影响面合约：有任务越界改动 ${d.files?.length ?? 0} 个文件`, 'error', {
-              label: '去处理',
-              onClick: () => {
-                track(d.repo, 'ui.contractViolated.click', { taskId: d.taskId })
-                handlePageChange('tasks')
-              },
-            }, true, `contract:${d.taskId}`)
-            if (document.hidden) void sysNotify('EasyVibe · 影响面越界', `有任务越界 ${d.files?.length ?? 0} 个文件`)
-          }
-          if (msg.name === 'task.statusChanged') {
-            const d = msg.data
-            if (d?.repo !== backendRepo) return
-            emitTaskEvent({ repo: d.repo, taskId: d.taskId, status: d.status, gate: d.gate })
-            // P0 对标缺口#3：审批零通知——manual 任务在计划关等批，用户不盯窗口就卡死。
-            // 系统通知（惰性申请权限）+ 页内 toast 双通道；仅窗口隐藏时弹系统通知防打扰
-            if (d?.status === 'awaiting_approval') {
-              toast('有任务等待你的审批', 'info')
-              if (document.hidden) void sysNotify('EasyVibe · 待审批', `有任务已到达审批关${d.gate ? `（${d.gate}）` : ''}`)
-            }
-            if (d?.status === 'failed') {
-              toast('有任务执行失败', 'error')
-              if (document.hidden) void sysNotify('EasyVibe · 任务失败', '有任务执行失败，回应用查看详情')
-            }
-            // ui-test-2026-10-03：任务终态（含 kill）即撤下它的越界预警——已死任务不再"正在越界"
-            if (['failed', 'done', 'rejected', 'interrupted'].includes(d?.status)) {
-              dismissToast(`contract:${d.taskId}`)
-            }
-          }
-        } catch {
-          /* 忽略坏消息 */
-        }
-      }
-      ws.onclose = () => {
-        if (closed) return
-        notifyWsClosed() // R2：断线时通知 Canvas 退出生长模式（重连后重新进入会拉全量）
-        retry += 1
-        timer = window.setTimeout(connect, Math.min(15000, 1000 * 2 ** retry))
-      }
-    }
-    connect()
-    return () => {
-      closed = true
-      window.clearTimeout(timer)
-      ws?.close()
-    }
-    // handlePageChange/track 仅用于事件回调内的瞬态动作（跳页/埋点），不应重启 WS 连接
+        setQueueResyncTick((t) => t + 1) // I5②：运行会话气泡重拉队列快照（resyncKey 递增）
+      },
+      onVersionChange: (prev, v) => toast(`后端已更新（${prev} → ${v}），刷新页面以加载新界面`, 'error'),
+      onGoTasks: () => handlePageChange('tasks'),
+    })
+    // handlePageChange 仅用于事件回调内的瞬态动作（跳页），不应重启 WS 连接
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendRepo])
 
