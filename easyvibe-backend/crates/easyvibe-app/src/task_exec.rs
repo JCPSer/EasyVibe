@@ -278,9 +278,16 @@ impl TaskExecutor {
                 task.status
             )));
         }
+        // 2026-10-05 实弹（评审#B1 同源）：失败在 p: 阶段的中途任务 retry 不得清阶段——
+        // reset_for_retry 会把 gate 置 NULL，execute() 就够不着阶段感知分支，
+        // manual 任务会被打回 plan 关从头评审（进度第二次清零）。
+        let preserved_gate = task.gate.clone().filter(|g| g.starts_with("p:"));
         let n = self.task_repo.reset_for_retry(task_id).await?;
         if n == 0 {
             return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
+        }
+        if let Some(g) = preserved_gate {
+            let _ = self.task_repo.set_gate(task_id, Some(&g)).await;
         }
         // 清内存基线残留（重启后 baselines 本已作废；此处防同进程内重复 retry 的脏基线）
         if let Ok(mut m) = self.baselines.lock() {
@@ -344,6 +351,58 @@ impl TaskExecutor {
                 _ => warn!("[task-exec] 复审任务 {} 丢失，spawn 取消", tid),
             }
         });
+        self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
+    /// 管道回看·节点重开（2026-10-05 方案 §3.1，子agent评审#B1/B2 修订版）：
+    /// 把任务放回目标评审关（analysis/solution），后续动作完全复用 decide——
+    /// 「通过」照常推进，「打回」走 3187d84 的带意见重跑闭环。
+    /// 可 rewound 的源状态覆盖「想回头」的全部真实场景（评审#B1——kill 会话会把任务判
+    /// failed，若 failed 不可 rewind 则「停下改方案」是死路）：
+    ///   awaiting_approval（走到后面的关）/ failed / interrupted / rejected（审查打回想改上游）/ done（归档返工）
+    /// 拒绝：running（先终止——kill→failed 后本方法接）、pending（写互斥瞬态 5s 自愈）、
+    ///       auto 信任（从未有过评审关，rewind 会把它丢进未设计的人工流——评审#S2）。
+    pub async fn rewind(self: &Arc<Self>, task_id: &str, target: &str) -> Result<TaskRow, ApiError> {
+        // 目标关白名单（rewind 只放回到评审关；ORDER 含 diff/report 仅供源关比较——评审#S6）
+        if !matches!(target, "analysis" | "solution") {
+            return Err(ApiError::BadRequest(format!("rewind 目标关仅支持 analysis/solution，收到 {target}")));
+        }
+        const ORDER: &[(&str, u8)] = &[("analysis", 0), ("solution", 1), ("diff", 2), ("report", 3)];
+        let target_order = ORDER.iter().find(|(g, _)| *g == target).map(|(_, o)| *o).unwrap_or(0);
+        let task = self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if task.trust == "auto" {
+            return Err(ApiError::Conflict("自动信任任务从未经过评审关，不支持回退——如需返工请复制为新任务".into()));
+        }
+        match task.status.as_str() {
+            "running" => {
+                return Err(ApiError::Conflict("任务正在执行——请先在管理按钮终止会话，再回退（终止后任务为失败态，本操作可接）".into()));
+            }
+            "pending" => {
+                return Err(ApiError::Conflict("任务正在排队等写互斥（瞬态，数秒后自愈）——请稍候刷新再试".into()));
+            }
+            "awaiting_approval" => {
+                // 只允许往更早的关回退；同关/更前 = 你已经在那里
+                let cur = task.gate.as_deref().and_then(|g| ORDER.iter().find(|(k, _)| *k == g).map(|(_, o)| *o));
+                if let Some(o) = cur {
+                    if o <= target_order {
+                        return Err(ApiError::Conflict(format!("任务已在 {:?} 关或更前，无需回退", task.gate)));
+                    }
+                }
+            }
+            // failed / interrupted / rejected / done：允许——这正是「停下来改上游」的入口
+            _ => {}
+        }
+        let n = self.task_repo.try_rewind(task_id, target).await?;
+        if n == 0 {
+            return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
+        }
+        let note = format!(
+            "自 {} 回退到本关——可打回（带意见让 agent 重跑本阶段）或通过继续流水线",
+            task.gate.as_deref().unwrap_or("（无关卡）")
+        );
+        self.record_approval(task_id, target, "rewind", Some(&note)).await;
+        self.publish_status(&task.repo, task_id, "awaiting_approval", Some(target)).await;
+        info!("[task-exec] 任务 {} 回退到 {} 关（源状态 {} 源关 {:?}）", task_id, target, task.status, task.gate);
         self.task_repo.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }
 

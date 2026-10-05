@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText, Hammer, ChevronRight, Trash2 } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, FileCode2, Lock, ClipboardList, ShieldAlert, Copy, Terminal, Unplug, FileText, Hammer, ChevronRight, Trash2, History } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { onTaskEvent } from '@/lib/growthBus'
 import { absTime, toMs } from '@/lib/diffStat'
 import { terminalLines } from '@/lib/terminalBuffer'
-import { stageOf, gateLabel } from '@/lib/taskStage'
+import { stageOf, gateLabel, STAGES } from '@/lib/taskStage'
+import { rewindTask } from '@/lib/taskAdmin'
 import { StagePipeline } from '@/components/StagePipeline'
 import { TaskAdminButtons } from '@/components/TaskAdminButtons'
 import { MarkdownMessage } from '@/components/MarkdownMessage'
@@ -96,7 +97,8 @@ function DocCard({ backendRepo, doc, onDeleted }: { backendRepo: string; doc: { 
 }
 
 /** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
- *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮 */
+ *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮
+ *  readonly（2026-10-05 管道回看）：隐藏裁决按钮，底部改「回到此关」重开入口（onRewind） */
 function PhaseDocReview({
   backendRepo,
   taskId,
@@ -107,6 +109,9 @@ function PhaseDocReview({
   compareDirHint,
   compareTitle,
   onDecide,
+  readonly,
+  onRewind,
+  rewinding,
 }: {
   backendRepo: string
   taskId: string
@@ -119,7 +124,12 @@ function PhaseDocReview({
   /** 对照文档（上一阶段产物，只读回看） */
   compareDirHint?: string
   compareTitle?: string
-  onDecide: (d: 'approved' | 'rejected', note?: string) => void
+  onDecide?: (d: 'approved' | 'rejected', note?: string) => void
+  /** 回看模式：只读，不带裁决 */
+  readonly?: boolean
+  /** 回看模式底部重开入口（不可重开时不传，按钮不渲染） */
+  onRewind?: () => void
+  rewinding?: boolean
 }) {
   const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
   const [missing, setMissing] = useState(false)
@@ -205,7 +215,7 @@ function PhaseDocReview({
           <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{title}</p>
           {doc && <p className="mono mt-0.5 truncate text-[10px] text-slate-400 dark:text-slate-500">{doc.path}</p>}
         </div>
-        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-micro font-bold text-amber-700">等待你的评审</span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-bold ${readonly ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>{readonly ? '回看模式' : '等待你的评审'}</span>
       </div>
       {/* 对照回看标签栏：方案评审时可回看需求矩阵（只读）；缺失时标签不出现 */}
       {compareDirHint && !compareMissing && (
@@ -293,9 +303,28 @@ function PhaseDocReview({
       </div>
       <div className="border-t border-slate-100 dark:border-slate-800 p-3">
         {tab === 'compare' && (
-          <p className="mb-1.5 text-center text-[10px] text-slate-400 dark:text-slate-500">正在对照回看——下方通过/打回作用于「{title}」</p>
+          <p className="mb-1.5 text-center text-[10px] text-slate-400 dark:text-slate-500">
+            {readonly ? '只读对照回看——不影响任务状态' : `正在对照回看——下方通过/打回作用于「${title}」`}
+          </p>
         )}
-        {rejecting ? (
+        {readonly ? (
+          /* 回看模式（2026-10-05 管道回看）：产物为最新版本，只读；重开走 rewind 端点 */
+          <div className="space-y-1.5">
+            <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
+              产物为目录内最新版本；此处查看不改变任务状态
+            </p>
+            {onRewind && (
+              <button
+                onClick={onRewind}
+                disabled={!!rewinding}
+                className="w-full rounded-lg bg-violet-600 px-3 py-2 text-[12px] font-bold text-white hover:bg-violet-700 disabled:opacity-40"
+                title="把任务放回本评审关：之后可打回（带意见让 agent 重跑本阶段），或通过继续流水线"
+              >
+                {rewinding ? '回退中…' : '回到此关重新评审（可打回重跑本阶段）'}
+              </button>
+            )}
+          </div>
+        ) : rejecting ? (
           <div className="space-y-1.5">
             <textarea
               autoFocus
@@ -307,7 +336,7 @@ function PhaseDocReview({
             />
             <div className="flex gap-2">
               <button
-                onClick={() => onDecide('rejected', note.trim())}
+                onClick={() => onDecide?.('rejected', note.trim())}
                 disabled={!!deciding || !note.trim()}
                 className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
               >
@@ -321,7 +350,7 @@ function PhaseDocReview({
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => onDecide('approved')}
+              onClick={() => onDecide?.('approved')}
               disabled={!!deciding}
               className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
             >
@@ -336,6 +365,66 @@ function PhaseDocReview({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** 管道回看（2026-10-05 方案 §3.2）：历史阶段产物的只读视图。
+ *  0/1（需求分析/方案设计）→ PhaseDocReview readonly + 「回到此关」重开入口；
+ *  2/3/4（实施/代码审查/归档）→ 变更统计等只读摘要（完整 Diff/报告随当前进度卡片）。 */
+function StageLookback({
+  backendRepo,
+  task,
+  look,
+  impact,
+  onRewind,
+  rewinding,
+}: {
+  backendRepo: string
+  task: TaskItem
+  /** 回看的目标阶段索引（< 当前阶段） */
+  look: number
+  impact: { adds: number; dels: number; files: number }[]
+  onRewind: (gate: 'analysis' | 'solution') => void
+  rewinding: 'analysis' | 'solution' | null
+}) {
+  // 重开资格与后端 rewind() 前置一致：running/pending 须先等终态；auto 不支持
+  const rewindable =
+    task.trust !== 'auto' && ['awaiting_approval', 'failed', 'interrupted', 'rejected', 'done'].includes(task.status)
+  if (look === 0 || look === 1) {
+    const isAnalysis = look === 0
+    return (
+      <PhaseDocReview
+        key={`${task.id}-look-${look}`}
+        backendRepo={backendRepo}
+        taskId={task.id}
+        dirHint={isAnalysis ? '1_requirements_matrix' : '2_requirements_solutions'}
+        title={isAnalysis ? '需求矩阵（回看）' : '方案设计（回看）'}
+        deciding={null}
+        review={isAnalysis ? (task.result?.phaseReviews?.analysis ?? null) : (task.result?.phaseReviews?.solution ?? null)}
+        {...(!isAnalysis ? { compareDirHint: '1_requirements_matrix', compareTitle: '需求矩阵（已评审）' } : {})}
+        readonly
+        rewinding={!!rewinding}
+        onRewind={rewindable ? () => onRewind(isAnalysis ? 'analysis' : 'solution') : undefined}
+      />
+    )
+  }
+  return (
+    <div className="m-4 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+      <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-violet-500 dark:text-violet-400">
+        <History size={10} /> {STAGES[look]?.label ?? look} · 回看
+      </p>
+      <div className="mt-2 space-y-1.5 text-[12px] leading-5 text-slate-700 dark:text-slate-200">
+        {impact.map((im, i) => (
+          <p key={i} className="tnum text-micro text-slate-500 dark:text-slate-400">
+            本次变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件
+          </p>
+        ))}
+        <p className="text-micro text-slate-400 dark:text-slate-500">
+          此阶段的完整产物（{look === 2 ? '实时执行与产物文档' : look === 3 ? 'Diff 与审查意见' : '审查报告与归档路径'}）随当前进度的对应卡片展示；
+          如需从更早阶段重开流水线，点击管道上的「需求分析」或「方案设计」回看其文档。
+        </p>
       </div>
     </div>
   )
@@ -493,7 +582,7 @@ export function TaskWorkflowPage({
   // 评审轮回（方案 §4.2）：approvals 按时间渲染留痕条——"第1轮打回：缺测试矩阵 → 第2轮通过"
   const reviewTrail = useMemo(() => {
     const GLABEL: Record<string, string> = { plan: '任务书', analysis: '需求矩阵', solution: '方案', diff: 'Diff', report: '报告' }
-    const DLABEL: Record<string, string> = { approved: '通过', rejected: '打回', skipped: '自动通过', flagged: '风险预评' }
+    const DLABEL: Record<string, string> = { approved: '通过', rejected: '打回', skipped: '自动通过', flagged: '风险预评', rewind: '回退' }
     return [...approvals]
       .sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)))
       .map((a) => `${GLABEL[a.gate] ?? a.gate}关${DLABEL[a.decision] ?? a.decision}${a.note ? `：${a.note}` : ''}`)
@@ -573,6 +662,31 @@ export function TaskWorkflowPage({
     return `${Math.floor(min / 60)} 小时 ${min % 60} 分`
   }
 
+  // 管道回看（2026-10-05 方案 §3.2）：null = 跟随当前阶段；数值 = 回看该历史阶段。
+  // 必须位于下方 early return 之前（hooks 序纪律——白屏战役的同款教训）。
+  const stage = sel ? stageOf(sel.status, sel.gate) : null
+  const [viewStage, setViewStage] = useState<number | null>(null)
+  const [rewinding, setRewinding] = useState<'analysis' | 'solution' | null>(null)
+  // 当前阶段索引（done 视为 5——全部可回看）；error 灰态不可回看
+  const stageIdx: number | null = stage === 'done' ? STAGES.length : typeof stage === 'number' ? stage : null
+  const viewing = viewStage !== null && stageIdx !== null && viewStage < stageIdx
+  // 阶段推进/换任务即退出回看（评审#S4：否则回看内容与新阶段脱节）
+  useEffect(() => {
+    setViewStage(null)
+  }, [selKey, stageIdx])
+  const doRewind = (gate: 'analysis' | 'solution') => {
+    if (!backendRepo || !sel || rewinding) return
+    setRewinding(gate)
+    rewindTask(backendRepo, sel.id, gate)
+      .then(() => {
+        toast(`已回到${gate === 'analysis' ? '需求分析' : '方案设计'}评审关——可打回（带意见重跑本阶段）或通过继续`, 'info')
+        setViewStage(null)
+        load()
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : '回退失败', 'error'))
+      .finally(() => setRewinding(null))
+  }
+
   if (!backendRepo) {
     return <p className="p-8 text-center text-[12px] text-slate-400 dark:text-slate-500">需要本地后端在线</p>
   }
@@ -584,7 +698,6 @@ export function TaskWorkflowPage({
     )
   }
 
-  const stage = sel ? stageOf(sel.status, sel.gate) : null
   const pendingCount = tasks.filter((t) => t.status === 'awaiting_approval').length
 
   return (
@@ -658,10 +771,32 @@ export function TaskWorkflowPage({
                   }}
                 />
               </div>
-              {/* 五阶段管道：公共 StagePipeline（detail 档）——判定收敛到 taskStage 一处 */}
+              {/* 五阶段管道：公共 StagePipeline（detail 档）——判定收敛到 taskStage 一处；
+                  2026-10-05 管道回看：当前及之前的阶段可点击回看产物 */}
               <div className="mt-3">
-                <StagePipeline status={sel.status} gate={sel.gate} variant="detail" />
+                <StagePipeline
+                  status={sel.status}
+                  gate={sel.gate}
+                  variant="detail"
+                  selected={viewing ? viewStage! : undefined}
+                  onSelectStage={(i) => setViewStage(i === stageIdx ? null : i)}
+                />
               </div>
+              {/* 回看横幅：明示只读 + 一键回到当前进度 */}
+              {viewing && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-violet-200 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/40 px-3 py-1.5">
+                  <History size={11} className="shrink-0 text-violet-500" />
+                  <p className="min-w-0 flex-1 truncate text-micro text-violet-700 dark:text-violet-300">
+                    正在回看「{STAGES[viewStage!]?.label}」——只读，不影响任务状态
+                  </p>
+                  <button
+                    onClick={() => setViewStage(null)}
+                    className="shrink-0 rounded-md border border-violet-200 dark:border-violet-800 px-2 py-0.5 text-micro font-semibold text-violet-600 hover:bg-violet-100 dark:hover:bg-violet-900/40"
+                  >
+                    回到当前进度
+                  </button>
+                </div>
+              )}
               {/* 合约红线：审批必见 */}
               {(sel.result?.contractViolations?.length ?? 0) > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3 py-2">
@@ -686,9 +821,21 @@ export function TaskWorkflowPage({
               )}
             </div>
 
-            {/* 主区：阶段单态切换（同一时间只有一个阶段是 now） */}
+            {/* 主区：阶段单态切换（同一时间只有一个阶段是 now）；
+                2026-10-05 管道回看：viewing 时整列换成历史阶段只读视图 */}
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
+                {viewing && viewStage !== null ? (
+                  <StageLookback
+                    backendRepo={backendRepo}
+                    task={sel}
+                    look={viewStage}
+                    impact={impact}
+                    onRewind={doRewind}
+                    rewinding={rewinding}
+                  />
+                ) : (
+                  <>
                 {/* ① 需求分析：三子态——任务书待批 / 分析中终端 / 矩阵评审卡 */}
                 {stage === 0 && sel.gate === 'plan' && !isRunning && (
                   <div className="m-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
@@ -1143,10 +1290,12 @@ export function TaskWorkflowPage({
                     </div>
                   </div>
                 )}
+                  </>
+                )}
               </div>
 
-              {/* 产物文档卡（④⑤ 与 done 的侧栏） */}
-              {(stage === 3 || stage === 4 || stage === 'done') && (
+              {/* 产物文档卡（④⑤ 与 done 的侧栏；管道回看 0/1 阶段时一并显示，产物随看随查） */}
+              {(viewing || stage === 3 || stage === 4 || stage === 'done') && (
                 <aside className="flex w-64 shrink-0 flex-col border-l border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40">
                   <p className="px-3 pt-3 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">产物文档</p>
                   <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">

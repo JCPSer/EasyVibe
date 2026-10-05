@@ -528,6 +528,17 @@ pub trait TaskRepository: Send + Sync {
     /// 修改并复审（rejected → running 直达实施阶段）：原子条件 UPDATE——
     /// 只认 rejected（用户打回走复制新任务，审查打回走本通道）。
     fn reset_for_remediate(&self, id: &str) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
+    /// 管道回看·节点重开（2026-10-05 方案 §3.1）：把任务放回目标评审关。
+    /// 允许源状态集覆盖「走到后面想回头」的全部场景：待审/失败/中断/审查打回/已归档——
+    /// 原子条件 UPDATE（评审#B2：不能用 try_advance_gate，其 WHERE 硬编码 awaiting_approval，
+    /// done 任务会恒 0 行）；并发安全靠状态集判定 + decide 的 N27 expected_gate 兜底。
+    /// running/pending 不在集内：running 必须先终止（kill→failed 后本方法接），
+    /// pending 是写互斥退回的瞬态（5s 自愈，不宜插队改关卡）。
+    fn try_rewind(
+        &self,
+        id: &str,
+        target_gate: &str,
+    ) -> impl std::future::Future<Output = Result<u64, ApiError>> + Send;
     /// 修改并复审的上下文注入：写入 remediation 反馈（JSON 整体替换 context 列）
     fn set_context(&self, id: &str, context: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
 }
@@ -699,6 +710,17 @@ impl TaskRepository for SqliteTaskRepository {
             .bind(id)
             .execute(&self.pool).await.map_err(db_err)?;
         Ok(())
+    }
+
+    async fn try_rewind(&self, id: &str, target_gate: &str) -> Result<u64, ApiError> {
+        let res = sqlx::query(
+            "UPDATE tasks SET status = 'awaiting_approval', error = NULL, gate = ?, session_id = NULL, updated_at = ? WHERE id = ? AND status IN ('awaiting_approval','failed','interrupted','rejected','done')",
+        )
+        .bind(target_gate)
+        .bind(now_ms())
+        .bind(id)
+        .execute(&self.pool).await.map_err(db_err)?;
+        Ok(res.rows_affected())
     }
 }
 

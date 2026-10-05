@@ -361,10 +361,12 @@ export function ChangesPage({ backendRepo, map, onOpenTask }: { backendRepo: str
                                 ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600'
                                 : a.decision === 'rejected'
                                   ? 'bg-red-50 dark:bg-red-950/40 text-red-500'
-                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
+                                  : a.decision === 'rewind'
+                                    ? 'bg-violet-50 dark:bg-violet-950/40 text-violet-600'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                             }`}
                           >
-                            {a.decision === 'approved' ? '已通过' : a.decision === 'rejected' ? '已驳回' : '已跳过'}
+                            {a.decision === 'approved' ? '已通过' : a.decision === 'rejected' ? '已驳回' : a.decision === 'rewind' ? '回退' : '已跳过'}
                           </span>
                         </div>
                       ))}
