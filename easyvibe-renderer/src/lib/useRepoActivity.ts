@@ -12,6 +12,8 @@ export interface RepoActivity {
   inducing: boolean
   /** 该仓库已排队归纳（等待接续） */
   reinduceQueued: boolean
+  /** 归纳活动会话标识（ticker 订阅/失败匹配/跳运行页用；会话终态后轮询自然清掉） */
+  inductionSession?: { sessionId: string; label: string }
 }
 
 interface OverviewActive {
@@ -41,6 +43,7 @@ export function useRepoActivityMap(): Map<string, RepoActivity> {
           if (kindFromLabel(a.label) !== 'reinduce') continue
           const cur = next.get(a.repo) ?? { inducing: false, reinduceQueued: false }
           cur.inducing = true
+          cur.inductionSession = { sessionId: a.sessionId, label: a.label }
           next.set(a.repo, cur)
         }
         for (const q of d?.data?.queued ?? []) {

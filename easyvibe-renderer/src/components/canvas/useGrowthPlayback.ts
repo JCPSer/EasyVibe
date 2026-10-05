@@ -41,17 +41,36 @@ export function useGrowthPlayback(
       onSessionEvent((evt) => {
         if (evt.status !== 'succeeded' && evt.status !== 'failed') return
         setInducing(false)
-        // 重归纳的直播生长会话诚实收尾：一个生长事件都没等到（agent 未按协议产出）→
-        // 收起空面板，不假装播完；有事件的会话等自己的 done 事件自然结束
+        // 重归纳的直播生长会话诚实收尾：
+        // - 失败：显式清理，含"有部分事件残留"场景——推进定时器否则会停在"正在分析模块：X"卡住
+        // - 成功但一个生长事件都没等到（agent 未按协议产出）→ 收起空面板，不假装播完；
+        //   有事件的会话等自己的 done 事件自然结束（或 map.changed 到达时的即时退出）
         if (growthFromReinduce.current) {
           growthFromReinduce.current = false
-          setGrowth((g) => (g && g.events.length === 0 && !g.done ? null : g))
+          setGrowth((g) => {
+            if (!g) return g
+            if (evt.status === 'failed') return null
+            return g.events.length === 0 && !g.done ? null : g
+          })
         }
         // R3 C1：stub 模式会话 id 带 patrol- 前缀可在此解除；真实模式（ind-N）统一走 patrol.finished 事件
         if (evt.sessionId.startsWith('patrol-')) onPatrollingChange(false)
       }),
     [],
   )
+
+  // 归纳完成：map.json 先落盘触发 map.changed（App 刷新 map prop），此时生长会话可能还活着——
+  // 直接退出再渲染新全图。若不退，mergeGrowthEvents 会拿旧 arrived 集过滤新地图造成闪烁
+  const mapRef = useRef(map)
+  useEffect(() => {
+    if (mapRef.current === map) return
+    mapRef.current = map
+    setGrowth((g) => {
+      if (!g || !growthFromReinduce.current) return g // 手动回放 growth.log 的生长不受地图刷新影响
+      growthFromReinduce.current = false
+      return null
+    })
+  }, [map])
 
   // R3 C1：巡检终态事件——真实模式会话 id 是 ind-N，前缀判定永远等不到，此前"巡检中"永不解除
   useEffect(

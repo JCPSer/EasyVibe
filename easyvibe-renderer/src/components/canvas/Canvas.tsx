@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { ReactFlow, Controls, MiniMap, Panel, useReactFlow, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { AlertTriangle, Focus, GitBranch, PanelRightOpen, RefreshCw, WifiOff } from 'lucide-react'
@@ -8,13 +8,14 @@ import { healthColor } from '@/lib/layout'
 import { DetailPanel, type Selection } from '@/components/DetailPanel'
 import { TaskFormPanel } from '@/components/TaskFormPanel'
 import type { TaskDraft } from '@/lib/taskContext'
-import { onFreshnessEvent } from '@/lib/growthBus'
+import { onFreshnessEvent, onSessionEvent } from '@/lib/growthBus'
 import { nodeTypes } from './nodeTypes'
 import { buildFlow } from './buildFlow'
 import { Legend } from './Legend'
 import { FilterButton } from './FilterButton'
 import { ModuleToolbar } from './ModuleToolbar'
 import { GrowthPanel } from './GrowthPanel'
+import { InductionOverlay } from './InductionOverlay'
 import { MAX_EXPANDED, type Filters } from './types'
 import { useCanvasPanelDrag } from './useCanvasPanelDrag'
 import { useSubmaps } from './useSubmaps'
@@ -116,6 +117,63 @@ export function Canvas({
     startReinduce()
   }, [inducingAny, shared.reinduceQueued, startReinduce])
 
+  // ── 归纳期间"原位过场"（旧地图留守 + 阶段进度 + agent 实时输出）────────────────
+  // 显示条件：本页重归纳空会话窗口（growth 存在但事件未到）/ 他页归纳（shared 有活动或排队且本页无 growth）。
+  // 准入以 overview 的归纳活动会话为准（shared.inducing），progress.json 只是进度展示，不决定显隐。
+  const localEmptyWindow = !!growth && growth.events.length === 0 && !growth.done
+  const foreignInduction = !growth && (shared.inducing || shared.reinduceQueued)
+  const overlayActiveRaw = localEmptyWindow || foreignInduction
+  const [overlayDismissed, setOverlayDismissed] = useState(false)
+  useEffect(() => {
+    if (!overlayActiveRaw) setOverlayDismissed(false) // 退出后复位，下一次归纳重新显示
+  }, [overlayActiveRaw])
+  const overlayActive = overlayActiveRaw && !overlayDismissed
+
+  // 归纳会话失败：撤罩层、显式清生长会话（含部分事件残留）、旧地图恢复全亮、
+  // 底部红条 5s（复用 SessionBubble 红态口径：toast + 超时消失）
+  const inductionSessionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    inductionSessionIdRef.current = shared.inductionSession?.sessionId ?? null
+  }, [shared.inductionSession])
+  const [inductionFailed, setInductionFailed] = useState(false)
+  useEffect(
+    () =>
+      onSessionEvent((evt) => {
+        if (evt.status !== 'failed' || evt.repo !== backendRepo) return
+        if (evt.sessionId !== inductionSessionIdRef.current) return
+        setOverlayDismissed(true)
+        exitGrowth() // 双保险：残留生长会话（推进定时器会停在"正在分析模块：X"卡住）
+        setInductionFailed(true)
+        toast('归纳失败，仍显示上一份地图', 'error')
+        window.setTimeout(() => setInductionFailed(false), 5000)
+      }),
+    [backendRepo, exitGrowth],
+  )
+
+  // 排队取消：DELETE /session-queue（口径同 RunsPage.cancelQueue）
+  const cancelReinduceQueue = useCallback(() => {
+    if (!backendRepo) return
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/session-queue`, { method: 'DELETE' })
+      .then(async (r) => {
+        if (r.status === 404) toast('没有排队任务', 'error')
+        else if (!r.ok) toast(`取消排队失败（HTTP ${r.status}）`, 'error')
+        else toast('已取消排队')
+      })
+      .catch(() => toast('取消排队失败（请确认后端在线后重试）。', 'error'))
+  }, [backendRepo])
+
+  // 过场显示期间顶部"归纳中…"chip 降显隐藏，避免同屏多处重复指示（全局 SessionBubble 不动）；
+  // 退出后多压 320ms，盖住罩层 300ms 淡出，避免 chip 在淡出期间闪回
+  const [chipSuppressed, setChipSuppressed] = useState(false)
+  useEffect(() => {
+    if (overlayActive) {
+      setChipSuppressed(true)
+      return
+    }
+    const t = window.setTimeout(() => setChipSuppressed(false), 320)
+    return () => window.clearTimeout(t)
+  }, [overlayActive])
+
   // 2026-10-04 实弹「渲染问题」修复：切仓库必须清掉上一仓库的画布状态——selection 是
   // keep-alive 的，旧仓库的模块 id 在新地图里不存在，nodeDim 的 neighborhood 判定会把
   // 新地图全部模块压到 0.3 透明度（整图洗白像蒙了层纱）；展开子图/过滤同理属于旧仓库上下文
@@ -162,9 +220,10 @@ export function Canvas({
   }, [])
 
   const toggleExpand = useCallback((id: string) => {
+    if (growth || foreignInduction) return // 生长回放/他页归纳过场期间禁用展开
     setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-MAX_EXPANDED)))
     ensureSubmapLoading(id)
-  }, [ensureSubmapLoading])
+  }, [growth, foreignInduction, ensureSubmapLoading])
 
   const expanded = useMemo(() => {
     const m = new Map<string, SubMap | 'loading' | 'error'>()
@@ -174,7 +233,9 @@ export function Canvas({
 
   const emptyExpanded = useMemo(() => new Map<string, SubMap | 'loading' | 'error'>(), [])
   const effectiveExpanded = growth ? emptyExpanded : expanded
-  const growthVisible = growth ? arrived : null
+  // 空会话窗口期留守旧地图：第一个 growth 事件到达前 arrived 是空集，buildFlow 会把
+  // 旧地图全部过滤光——此窗口传 null（不过滤），让旧地图渲染出来再罩层
+  const growthVisible = growth ? (growth.events.length === 0 ? null : arrived) : null
 
   const { nodes, edges } = useMemo(
     () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id], toggleExpand, onOpenRuns, (id) => submapSessions[id]),
@@ -243,7 +304,7 @@ export function Canvas({
   }, [fitView, map])
 
   const onNodeClick = useCallback((_e: unknown, node: Node) => {
-    if (growth) return // 生长回放期间禁用选中
+    if (growth || foreignInduction) return // 生长回放/他页归纳过场期间禁用选中
     if (node.type === 'module' || node.type === 'moduleExpanded') {
       const alreadySelected = selection?.kind === 'module' && selection.id === node.id
       if (node.type === 'module' && alreadySelected) toggleExpand(node.id)
@@ -257,7 +318,7 @@ export function Canvas({
       setTab('detail')
       onPanelOpenChange(true)
     }
-  }, [growth, selection, toggleExpand, setTab, onPanelOpenChange])
+  }, [growth, foreignInduction, selection, toggleExpand, setTab, onPanelOpenChange])
   const onPaneClick = useCallback(() => setSelection(null), [])
 
   const toggleFilter = (key: keyof Filters) => setFilters((f) => ({ ...f, [key]: !f[key] }))
@@ -334,15 +395,17 @@ export function Canvas({
             </Panel>
           )}
 
-          {/* 底部中央：生长回放控制条 或 全局过滤 */}
+          {/* 底部中央：生长回放控制条 或 全局过滤；空会话窗口期由 InductionOverlay 的阶段卡顶替位置 */}
           <Panel position="bottom-center" className="mb-2">
             {growth ? (
-              <GrowthPanel
-                growth={growth}
-                onPause={pauseGrowth}
-                onRestart={restartGrowth}
-                onExit={exitGrowth}
-              />
+              localEmptyWindow ? null : (
+                <GrowthPanel
+                  growth={growth}
+                  onPause={pauseGrowth}
+                  onRestart={restartGrowth}
+                  onExit={exitGrowth}
+                />
+              )
             ) : (
               <div className="flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-2 py-1.5 shadow-sm backdrop-blur">
                 {/* 真人测试#1：聚焦常驻指示——任何时刻看得见、一键退得出（Esc 同效） */}
@@ -461,6 +524,13 @@ export function Canvas({
                 <span>{mergedMap.layers.length} 层</span>
                 <span>{mergedMap.edges.length} 依赖</span>
                 <span className="text-red-500">{violations} 逆向</span>
+                {/* 归纳过场期间：罩层左上角小标签，说明留守的是上一份地图（顶部 chip 已隐藏） */}
+                {overlayActive && (
+                  <span className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-1.5 py-px font-semibold text-slate-500 dark:text-slate-400 shadow-sm">
+                    <RefreshCw size={9} className="animate-spin" />
+                    上一份地图 · 归纳中
+                  </span>
+                )}
                 {!backendRepo && (
                   <span
                     className="flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-px font-semibold text-amber-700"
@@ -490,7 +560,7 @@ export function Canvas({
                     )}
                   </span>
                 )}
-                {inducingAny && (
+                {inducingAny && !chipSuppressed && (
                   <span className="flex items-center gap-1 font-semibold text-amber-600">
                     <RefreshCw size={10} className="animate-spin" />
                     {shared.reinduceQueued ? '归纳排队中…' : '归纳中…'}
@@ -500,6 +570,25 @@ export function Canvas({
             </div>
           </div>
         </div>
+
+        {/* 归纳期间原位过场：留守旧地图 + 阶段进度卡 + agent 实时输出（高频态在 Overlay 内部） */}
+        <InductionOverlay
+          repo={backendRepo}
+          session={shared.inductionSession ?? null}
+          queued={!growth && !!shared.reinduceQueued}
+          active={overlayActive}
+          onOpenRuns={onOpenRuns}
+          onCancelQueue={cancelReinduceQueue}
+        />
+
+        {/* 归纳失败红条：撤罩层后底部提示 5s（红 toast 同口径），旧地图恢复全亮 */}
+        {inductionFailed && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-2">
+            <div className="anim-fade-in-fast rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-[12px] font-semibold text-red-700 shadow-sm dark:border-red-800 dark:bg-red-950/80 dark:text-red-300">
+              归纳失败，仍显示上一份地图
+            </div>
+          </div>
+        )}
       </div>
       {/* 右侧详情面板（M4-1：三页签 详情/问题/对话 + 顶部旧入口引导卡） */}
       {panelOpen ? (

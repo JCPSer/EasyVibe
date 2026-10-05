@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
 import { loadTaskIdea, saveTaskIdea, prefersReducedMotion } from '@/lib/onboarding'
+import { inductionPhaseLabel } from '@/lib/inductionProgress'
 
 // 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
 export function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
@@ -35,23 +36,16 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
     }
   }, [repo])
 
-  const PHASE_LABEL: Record<string, string> = {
-    init: '准备中',
-    layering: '分层分析',
-    module_scan: '模块扫描',
-    emit: '模块归纳',
-    edging: '依赖边推导',
-    consistency: '一致性校验',
-    finalize: '收尾写盘',
-    done: '完成',
-  }
   const concept = ONBOARDING_COPY.concepts[cardIdx]
+  // 阶段名走 v2.2 协议共享词表（旧表 layering/module_scan/emit 永不命中，是存量 bug）；
+  // done 是终态：等待页以 map.json 落盘为准出页，收尾瞬间本地补"完成"（词表不收录 done）
+  const phaseLabel = prog ? (prog.phase === 'done' ? '完成' : inductionPhaseLabel(prog.phase)) : ''
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-[13px] text-slate-500 dark:text-slate-400">
       {/* 第 1 层：真实进度叙事（永远不让等待页只有 spinner） */}
       <Loader2 size={18} className="animate-spin text-blue-500" />
       <span className="font-semibold text-slate-700 dark:text-slate-200">
-        正在归纳代码地图{prog ? `：${PHASE_LABEL[prog.phase] ?? prog.phase} ${prog.percent}%` : '…'}
+        正在归纳代码地图{prog ? `：${phaseLabel} ${prog.percent}%` : '…'}
       </span>
       {prog && (
         <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
