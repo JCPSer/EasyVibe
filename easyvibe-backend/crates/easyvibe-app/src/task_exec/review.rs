@@ -9,6 +9,41 @@ pub struct ReviewVerdict {
     pub summary: String,
 }
 
+/// spawn 审查/初审会话：单会话纪律下，执行刚终态的 ≤2s 空档里仓库槽位可能已被
+/// 另一排队任务的重试抢占（2026-10-06 实弹：并发任务时评审有概率静默丢失——
+/// start_induction 遇 Conflict 被 .ok()? 吞掉 → "审查不可用，照常进 diff 关"）。
+/// 对策：Conflict 有界重试（4s 一拍，15 分钟上限——占用方是会话，终态必然释放，
+/// 无死锁：占用方自己也在 5s 重试节拍上等这个槽位）；非 Conflict 错误/超时立即降级，
+/// 且降级原因落日志（此前静默吞错误，排查只能靠猜）。
+async fn start_review_session(
+    session_manager: &SessionManager,
+    repo_id: &str,
+    repo_root: &std::path::Path,
+    prompt: &str,
+    agent_command: &str,
+    agent_args: &[String],
+    timeout: std::time::Duration,
+    purpose: &str,
+) -> Option<easyvibe_api_types::SessionStatusChanged> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
+    loop {
+        match session_manager
+            .start_induction(repo_id, repo_root, prompt, agent_command, agent_args, Some(timeout))
+            .await
+        {
+            Ok(s) => return Some(s),
+            Err(easyvibe_common::ApiError::Conflict(_)) if tokio::time::Instant::now() < deadline => {
+                info!("[task-exec] {} 会话槽位被占用，4s 后重试…", purpose);
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+            }
+            Err(e) => {
+                warn!("[task-exec] {} 会话启动失败，按不可用处理（降级不阻断）: {e}", purpose);
+                return None;
+            }
+        }
+    }
+}
+
 /// 跑独立审查会话并等终态。25 分钟上限（审查是分钟级任务；超时判不可用不阻断）。
 /// custom：自定义层补充（review 槽）；rules：出厂规则内嵌副本（开发/修复两份，直接进 prompt）。
 pub(crate) async fn run_subagent_review(
@@ -24,10 +59,17 @@ pub(crate) async fn run_subagent_review(
     let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
     let prompt = assemble_review_prompt(task, &user, custom, rules);
     // 审查会话沿用任务槽 CLI 参数（可经 settings `agent.args.review` 单独收紧/换模型）
-    let session = session_manager
-        .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(25 * 60)))
-        .await
-        .ok()?;
+    let session = start_review_session(
+        session_manager,
+        repo_id,
+        repo_root,
+        &prompt,
+        agent_command,
+        agent_args,
+        std::time::Duration::from_secs(25 * 60),
+        "审查",
+    )
+    .await?;
     let sid = session.session_id.clone();
     info!("[task-exec] 任务 {} 审查会话 {} 已启动", task.id, sid);
     session_manager.note_label(&sid, "任务执行·审查".into()).await;
@@ -51,10 +93,17 @@ pub(crate) async fn run_phase_doc_review(
     let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
     let prompt = assemble_phase_review_prompt(task, phase, &user, custom);
     // 初审是读文档+下结论，比实施审查轻——15 分钟上限足够
-    let session = session_manager
-        .start_induction(repo_id, repo_root, &prompt, agent_command, agent_args, Some(std::time::Duration::from_secs(15 * 60)))
-        .await
-        .ok()?;
+    let session = start_review_session(
+        session_manager,
+        repo_id,
+        repo_root,
+        &prompt,
+        agent_command,
+        agent_args,
+        std::time::Duration::from_secs(15 * 60),
+        "初审",
+    )
+    .await?;
     let sid = session.session_id.clone();
     info!("[task-exec] 任务 {} 阶段 {} 初审会话 {} 已启动", task.id, phase, sid);
     session_manager.note_label(&sid, "任务执行·初审".into()).await;
