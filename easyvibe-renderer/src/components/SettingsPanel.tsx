@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, X, Zap,
+  Bot, Check, Eye, EyeOff, Info, KeyRound, Loader2, Pencil, Plus, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, X, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { Select } from '@/components/ui/SelectMenu'
@@ -781,7 +781,7 @@ function IosToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => vo
 
 function HarnessSection({ about, onVersionChange }: { about: { backend: string; harness: string } | null; onVersionChange: (v: string) => void }) {
   const [slots, setSlots] = useState<CustomSlot[] | null>(null)
-  const [ai, setAi] = useState<{ scope: string; description: string; generating: boolean } | null>(null)
+  const [ai, setAi] = useState<{ scope: string; description: string; mode: 'ai' | 'manual'; manual: string; generating: boolean } | null>(null)
   const [showScopes, setShowScopes] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
 
@@ -827,7 +827,20 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
   const activeRules = (slots ?? []).filter((s) => s.exists && s.slot !== 'development')
   const lastGen = activeRules.reduce((m, s) => Math.max(m, s.mtimeMs), 0)
 
-  const openAi = (scope: string) => setAi({ scope, description: '', generating: false })
+  const openAi = (scope: string) => setAi({ scope, description: '', mode: 'ai', manual: '', generating: false })
+
+  const saveRule = (scopeKey: string, content: string, label: string) =>
+    fetch('/api/harness/custom/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: slotFile(scopeKey), content }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(() => {
+        toast(`「${label}」规则已生效——${SCOPES.find((s) => s.key === scopeKey)?.desc ?? ''}`, 'info')
+        setAi(null)
+        load()
+      })
 
   const runAi = () => {
     if (!ai || !ai.description.trim()) return
@@ -839,20 +852,17 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
       body: JSON.stringify({ slot: scope.key, description: ai.description.trim() }),
     })
       .then((r) => (r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? String(r.status))))))
-      .then((d: { data?: { content?: string } }) =>
-        fetch('/api/harness/custom/file', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: scope.file, content: d?.data?.content ?? '' }),
-        })
-      )
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then(() => {
-        toast(`「${scope.label}」规则已生成并生效——${scope.desc}`, 'info')
-        setAi(null)
-        load()
-      })
+      .then((d: { data?: { content?: string } }) => saveRule(scope.key, d?.data?.content ?? '', scope.label))
       .catch((e: Error) => toast(`生成失败：${e.message}`, 'error'))
+      .finally(() => setAi((a) => (a ? { ...a, generating: false } : null)))
+  }
+
+  const saveManual = () => {
+    if (!ai || !ai.manual.trim()) return
+    const scope = SCOPES.find((s) => s.key === ai.scope) ?? SCOPES[0]
+    setAi({ ...ai, generating: true })
+    saveRule(scope.key, ai.manual.trim(), scope.label)
+      .catch((e: Error) => toast(`保存失败：${e.message}`, 'error'))
       .finally(() => setAi((a) => (a ? { ...a, generating: false } : null)))
   }
 
@@ -1001,19 +1011,38 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
         </div>
       )}
 
-      {/* AI 生成弹窗：选择环节 → 描述需求 → 生成并生效 */}
+      {/* 规则弹窗：选择环节 → AI 生成 或 手动输入 → 保存即生效 */}
       {ai && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setAi(null)}>
           <div className="w-[560px] max-w-[92vw] rounded-xl bg-white dark:bg-slate-900 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 px-4 pt-4">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white">
-                <Sparkles size={14} />
+                {ai.mode === 'ai' ? <Sparkles size={14} /> : <Pencil size={13} />}
               </span>
-              <b className="text-[13px] text-slate-800 dark:text-slate-100">AI 生成团队规则</b>
+              <b className="text-[13px] text-slate-800 dark:text-slate-100">{ai.mode === 'ai' ? 'AI 生成团队规则' : '手动编写团队规则'}</b>
               {slotOf(ai.scope)?.exists && <span className="rounded bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 text-micro font-bold text-red-500">将替换该范围现有规则</span>}
             </div>
+            {/* 方式切换：AI 起草 / 自己的文本 */}
+            <div className="flex gap-1.5 px-4 pt-3">
+              {([
+                ['ai', '✨ AI 生成'],
+                ['manual', '✍️ 手动输入'],
+              ] as const).map(([m, label]) => (
+                <button
+                  key={m}
+                  onClick={() => setAi({ ...ai, mode: m })}
+                  className={`rounded-full border px-3 py-1.5 text-micro font-bold transition-colors ${
+                    ai.mode === m
+                      ? 'border-violet-400 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-violet-200 hover:text-violet-500'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {/* 环节选择：五个 harness 类型 */}
-            <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+            <div className="flex flex-wrap gap-1.5 px-4 pt-2.5">
               {SCOPES.map((s) => (
                 <button
                   key={s.key}
@@ -1031,25 +1060,39 @@ function HarnessSection({ about, onVersionChange }: { about: { backend: string; 
             <p className="px-4 pt-2 text-micro leading-4 text-slate-400 dark:text-slate-500">
               {SCOPES.find((s) => s.key === ai.scope)?.desc}——规则原文不在界面展示；与出厂规则冲突时以补充为准。
             </p>
-            <textarea
-              autoFocus
-              value={ai.description}
-              onChange={(e) => setAi({ ...ai, description: e.target.value })}
-              rows={5}
-              placeholder="例：我们团队做金融系统。所有数据库查询必须参数化；代码审查必须额外检查越权访问和敏感数据日志；方案文档必须包含性能影响与回滚方式两节……"
-              className="mx-4 mt-3 w-[calc(100%-2rem)] resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500/30"
-            />
+            {ai.mode === 'ai' ? (
+              <textarea
+                autoFocus
+                value={ai.description}
+                onChange={(e) => setAi({ ...ai, description: e.target.value })}
+                rows={5}
+                placeholder="例：我们团队做金融系统。所有数据库查询必须参数化；代码审查必须额外检查越权访问和敏感数据日志；方案文档必须包含性能影响与回滚方式两节……"
+                className="mx-4 mt-3 w-[calc(100%-2rem)] resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3 text-[12px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500/30"
+              />
+            ) : (
+              <textarea
+                autoFocus
+                value={ai.manual}
+                onChange={(e) => setAi({ ...ai, manual: e.target.value })}
+                rows={9}
+                placeholder={'直接粘贴或编写你的规则文本（Markdown），例如：\n1. 所有公开函数必须有文档注释。\n2. 代码审查必须检查 SQL 注入与越权访问。\n3. 方案文档必须包含「性能影响」与「回滚方式」两节。'}
+                className="mono mx-4 mt-3 w-[calc(100%-2rem)] resize-y rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3 text-[11.5px] leading-5 text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-violet-500/30"
+              />
+            )}
             <div className="flex items-center gap-2 px-4 py-3.5">
-              <span className="text-micro text-slate-300 dark:text-slate-600">将由已配置的 LLM 生成 · 生成即生效</span>
+              <span className="text-micro text-slate-300 dark:text-slate-600">
+                {ai.mode === 'ai' ? '将由已配置的 LLM 生成 · 生成即生效' : '保存即生效 · 仅追加为补充，不影响出厂规则'}
+              </span>
               <button onClick={() => setAi(null)} className="ml-auto rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700">
                 取消
               </button>
               <button
-                onClick={runAi}
-                disabled={ai.generating || !ai.description.trim()}
+                onClick={ai.mode === 'ai' ? runAi : saveManual}
+                disabled={ai.generating || (ai.mode === 'ai' ? !ai.description.trim() : !ai.manual.trim())}
                 className="flex items-center gap-1 rounded-md bg-gradient-to-br from-violet-500 to-indigo-500 px-3.5 py-1.5 text-micro font-bold text-white hover:from-violet-600 hover:to-indigo-600 disabled:opacity-40"
               >
-                {ai.generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} 生成并生效
+                {ai.generating ? <Loader2 size={11} className="animate-spin" /> : ai.mode === 'ai' ? <Sparkles size={11} /> : <Save size={11} />}
+                {ai.mode === 'ai' ? '生成并生效' : '保存并生效'}
               </button>
             </div>
           </div>
