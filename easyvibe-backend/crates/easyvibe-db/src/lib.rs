@@ -1383,7 +1383,7 @@ impl AgentSessionRepo {
     /// 总量统计（KPI 行）：cost/tokens 的 SUM 与「自报次数」分开——NULL 语义诚实降级
     pub async fn usage_totals(&self, repo: &str, since: &str) -> Result<UsageTotalsRow, ApiError> {
         let row = sqlx::query_as::<_, UsageTotalsSql>(
-            "SELECT COUNT(*) AS sessions,                 SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END) AS succeeded,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,                 SUM(CASE WHEN status='failed' THEN cost_usd ELSE 0 END) AS failed_cost,                 SUM(cost_usd) AS cost,                 SUM(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) AS reported,                 SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,                 SUM(cache_read_tokens) AS cache_read              FROM agent_sessions WHERE repo = ? AND started_at >= ?",
+            "SELECT COUNT(*) AS sessions,                 SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END) AS succeeded,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,                 CAST(SUM(CASE WHEN status='failed' THEN cost_usd ELSE 0 END) AS REAL) AS failed_cost,                 CAST(SUM(cost_usd) AS REAL) AS cost,                 SUM(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) AS reported,                 SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,                 SUM(cache_read_tokens) AS cache_read              FROM agent_sessions WHERE repo = ? AND started_at >= ?",
         )
         .bind(repo)
         .bind(since)
@@ -1409,7 +1409,7 @@ impl AgentSessionRepo {
     /// 按类型分布：会话数 + 花费（子 agent 的 kind 已折入 task/subagent-*，前端再按父类聚合）
     pub async fn usage_by_kind(&self, repo: &str, since: &str) -> Result<Vec<UsageGroupRow>, ApiError> {
         let rows = sqlx::query_as::<_, UsageGroupSql>(
-            "SELECT kind AS name, COUNT(*) AS sessions, SUM(cost_usd) AS cost              FROM agent_sessions WHERE repo = ? AND started_at >= ?              GROUP BY kind ORDER BY cost DESC",
+            "SELECT kind AS name, COUNT(*) AS sessions, CAST(SUM(cost_usd) AS REAL) AS value              FROM agent_sessions WHERE repo = ? AND started_at >= ?              GROUP BY kind ORDER BY value DESC",
         )
         .bind(repo)
         .bind(since)
@@ -1422,7 +1422,7 @@ impl AgentSessionRepo {
     /// 按模型分布：会话数 + tokens（真实模型名来自 system init 事件）
     pub async fn usage_by_model(&self, repo: &str, since: &str) -> Result<Vec<UsageGroupRow>, ApiError> {
         let rows = sqlx::query_as::<_, UsageGroupSql>(
-            "SELECT model AS name, COUNT(*) AS sessions,                 SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0)) AS tokens              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND model IS NOT NULL              GROUP BY model ORDER BY tokens DESC",
+            "SELECT model AS name, COUNT(*) AS sessions,                 CAST(SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0)) AS REAL) AS value              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND model IS NOT NULL              GROUP BY model ORDER BY value DESC",
         )
         .bind(repo)
         .bind(since)
@@ -1435,7 +1435,7 @@ impl AgentSessionRepo {
     /// L1 按模块归因：会话数 + 花费 + 失败数（治理账单；module_id 为 NULL 的会话不入此表）
     pub async fn usage_by_module(&self, repo: &str, since: &str) -> Result<Vec<UsageModuleRow>, ApiError> {
         let rows = sqlx::query_as::<_, UsageModuleSql>(
-            "SELECT module_id AS name, COUNT(*) AS sessions, SUM(cost_usd) AS cost,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND module_id IS NOT NULL              GROUP BY module_id ORDER BY cost DESC LIMIT 10",
+            "SELECT module_id AS name, COUNT(*) AS sessions, CAST(SUM(cost_usd) AS REAL) AS cost,                 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed              FROM agent_sessions WHERE repo = ? AND started_at >= ? AND module_id IS NOT NULL              GROUP BY module_id ORDER BY cost DESC LIMIT 10",
         )
         .bind(repo)
         .bind(since)
@@ -1605,6 +1605,35 @@ mod tests {
         assert!(stub.cost_usd.is_none());
         // 跨仓库隔离
         assert!(repo.list("other", 10).await.unwrap().is_empty());
+    }
+
+    // 2026-10-05 实弹回归（用量页转圈）：无失败会话时 failed_cost 的 CASE-ELSE 0 使 SUM 返回
+    // INTEGER，sqlx 按 f64 解码直接 500——所有 f64 聚合列必须 CAST AS REAL 兜底。
+    #[tokio::test]
+    async fn usage_aggregates_cast_real_when_no_failed_sessions() {
+        let db = Database::connect_memory().await.unwrap();
+        let repo = AgentSessionRepo::new(db.pool().clone());
+        // 只有成功会话（无 failed 行）——failed_cost 的 SUM 全是整数 0
+        repo.upsert_started("s-ok", "demo", "claude", "2026-10-05T06:00:00Z").await.unwrap();
+        repo.set_usage("s-ok", 1000, 500, 0, 0, 0.01, 1500, 1).await.unwrap();
+        repo.finalize("s-ok", "demo", "succeeded", "2026-10-05T06:01:00Z", Some(0), None, "task").await.unwrap();
+        // 完全空的仓库（SUM 全 NULL）
+        let totals = repo.usage_totals("demo", "2026-01-01T00:00:00Z").await.unwrap();
+        assert_eq!(totals.sessions, 1);
+        assert_eq!(totals.failed_cost, Some(0.0), "无失败会话时 failed_cost 应为 0.0 而非解码错误");
+        assert_eq!(totals.cost.map(|c| (c * 100.0).round()), Some(1.0));
+        let empty = repo.usage_totals("empty", "2026-01-01T00:00:00Z").await.unwrap();
+        assert_eq!(empty.sessions, 0);
+        assert_eq!(empty.cost, None);
+        // by_kind / by_model / by_module 的 REAL 列同理（tokens 聚合也是整数路径）
+        repo.upsert_started("s-ok2", "demo", "claude", "2026-10-05T07:00:00Z").await.unwrap();
+        repo.set_model("s-ok2", "claude-sonnet-4-6").await.unwrap();
+        repo.set_usage("s-ok2", 2000, 1000, 0, 0, 0.02, 3000, 1).await.unwrap();
+        repo.finalize("s-ok2", "demo", "succeeded", "2026-10-05T07:01:00Z", Some(0), None, "induce").await.unwrap();
+        let kinds = repo.usage_by_kind("demo", "2026-01-01T00:00:00Z").await.unwrap();
+        assert!(kinds.iter().any(|k| k.name == "task" && k.value.map(|v| (v * 100.0).round()) == Some(1.0)));
+        let models = repo.usage_by_model("demo", "2026-01-01T00:00:00Z").await.unwrap();
+        assert!(models.iter().any(|m| m.name == "claude-sonnet-4-6" && m.value == Some(3000.0)));
     }
 
     fn now() -> String {
