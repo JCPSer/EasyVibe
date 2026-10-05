@@ -1,0 +1,519 @@
+//! 资源域：地图/子图/成长/保鲜/进度/归纳/巡检 + 队列宿主实现。
+
+use crate::state::*;
+use axum::{
+    extract::{Path, State},
+    response::{IntoResponse, Response},
+    Json,
+};
+use easyvibe_api_types::SessionStatusChanged;
+use easyvibe_common::ApiError;
+use easyvibe_event_bus::queue::{JobKind, QueueHost, QueuedJob};
+use easyvibe_event_bus::{publish, BusEvent};
+use easyvibe_ai_agent::agent_conf;
+use tracing::info;
+use crate::assets::resolve_text_asset;
+use crate::freshness;
+
+pub(crate) async fn get_map(State(st): State<AppState>, Path(id): Path<String>, headers: axum::http::HeaderMap) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    // Y1 清债：ETag 条件请求——内容哈希已有，浏览器重连重同步时 If-None-Match 命中即 304
+    // （body 不传输；前端零改动，浏览器 HTTP 缓存自动处理）
+    let etag = format!("\"{}\"", snap.content_hash);
+    if headers.get("if-none-match").and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+        let mut resp = axum::http::Response::new(axum::body::Body::empty());
+        *resp.status_mut() = axum::http::StatusCode::NOT_MODIFIED;
+        resp.headers_mut().insert("etag", etag.parse().unwrap());
+        return Ok(resp.into_response());
+    }
+    let mut resp = Json(snap.json).into_response();
+    resp.headers_mut().insert("etag", etag.parse().unwrap());
+    resp.headers_mut().insert("cache-control", "private, must-revalidate".parse().unwrap());
+    Ok(resp)
+}
+
+pub(crate) async fn get_growth(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    // 原样返回 growth.log 事件数组（与文件行一致，前端状态机统一消费）
+    Ok(Json(st.map_service.load_growth(&repo).await?).into_response())
+}
+
+pub(crate) async fn get_submap(
+    State(st): State<AppState>,
+    Path((id, module_id)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    // 路径遍历防线：module_id 必须满足 Schema 的 id 字符集（审查 🔴1）
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    Ok(Json(st.map_service.load_submap(&repo, &module_id).await?).into_response())
+}
+
+/// S2：地图保鲜状态（§13.4——stale 地图上的对话/建议/健康分全是假数据自信工作）
+pub(crate) async fn get_freshness(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let f = freshness::assess(&repo.root, &snap.json);
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "status": f.status.as_str(),
+            "mapGeneratedAt": f.map_generated_at,
+            "latestCommitAt": f.latest_commit_at,
+            "commitsSinceMap": f.commits_since_map,
+        }
+    }))
+    .into_response())
+}
+
+/// S2：模块健康历史（趋势图数据面；module_health_history 自 M2-4 落库以来的第一个消费者）
+pub(crate) async fn get_health_history(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
+    st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    use easyvibe_db::HealthRepository as _;
+    let rows = st.health_repo.list_module_history(&id, &module_id, 20).await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": rows })).into_response())
+}
+
+/// 归纳完成超时防线（实弹#4：FENJUE 首归纳产物/进度俱齐，但 CLI 不收尾、会话恒 Running，
+/// 前端"归纳中"假卡住）：progress.json phase=done 且文件落盘超过 grace 秒 → 判 agent 已交付。
+/// 用文件 mtime（系统时间基准）而非 progress.updated_at（RFC3339 带时区，秒级判定会被时区坑）。
+pub(crate) fn progress_done_ago_secs(repo_root: &std::path::Path) -> Option<u64> {
+    let path = repo_root.join(".easyvibe/map/progress.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if v["phase"].as_str() != Some("done") {
+        return None;
+    }
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
+}
+
+/// 2026-10-04 实弹修复：收尸的"进度 100%"必须出自本次会话——旧 progress.json
+/// （上一次归纳留下的 done + 旧 mtime）会让新会话秒被杀（用户点"立即归纳"3 秒复活）。
+/// 只有 mtime 晚于会话启动时间，才承认这个 done 是本会话产物。
+pub(crate) fn progress_done_ago_secs_since(repo_root: &std::path::Path, since: std::time::SystemTime) -> Option<u64> {
+    let path = repo_root.join(".easyvibe/map/progress.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if v["phase"].as_str() != Some("done") {
+        return None;
+    }
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    if modified < since {
+        return None;
+    }
+    Some(std::time::SystemTime::now().duration_since(modified).ok()?.as_secs())
+}
+
+/// S2.5：归纳进度（progress.json 透传——首归纳等待页显示真实阶段/百分比，
+/// 不再只转圈；文件缺失（如巡检场景无 progress）返回 done 形状，前端不渲染进度）
+pub(crate) async fn get_progress(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let path = repo.root.join(".easyvibe/map/progress.json");
+    if !path.exists() {
+        return Ok(Json(serde_json::json!({ "success": true, "data": null })).into_response());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| ApiError::Internal(format!("progress 读取失败: {e}")))?;
+    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("progress 解析失败: {e}")))?;
+    Ok(Json(serde_json::json!({ "success": true, "data": v })).into_response())
+}
+
+/// 子图深入分析（试用反馈"子图加载失败"根因修复——v2.2 归纳不产子图，文件无人生产；
+/// 此处把缺口变为能力：透明 agent 扫描模块文件产出子图，落盘 .easyvibe/modules/<id>.json，
+/// 与归纳共用写互斥/会话机制。读时拉取无需 watcher，产出后重新展开即见）
+pub(crate) async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
+    analyze_submap_inner(st, id, module_id).await
+}
+
+/// 子图分析执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）
+pub(crate) async fn analyze_submap_inner(st: AppState, id: String, module_id: String) -> Result<Response, AppError> {
+    if !easyvibe_map::is_valid_id(&module_id) {
+        return Err(ApiError::BadRequest(format!("非法模块 id: {module_id}")).into());
+    }
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let snap = st.map_service.load_map(&repo).await?;
+    let module = snap.json["modules"]
+        .as_array()
+        .and_then(|ms| ms.iter().find(|m| m["id"].as_str() == Some(module_id.as_str())).cloned())
+        .ok_or_else(|| ApiError::NotFound(format!("模块 {module_id} 不在主地图中")))?;
+    // 子图提示词每次请求重读（产品内置协议迭代快——避免"改了提示词要重启后端"的叠加
+    // （本次实弹：路径修正后的提示词因后端未重启而仍用旧版，DeskWar 两次分析空跑）。
+    // 读取失败回退启动时装载的副本，绝不阻断
+    let (template, _) = resolve_text_asset(
+        "EASYVIBE_SUBMAP_PROMPT_PATH",
+        "easyvibe-module-submap-prompt.md",
+        &st.submap_prompt,
+        false,
+    );
+    ensure_agent_available(&st)?;
+    let prompt = template
+        .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
+        .replace("<MODULE_ID>", &module_id)
+        .replace("<MODULE_JSON>", &serde_json::to_string(&module).unwrap_or_default());
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+    let session = st
+        .session_manager
+        .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
+        .await?;
+    // I1：气泡标签「分析模块 {name}」（name 缺失降级为 id）
+    let module_name = module["name"].as_str().unwrap_or(&module_id).to_string();
+    st.session_manager.note_label(&session.session_id, format!("分析模块 {module_name}")).await;
+    // L1 归因：子图会话直接归属模块（任务会话在 task_exec 经 tasks.modules 反查）
+    if let Err(err) = st.agent_session_repo.set_module_id(&session.session_id, &module_id).await {
+        tracing::warn!("[agent_sessions] 子图归因失败 {}: {err}", session.session_id);
+    }
+    info!("[submap] 模块 {} 子图分析会话 {} 已启动", module_id, session.session_id);
+    Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
+}
+
+/// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
+/// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
+pub(crate) async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    start_reinduce_inner(st, id).await
+}
+
+/// 重新归纳执行体（HTTP handler 与队列 drain 共用——§4.1：避免行为漂移）
+pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    ensure_agent_available(&st)?;
+    // 实弹验证发现：agent 可能"成功退出但什么都没写"（如模型能力不足只输出分析），
+    // 因此记录会话前的地图哈希，终态后比对——未变化则告警（会话仍算成功：重归纳产出相同内容合法）。
+    let hash_before = st.map_service.load_map(&repo).await.ok().map(|s| s.content_hash);
+    let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+    let session = st
+        .session_manager
+        .start_induction(&repo.id, &repo.root, &st.prompt_template, &resolved.command, &resolved.args, None)
+        .await?;
+    // I1：气泡标签「归纳」
+    st.session_manager.note_label(&session.session_id, "归纳".into()).await;
+
+    // 终态后产物核验
+    // R3 P0-2：必须按「自己 spawn 的会话」轮询（status_of_session），不能用仓库级 status_of——
+    // 归纳终态后 2s 窗内新起的巡检/重归纳会话会被本循环误读，grace 收尸会把别的会话误判 Succeeded
+    let st2 = st.clone();
+    let repo2 = repo.clone();
+    let session_id = session.session_id.clone();
+    let started = std::time::SystemTime::now(); // 收尸防线的时间锚：只认本会话写出的 100%（2026-10-04 实弹）
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            match st2.session_manager.status_of_session(&session_id).await {
+                Some(s) if !matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) => {
+                    if let Some(before) = hash_before {
+                        if let Ok(snap) = st2.map_service.load_map(&repo2).await {
+                            if snap.content_hash == before {
+                                tracing::warn!(
+                                    "[reinduce] 会话 {} 终态 {:?} 但 map.json 未变化——agent 可能未执行归纳（模型能力/提示词遵从？）",
+                                    s.session_id, s.status
+                                );
+                            }
+                        }
+                    }
+                    break;
+                }
+                // 实弹#4 防线：进度 100% 落盘超过 90s 但会话仍 Running（agent 已交付未自行退出）
+                // → 按成功收尸解除"归纳中"假卡住。产物合法性由 watcher 校验保证（不出残图）。
+                // 重审 P1 修订：收尸必须连进程一起杀（grace_finish）——此前只记终态不杀，
+                // 已交付但不退出的 claude 成为无法击杀的僵尸（kill 对已终态会话返回 409），
+                // 只能等自然退出或后端退出（kill_on_drop）才释放。
+                Some(s) => {
+                    const GRACE_SECS: u64 = 90;
+                    if let Some(ago) = progress_done_ago_secs_since(&repo2.root, started) {
+                        if ago > GRACE_SECS {
+                            tracing::warn!(
+                                "[reinduce] 进度 100% 已落盘 {}s 但会话仍未退出——按成功收尸并终止进程（agent 未自行退出，实弹#4 + 重审 P1）",
+                                ago
+                            );
+                            let _ = st2.session_manager.grace_finish(&s.session_id).await;
+                            break;
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    });
+
+    Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
+}
+
+/// 触发巡检（M2-4，实弹 #2 修订）：两条执行路径——
+/// - Stub 模式：ai-agent PatrolService 零成本确定性巡检（测试/demo）
+/// - 真实模式：**session spawn**（与归纳同路径）。实弹发现直调无 tools 声明的 API
+///   只会得到模型的 tool_call 幻觉（DSML 伪调用），真实巡检需要 Bash 核查
+///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
+/// 问题项快照条目（2026-10-05 巡检新旧对照的旧侧）
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OldConcern {
+    pub(crate) scope: &'static str, // "arch" | "module"
+    pub(crate) module: Option<String>,
+    pub(crate) id: Option<String>,
+    pub(crate) finding: String,
+}
+
+/// 从地图 JSON 提取全部 concerns（架构级 + 各模块级）——巡检开始前快照用。
+pub(crate) fn extract_concerns(map: &serde_json::Value) -> Vec<OldConcern> {
+    let mut out = Vec::new();
+    let mut push = |scope: &'static str, module: Option<String>, c: &serde_json::Value| {
+        out.push(OldConcern {
+            scope,
+            module,
+            id: c["id"].as_str().map(Into::into),
+            finding: c["finding"].as_str().unwrap_or_default().into(),
+        });
+    };
+    for c in map["health"]["concerns"].as_array().into_iter().flatten() {
+        push("arch", None, c);
+    }
+    for m in map["modules"].as_array().into_iter().flatten() {
+        let mid = m["id"].as_str().map(Into::into);
+        for c in m["health"]["concerns"].as_array().into_iter().flatten() {
+            push("module", mid.clone(), c);
+        }
+    }
+    out
+}
+
+/// 巡检新旧对照（纯函数；测试全覆盖）：
+/// 两阶段匹配（评审#S3）——先 (scope, module, id) 精确匹配（双侧都有 id），
+/// 剩余项按 (scope, module, finding) 文本精确匹配兜底（旧图无 id 的过渡期数据）；
+/// 仍孤立的旧项计 fixed——但其模块已从新图消失的计 moduleGone（评审#S3：模块没了 ≠ 修好了）。
+pub(crate) fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> serde_json::Value {
+    let new = extract_concerns(new_map);
+    let mut used_new = vec![false; new.len()];
+    let mut used_old = vec![false; old.len()];
+
+    // 阶段 1：id 精确匹配（双侧都有 id 才有锚点意义）
+    for (oi, o) in old.iter().enumerate() {
+        let Some(oid) = &o.id else { continue };
+        for (ni, n) in new.iter().enumerate() {
+            if used_new[ni] || n.id.as_deref() != Some(oid.as_str()) {
+                continue;
+            }
+            if o.scope == n.scope && o.module == n.module {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                break;
+            }
+        }
+    }
+    // 阶段 2：finding 文本精确匹配兜底（只作用于两侧剩余项；新侧不限制 id——
+    // LLM 会给继承来的旧问题也分配新 id，但旧侧无 id 时文本是唯一锚点）
+    for (oi, o) in old.iter().enumerate() {
+        if used_old[oi] || o.id.is_some() {
+            continue;
+        }
+        for (ni, n) in new.iter().enumerate() {
+            if used_new[ni] || n.finding != o.finding {
+                continue;
+            }
+            if o.scope == n.scope && o.module == n.module {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                break;
+            }
+        }
+    }
+
+    let alive_modules: std::collections::HashSet<&str> = new_map["modules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    let item = |c: &OldConcern| serde_json::json!({ "id": c.id, "finding": c.finding });
+    let mut fixed = Vec::new();
+    let mut module_gone = Vec::new();
+    for (oi, o) in old.iter().enumerate() {
+        if used_old[oi] {
+            continue;
+        }
+        match o.scope {
+            "module" if o.module.as_deref().is_some_and(|m| !alive_modules.contains(m)) => {
+                module_gone.push(serde_json::json!({ "module": o.module, "finding": o.finding }));
+            }
+            _ => fixed.push(item(o)),
+        }
+    }
+    let fresh: Vec<_> = new.iter().zip(used_new.iter()).filter(|(_, u)| !**u).map(|(n, _)| item(n)).collect();
+    serde_json::json!({
+        "fixed": fixed,
+        "new": fresh,
+        "persisted": used_old.iter().filter(|b| **b).count(),
+        "moduleGone": module_gone,
+    })
+}
+
+/// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
+pub(crate) async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
+    start_patrol_inner(st, id).await
+}
+
+/// 巡检执行体（HTTP handler、队列 drain 与定时自动巡检共用——§4.1：避免行为漂移）
+pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Response, AppError> {
+    let repo = st.map_service.find_repo(&id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    if *st.llm_mode == LlmMode::Anthropic {
+        ensure_agent_available(&st)?;
+    }
+    let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+
+    match *st.llm_mode {
+        LlmMode::Stub => {
+            st.session_manager
+                .try_register(SessionStatusChanged { repo: repo.id.clone(), session_id: run_id.clone(), status: easyvibe_api_types::SessionStatus::Running })
+                .await?;
+            // I1：气泡标签「巡检」
+            st.session_manager.note_label(&run_id, "巡检".into()).await;
+            let snap = match st.map_service.load_map(&repo).await {
+                Ok(s) => s,
+                Err(e) => {
+                    st.session_manager.note_status(SessionStatusChanged { repo: repo.id.clone(), session_id: run_id.clone(), status: easyvibe_api_types::SessionStatus::Failed }).await;
+                    return Err(e.into());
+                }
+            };
+            let st2 = st.clone();
+            let repo2 = repo.clone();
+            let run_id_task = run_id.clone();
+            tokio::spawn(async move {
+                let llm = easyvibe_ai_agent::StubLlmClient::new();
+                let result = st2
+                    .patrol_service
+                    .run(Some(run_id_task.clone()), &repo2.id, &repo2.root, &snap.json, &st2.patrol_prompt, &st2.schema_path, &llm)
+                    .await;
+                let status = match &result {
+                    Ok(_) => easyvibe_api_types::SessionStatus::Succeeded,
+                    Err(_) => easyvibe_api_types::SessionStatus::Failed,
+                };
+                st2.session_manager.note_status(SessionStatusChanged { repo: repo2.id.clone(), session_id: run_id_task.clone(), status }).await;
+                // R3 C1：巡检终态广播——前端解除"巡检中"并刷新健康看板
+                publish(&st2.event_bus, BusEvent::PatrolFinished {
+                    repo: repo2.id,
+                    run_id: run_id_task,
+                    status: format!("{:?}", status).to_lowercase(),
+                });
+                if let Err(e) = result {
+                    tracing::warn!("[patrol] 失败: {e}");
+                }
+            });
+            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "runId": run_id, "mode": "stub" }))).into_response())
+        }
+        LlmMode::Anthropic => {
+            // 2026-10-05 问题项新旧对照：spawn 前快照上轮 concerns（必须在 start_induction 之前——
+            // 窗口期内 agent 完成原子写回后快照会拿到新图，对照全错；评审#S1/S6）。
+            // 读失败降级为空快照（等同首巡语义），不得阻断巡检启动。
+            let snap = st.map_service.load_map(&repo).await.ok();
+            let old_concerns = snap.as_ref().map(|s| extract_concerns(&s.json)).unwrap_or_default();
+            // 评审#S4：占位符在 agent 路径原样传入（会话层只替换 <REPO_ROOT>）——
+            // 此处预渲染 <CURRENT_MAP>（顺带解决上轮地图不可见的 id 继承依据）与 <SCHEMA_PATH>。
+            let prompt = match snap.as_ref().and_then(|s| serde_json::to_string(&s.json).ok()) {
+                Some(map_json) if map_json.len() < 512 * 1024 => st
+                    .patrol_prompt
+                    .replace("<CURRENT_MAP>", &map_json)
+                    .replace("<SCHEMA_PATH>", &st.schema_path),
+                _ => st.patrol_prompt.to_string(),
+            };
+            // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
+            let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+            let session = st
+                .session_manager
+                .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
+                .await?;
+            // I1：气泡标签「巡检」
+            st.session_manager.note_label(&session.session_id, "巡检".into()).await;
+            // 终态后：解析产物地图，健康历史落域 2（succeeded 但产物缺 health 也算失败记录）
+            // run_id 用时间戳独立生成，不复用 session_id——会话计数器在后端重启后归零，
+            // 会与历史 patrol_runs 行主键碰撞导致落库失败（实弹：UNIQUE constraint failed）
+            let st2 = st.clone();
+            let repo2 = repo.clone();
+            // R3 P0-2：同 reinduce——按自己 spawn 的会话轮询，不用仓库级 status_of（多会话交错会把
+            // 别的会话终态写进健康历史，归错 run）
+            let session_id = session.session_id.clone();
+            let run_id = format!("patrol-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            let run_id_task = run_id.clone();
+            let model = st.agent_command.to_string();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let Some(s) = st2.session_manager.status_of_session(&session_id).await else { continue };
+                    if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) { continue }
+                    let succeeded = s.status == easyvibe_api_types::SessionStatus::Succeeded;
+                    let result = async {
+                        let snap = st2.map_service.load_map(&repo2).await?;
+                        // 仅 succeeded 写对照（评审#Q1：失败时读到的可能是未写回旧图，存了反而误导）
+                        let diff = if succeeded {
+                            Some(diff_concerns(&old_concerns, &snap.json).to_string())
+                        } else {
+                            None
+                        };
+                        st2.patrol_service
+                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, succeeded, None, diff)
+                            .await
+                    }
+                    .await;
+                    if let Err(e) = result {
+                        tracing::warn!("[patrol] 健康历史落库失败: {e}");
+                    }
+                    // R3 C1：巡检终态广播（健康历史已落库）——前端解除"巡检中"并刷新看板
+                    publish(&st2.event_bus, BusEvent::PatrolFinished {
+                        repo: repo2.id.clone(),
+                        run_id: run_id_task.clone(),
+                        status: format!("{:?}", s.status).to_lowercase(),
+                    });
+                    break;
+                }
+            });
+            Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "sessionId": session.session_id, "runId": run_id, "mode": "agent" }))).into_response())
+        }
+    }
+}
+
+/// CLI agent 可执行预检：spawn 路径的鉴权由 claude 自身配置（~/.claude/settings.json 的 env
+/// 或进程环境变量）负责，与本进程的 EASYVIBE_LLM_API_KEY 无关——旧守卫把"DB 已配 key"
+/// 的合法场景误判为未配置（chat 直调走 DB，patrol/reinduce 走 CLI spawn，两条链路配置源不同）。
+pub(crate) fn ensure_agent_available(st: &AppState) -> Result<(), ApiError> {
+    let cmd = &*st.agent_command;
+    let name = cmd.rsplit('/').next().unwrap_or(cmd);
+    let on_path = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
+        .unwrap_or(false);
+    if !on_path && !std::path::Path::new(cmd).is_file() {
+        return Err(ApiError::BadRequest(format!("未找到 CLI agent `{cmd}`——请先安装并加入 PATH")));
+    }
+    Ok(())
+}
+
+/// 解环适配：server-api 侧实现队列宿主契约，向 event-bus 状态机注入
+/// 「发事件 / 查活动会话 / 执行任务」三项能力。执行入口回指 start_*_inner
+/// 属正向的 server-api → task-engine/自身逻辑，不构成 task-engine → server-api 反向边。
+#[async_trait::async_trait]
+impl QueueHost for AppState {
+    fn publish_event(&self, ev: BusEvent) {
+        publish(&self.event_bus, ev);
+    }
+
+    async fn has_active_session(&self, repo: &str) -> bool {
+        matches!(
+            self.session_manager.status_of(repo).await,
+            Some(s) if matches!(
+                s.status,
+                easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running
+            )
+        )
+    }
+
+    async fn run_job(&self, repo: &str, job: &QueuedJob) -> Result<(), ApiError> {
+        match job.kind {
+            JobKind::Patrol => start_patrol_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
+            JobKind::Reinduce => start_reinduce_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
+            JobKind::Submap => {
+                let module_id = job.module_id.clone().unwrap_or_default();
+                analyze_submap_inner(self.clone(), repo.to_string(), module_id).await.map(|_| ()).map_err(|e| e.0)
+            }
+        }
+    }
+}

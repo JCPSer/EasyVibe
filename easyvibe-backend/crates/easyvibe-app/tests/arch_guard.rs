@@ -7,8 +7,24 @@
 
 use std::path::PathBuf;
 
-/// task-engine 模块文件集合（与 scan_easyvibe.py 的 MODS['task-engine'] 保持一致）
-const TASK_ENGINE_FILES: &[&str] = &["src/task_exec.rs"];
+/// task-engine 模块文件集合（与 scan_easyvibe.py 的 MODS['task-engine'] 保持一致）：
+/// 主文件 + task_exec/ 子模块（拆分为 prompt/review/harness/changes/contract 后必须全覆盖，
+/// 否则子模块里的 crate:: 反向引用会被漏报）。
+fn task_engine_files() -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut v = vec!["src/task_exec.rs".to_string()];
+    let dir = root.join("src/task_exec");
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                v.push(format!("src/task_exec/{}", p.file_name().unwrap().to_string_lossy()));
+            }
+        }
+    }
+    v.sort();
+    v
+}
 
 /// 逆向引用禁止子串（server-api / 同 crate 应用层符号）
 const FORBIDDEN: &[&str] = &[
@@ -25,7 +41,8 @@ const FORBIDDEN: &[&str] = &[
 #[test]
 fn task_engine_has_no_reverse_crate_refs() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for f in TASK_ENGINE_FILES {
+    for f in task_engine_files() {
+        let f = f.as_str();
         let path = root.join(f);
         let txt = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读取 {f} 失败: {e}"));
         for bad in FORBIDDEN {
