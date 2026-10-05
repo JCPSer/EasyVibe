@@ -30,10 +30,14 @@ describe('kindFromLabel（active 无 kind 字段，从 label 推导图标类型�
   it('分析模块 X → submap', () => {
     expect(kindFromLabel('分析模块 数据访问')).toBe('submap')
   })
-  it('归纳/重新归纳/未知 → reinduce（Sparkles 兜底）', () => {
+  it('归纳/重新归纳 → reinduce', () => {
     expect(kindFromLabel('归纳')).toBe('reinduce')
     expect(kindFromLabel('重新归纳')).toBe('reinduce')
-    expect(kindFromLabel('会话 ind-3')).toBe('reinduce')
+  })
+  it('未知 label（任务执行/降级 id）→ null 由调用方兜底（2026-10-06 实弹：误判 reinduce 会触发过场罩层）', () => {
+    expect(kindFromLabel('任务执行')).toBeNull()
+    expect(kindFromLabel('任务执行·审查')).toBeNull()
+    expect(kindFromLabel('会话 ind-3')).toBeNull()
   })
 })
 

@@ -26,11 +26,14 @@ export function formatElapsed(ms: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`
 }
 
-/** 活动会话图标类型推断：契约里 active 无 kind 字段（只有 queued 带），从 label 文本推导 */
-export function kindFromLabel(label: string): SessionQueueKind {
+/** 活动会话图标类型推断：契约里 active 无 kind 字段（只有 queued 带），从 label 文本推导。
+ *  未知 label（任务执行/审查/初审等）返回 null 由调用方兜底——不能兜底成 reinduce：
+ *  2026-10-06 实弹，任务会话被 kindFromLabel 误判为归纳，地图过场罩层无辜压暗一整轮任务 */
+export function kindFromLabel(label: string): SessionQueueKind | null {
   if (label.includes('巡检')) return 'patrol'
   if (label.includes('分析')) return 'submap'
-  return 'reinduce'
+  if (label.includes('归纳')) return 'reinduce'
+  return null
 }
 
 /** 空态判定（纯函数）：无活动且无排队 → 不渲染 */

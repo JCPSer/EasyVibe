@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
+import { Activity, Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
 import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/runtime/growthBus'
 import { toast } from '@/runtime/toast'
 import { absTime, toMs } from '@/shared/logic/diffStat'
@@ -119,7 +119,8 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
   // eslint-disable-next-line react-hooks/purity -- 时长必须在渲染时读真实时钟：定时器被 webview 节流时状态快照会过期导致"从0重计"（2026-10-04 实弹修复，见 git log）
   const now = Date.now()
   const elapsed = primaryStartedMs !== null ? formatElapsed(now - primaryStartedMs) : null
-  const Icon = kind === 'patrol' ? HeartPulse : kind === 'submap' ? Search : Sparkles
+  // 任务执行/审查等未知 label（kindFromLabel 返回 null）→ Activity 图标
+  const Icon = kind === 'patrol' ? HeartPulse : kind === 'submap' ? Search : kind === 'reinduce' ? Sparkles : Activity
 
   const kill = (a: OverviewActive) => {
     if (!window.confirm(`确定取消「${a.label}」（${a.repo}）？该操作不可撤销。`)) return

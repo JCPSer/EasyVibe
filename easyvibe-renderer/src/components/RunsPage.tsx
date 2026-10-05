@@ -374,7 +374,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
                     >
                       <div className="flex items-center gap-2">
                         {(() => {
-                          const Icon = kindIcon(kindFromLabel(a.label))
+                          const Icon = kindIcon(kindFromLabel(a.label) ?? 'task')
                           return <Icon size={13} className="shrink-0 text-blue-500" />
                         })()}
                         <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{a.label}</span>
