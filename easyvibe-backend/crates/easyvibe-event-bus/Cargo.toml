@@ -1,0 +1,14 @@
+[package]
+name = "easyvibe-event-bus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+easyvibe-common.workspace = true
+easyvibe-api-types.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -12,6 +12,11 @@ use tracing::{info, warn};
 
 pub mod compaction;
 
+/// 执行 agent 配置体系（预设表 + settings 优先解析链 + 并行探测）。
+/// 原位于 easyvibe-app，自 2026-10-05 解环迁移至此：server-api 与 task-engine
+/// 各自单向依赖本模块，消除 task-engine → server-api 的反向引用。
+pub mod agent_conf;
+
 // ---------- LLM 客户端（trait：Anthropic 兼容实现 + Stub 实现） ----------
 
 pub struct ChatRequest<'a> {

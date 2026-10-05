@@ -7,8 +7,11 @@ use axum::{
 };
 use easyvibe_api_types::{HealthResponse, MapChanged, MapInvalid, RepoInfo, SessionStatusChanged, WsMessage};
 use easyvibe_common::{events as ev, ApiError, ApiResponse, ErrorResponse};
+use easyvibe_event_bus::queue::{JobKind, QueueHost, QueueState, QueuedJob};
+use easyvibe_event_bus::{publish, BusEvent};
 use easyvibe_map::{repo_from_root, spawn_map_watcher, MapService};
 use easyvibe_session::SessionManager;
+use easyvibe_ai_agent::agent_conf;
 use easyvibe_ai_agent::{QaClient as _, SuggestClient as _};
 use serde_json::Value;
 use std::sync::Arc;
@@ -114,8 +117,40 @@ pub struct AppState {
     /// M1：测试连接串行化（连点/并发测试互相踩结果）
     pub agent_test_lock: Arc<tokio::sync::Mutex<()>>,
     /// 运行会话排队（需求 v1 §4.1）：key=repo_id 的单槽队列；内存态，重启即失
-    /// （S4：重启后首帧 GET 自然清态，无需额外机制）
-    pub session_queue: session_queue::SessionQueue,
+    /// （S4：重启后首帧 GET 自然清态，无需额外机制）。队列状态机在 easyvibe-event-bus，
+    /// 执行入口经 `impl QueueHost for AppState` 回调注入（解环：不再 crate:: 反向引用）。
+    pub session_queue: Arc<QueueState>,
+}
+
+/// 解环适配：server-api 侧实现队列宿主契约，向 event-bus 状态机注入
+/// 「发事件 / 查活动会话 / 执行任务」三项能力。执行入口回指 start_*_inner
+/// 属正向的 server-api → task-engine/自身逻辑，不构成 task-engine → server-api 反向边。
+#[async_trait::async_trait]
+impl QueueHost for AppState {
+    fn publish_event(&self, ev: BusEvent) {
+        publish(&self.event_bus, ev);
+    }
+
+    async fn has_active_session(&self, repo: &str) -> bool {
+        matches!(
+            self.session_manager.status_of(repo).await,
+            Some(s) if matches!(
+                s.status,
+                easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running
+            )
+        )
+    }
+
+    async fn run_job(&self, repo: &str, job: &QueuedJob) -> Result<(), ApiError> {
+        match job.kind {
+            JobKind::Patrol => start_patrol_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
+            JobKind::Reinduce => start_reinduce_inner(self.clone(), repo.to_string()).await.map(|_| ()).map_err(|e| e.0),
+            JobKind::Submap => {
+                let module_id = job.module_id.clone().unwrap_or_default();
+                analyze_submap_inner(self.clone(), repo.to_string(), module_id).await.map(|_| ()).map_err(|e| e.0)
+            }
+        }
+    }
 }
 
 /// LLM 客户端来源：stub（零成本验证）或 anthropic（真实 API）
@@ -123,44 +158,6 @@ pub struct AppState {
 pub enum LlmMode {
     Stub,
     Anthropic,
-}
-
-/// 总线事件（内部枚举，发送时翻译为 WsMessage）
-#[derive(Debug, Clone)]
-pub enum BusEvent {
-    MapChanged(MapChanged),
-    MapInvalid(MapInvalid),
-    Growth { repo: String, event: Value },
-    Progress { repo: String, progress: Value },
-    SessionStatus(SessionStatusChanged),
-    TaskStatus { repo: String, task_id: String, status: String, gate: Option<String> },
-    /// R2 裂缝#3：影响面合约越界（auto/supervised 无审批关，必须主动送达）
-    TaskContractViolated { repo: String, task_id: String, files: Vec<String> },
-    /// L2 过程预警：任务执行中哨兵巡检到的新增越界（预警 ≠ 终态红线判定）
-    TaskContractAlert { repo: String, task_id: String, files: Vec<String> },
-    /// S2：地图保鲜状态变化（git 有新提交而地图未更新——下游对话/建议/健康分全是假数据自信工作）
-    Freshness { repo: String, status: String, latest_commit_at: Option<i64>, commits_since_map: Option<i64> },
-    /// 改进#2：agent 过程直播——会话 stdout 行（子图分析/任务执行中的"它在干嘛"）
-    SessionOutput { session_id: String, seq: u64, stream: String, line: String },
-    /// R3 C1：巡检终态（健康历史落库后广播）——前端据此解除"巡检中"、刷新看板，
-    /// 让"体检报告出来了"成为产品事件而不是用户刷新的猜测
-    PatrolFinished { repo: String, run_id: String, status: String },
-    /// 需求 v1 §5/§8：会话队列变更（入队/替换/取消/排空/重入队/失败）——气泡即时刷新
-    QueueChanged { repo: String, change: session_queue::QueueChange },
-}
-
-/// R3 C3：统一事件出口。broadcast 的 send 仅在"零订阅者"时失败（缓冲满不报错，而是 recv 端
-/// Lagged——ws_handler 已记 warn）；关键事件（合约红线/预警）在此留痕，送达承诺必须可观测
-pub(crate) fn publish(bus: &broadcast::Sender<BusEvent>, event: BusEvent) {
-    let critical = matches!(
-        event,
-        BusEvent::TaskContractViolated { .. } | BusEvent::TaskContractAlert { .. }
-    );
-    if let Err(e) = bus.send(event) {
-        if critical {
-            tracing::warn!("[bus] 关键事件无订阅者被丢弃（红线送达承诺依赖可观测性）: {:?}", e.0);
-        }
-    }
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -180,14 +177,14 @@ pub fn build_router(state: AppState) -> Router {
         // 运行会话排队（需求 v1 §5/§8：GET 查 active+queued；POST 原子裁决入队/代执行；DELETE 取消）
         .route(
             "/repos/{id}/session-queue",
-            get(session_queue::get_session_queue)
-                .post(session_queue::post_session_queue)
-                .delete(session_queue::delete_session_queue),
+            get(session_queue_routes::get_session_queue)
+                .post(session_queue_routes::post_session_queue)
+                .delete(session_queue_routes::delete_session_queue),
         )
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
         // 全局运行指示（2026-10-05）：跨仓库活动会话 + 队列——d928389 实现 handler 但漏注册，
         // 前端 404 静默兜底 = 巡检/归纳进行中状态丸与运行页永远空白（实弹 bug）。
-        .route("/sessions/overview", get(session_queue::get_sessions_overview))
+        .route("/sessions/overview", get(session_queue_routes::get_sessions_overview))
         .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
         .route("/repos/{id}/usage", get(get_usage))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
@@ -433,10 +430,8 @@ async fn remove_repo(
         }
     }
     // S1：顺带清该仓库队列项（kill 产生的终态事件会对已注销仓库触发 drain 空跑；
-    // 广播 cancelled 让前端气泡即时清态）
-    if let Some(job) = st.session_queue.lock().await.remove(&id) {
-        publish(&st.event_bus, BusEvent::QueueChanged { repo: id.clone(), change: session_queue::QueueChange::Cancelled { job } });
-    }
+    // 广播 cancelled 让前端气泡即时清态）。解环后由 QueueState::cancel 完成「移除 + 广播」。
+    let _ = st.session_queue.cancel(&st, &id).await;
     // 数据清除（?wipe=true）：抹掉该仓库在本地库的全部痕迹
     // （任务/审批/会话/消息/巡检历史/事件/仓库级设置）——默认保留，用户显式选择才清
     let wiped = if q.get("wipe").map(|v| v == "true").unwrap_or(false) {
@@ -2386,50 +2381,7 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
-            let msg: WsMessage<Value> = match event {
-                BusEvent::MapChanged(d) => WsMessage { name: ev::MAP_CHANGED.into(), data: serde_json::to_value(d).unwrap_or_default() },
-                BusEvent::MapInvalid(d) => WsMessage { name: ev::MAP_INVALID.into(), data: serde_json::to_value(d).unwrap_or_default() },
-                BusEvent::Growth { repo, event } => WsMessage {
-                    name: ev::GROWTH_EVENT.into(),
-                    data: serde_json::json!({ "repo": repo, "event": event }),
-                },
-                BusEvent::Progress { repo, progress } => WsMessage {
-                    name: ev::PROGRESS_UPDATED.into(),
-                    data: serde_json::json!({ "repo": repo, "progress": progress }),
-                },
-                BusEvent::SessionStatus(s) => WsMessage {
-                    name: ev::SESSION_STATUS_CHANGED.into(),
-                    data: serde_json::to_value(s).unwrap_or_default(),
-                },
-                BusEvent::TaskStatus { repo, task_id, status, gate } => WsMessage {
-                    name: "task.statusChanged".into(),
-                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "status": status, "gate": gate }),
-                },
-                BusEvent::TaskContractViolated { repo, task_id, files } => WsMessage {
-                    name: "task.contractViolated".into(),
-                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
-                },
-                BusEvent::TaskContractAlert { repo, task_id, files } => WsMessage {
-                    name: "task.contractAlert".into(),
-                    data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
-                },
-                BusEvent::Freshness { repo, status, latest_commit_at, commits_since_map } => WsMessage {
-                    name: "freshness.changed".into(),
-                    data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
-                },
-                BusEvent::SessionOutput { session_id, seq, stream, line } => WsMessage {
-                    name: "session.output".into(),
-                    data: serde_json::json!({ "sessionId": session_id, "seq": seq, "stream": stream, "line": line }),
-                },
-                BusEvent::PatrolFinished { repo, run_id, status } => WsMessage {
-                    name: "patrol.finished".into(),
-                    data: serde_json::json!({ "repo": repo, "runId": run_id, "status": status }),
-                },
-                BusEvent::QueueChanged { repo, change } => WsMessage {
-                    name: ev::QUEUE_CHANGED.into(),
-                    data: change.to_payload(&repo),
-                },
-            };
+            let msg = translate(event);
             if let Ok(text) = serde_json::to_string(&msg) {
                 if socket.send(Message::Text(text.into())).await.is_err() {
                     break; // 前端断开
@@ -2437,6 +2389,55 @@ async fn ws_handler(State(st): State<AppState>, ws: WebSocketUpgrade) -> Respons
             }
         }
     })
+}
+
+/// BusEvent → WsMessage 的唯一翻译层（R7：抽为纯函数以便快照测试钉死事件名）。
+/// 事件名/载荷必须与前端 `App.tsx` 的 `msg.name` 订阅保持一致，迁移不得漂移。
+fn translate(event: BusEvent) -> WsMessage<Value> {
+    match event {
+        BusEvent::MapChanged(d) => WsMessage { name: ev::MAP_CHANGED.into(), data: serde_json::to_value(d).unwrap_or_default() },
+        BusEvent::MapInvalid(d) => WsMessage { name: ev::MAP_INVALID.into(), data: serde_json::to_value(d).unwrap_or_default() },
+        BusEvent::Growth { repo, event } => WsMessage {
+            name: ev::GROWTH_EVENT.into(),
+            data: serde_json::json!({ "repo": repo, "event": event }),
+        },
+        BusEvent::Progress { repo, progress } => WsMessage {
+            name: ev::PROGRESS_UPDATED.into(),
+            data: serde_json::json!({ "repo": repo, "progress": progress }),
+        },
+        BusEvent::SessionStatus(s) => WsMessage {
+            name: ev::SESSION_STATUS_CHANGED.into(),
+            data: serde_json::to_value(s).unwrap_or_default(),
+        },
+        BusEvent::TaskStatus { repo, task_id, status, gate } => WsMessage {
+            name: "task.statusChanged".into(),
+            data: serde_json::json!({ "repo": repo, "taskId": task_id, "status": status, "gate": gate }),
+        },
+        BusEvent::TaskContractViolated { repo, task_id, files } => WsMessage {
+            name: "task.contractViolated".into(),
+            data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
+        },
+        BusEvent::TaskContractAlert { repo, task_id, files } => WsMessage {
+            name: "task.contractAlert".into(),
+            data: serde_json::json!({ "repo": repo, "taskId": task_id, "files": files }),
+        },
+        BusEvent::Freshness { repo, status, latest_commit_at, commits_since_map } => WsMessage {
+            name: "freshness.changed".into(),
+            data: serde_json::json!({ "repo": repo, "status": status, "latestCommitAt": latest_commit_at, "commitsSinceMap": commits_since_map }),
+        },
+        BusEvent::SessionOutput { session_id, seq, stream, line } => WsMessage {
+            name: "session.output".into(),
+            data: serde_json::json!({ "sessionId": session_id, "seq": seq, "stream": stream, "line": line }),
+        },
+        BusEvent::PatrolFinished { repo, run_id, status } => WsMessage {
+            name: "patrol.finished".into(),
+            data: serde_json::json!({ "repo": repo, "runId": run_id, "status": status }),
+        },
+        BusEvent::QueueChanged { repo, change } => WsMessage {
+            name: ev::QUEUE_CHANGED.into(),
+            data: change.to_payload(&repo),
+        },
+    }
 }
 
 /// ApiError 的新类型包装（绕过孤儿规则；common 层不依赖 axum）
@@ -2466,8 +2467,9 @@ impl IntoResponse for AppError {
 mod task_exec;
 mod freshness;
 mod git;
-mod agent_conf;
-mod session_queue;
+// 解环：agent_conf 已下沉 easyvibe-ai-agent；session_queue 拆分为
+// 「路由/请求面」（本 crate 的 session_queue_routes）与「队列状态机」（easyvibe-event-bus）。
+mod session_queue_routes;
 
 /// D5：单仓库 watcher 管线——自动归纳（无合法地图时）+ map/growth/progress 三 watcher。
 /// 启动挂载与 POST /api/repos 动态注册共用（新仓库热生效，无需重启壳/后端）。
@@ -2947,11 +2949,11 @@ async fn main() {
                     if matches!(cur.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) {
                         continue;
                     }
-                    session_queue::drain_repo_queue(&st, &s.repo).await;
+                    st.session_queue.drain(&st, &s.repo).await;
                 }
             }
         });
-        tokio::spawn(session_queue::run_queue_sweeper(state.clone()));
+        tokio::spawn(QueueState::sweep_loop(state.session_queue.clone(), state.clone()));
     }
     let app = build_router(state.clone());
     // M1 配置体系：启动即探测执行 agent（异步——探测失败只是 missing 态，不阻断启动；
@@ -4242,7 +4244,7 @@ mod tests {
     // ---------- 运行会话排队（需求 v1 §5/§8 + 评审裁决 B1/B2/B4） ----------
 
     use easyvibe_api_types::SessionStatusChanged;
-    use session_queue::{JobKind, QueuedJob};
+    use easyvibe_event_bus::queue::{JobKind, QueuedJob};
 
     async fn queue_state(tag: &str) -> (AppState, String) {
         chat_state(tag).await
@@ -4302,7 +4304,7 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::ACCEPTED);
         assert_eq!(v["data"]["started"], true, "无活动会话必须直接执行: {v}");
         assert!(v["data"]["queued"].is_null());
-        assert!(state.session_queue.lock().await.is_empty(), "直接执行不得留队列项");
+        assert!(state.session_queue.is_empty().await, "直接执行不得留队列项");
         // 代执行真实发生了：状态被新会话接管（inner 在响应返回前已同步完成注册；
         // stub 巡检毫秒级收尾，故只断言「会话已接续」这一稳定事实，label 契约由 GET 用例覆盖）
         let mut saw = false;
@@ -4390,8 +4392,8 @@ mod tests {
             .session_manager
             .note_status(SessionStatusChanged { repo: repo.clone(), session_id: "ind-1".into(), status: easyvibe_api_types::SessionStatus::Succeeded })
             .await;
-        assert!(session_queue::drain_repo_queue(&state, &repo).await, "终态后必须 drain");
-        assert!(state.session_queue.lock().await.is_empty(), "drain 必须 pop 队列项");
+        assert!(state.session_queue.drain(&state, &repo).await, "终态后必须 drain");
+        assert!(state.session_queue.is_empty().await, "drain 必须 pop 队列项");
 
         // 接续执行真实发生：仓库状态被新会话接管（stub 巡检毫秒级收尾，
         // 故只断言「会话已接续」这一稳定事实）
@@ -4425,23 +4427,21 @@ mod tests {
 
         // drain 的 patrol 项撞 Conflict（TOCTOU：任务槽抢注）→ 不得覆盖用户新排的「归纳」
         let patrol = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
-        session_queue::handle_drain_failure(&state, &repo, patrol, ApiError::Conflict("仓库有活动会话".into())).await;
-        let q = state.session_queue.lock().await;
-        let kept = q.get(&repo).expect("Conflict 不得丢项");
+        state.session_queue.handle_failure(&state, &repo, patrol, ApiError::Conflict("仓库有活动会话".into())).await;
+        let kept = state.session_queue.peek(&repo).await.expect("Conflict 不得丢项");
         assert_eq!(kept.kind, JobKind::Reinduce, "不得覆盖期间用户新排的队: {:?}", kept.kind);
-        drop(q);
         // 槽位空时 Conflict → 放回原项（不丢）
-        state.session_queue.lock().await.remove(&repo);
+        let _ = state.session_queue.cancel(&state, &repo).await;
         let patrol2 = QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() };
-        session_queue::handle_drain_failure(&state, &repo, patrol2, ApiError::Conflict("抢注".into())).await;
-        assert_eq!(state.session_queue.lock().await.get(&repo).unwrap().label, "巡检");
+        state.session_queue.handle_failure(&state, &repo, patrol2, ApiError::Conflict("抢注".into())).await;
+        assert_eq!(state.session_queue.peek(&repo).await.unwrap().label, "巡检");
 
         // 确定性失败 → 丢弃 + 广播 queue.changed{type:"failed", error}
         // （先清槽模拟 drain 已 pop 出该项——handle 只处置被弹出的项，不动槽内其他排队）
-        state.session_queue.lock().await.remove(&repo);
+        let _ = state.session_queue.cancel(&state, &repo).await;
         let doomed = QueuedJob { kind: JobKind::Submap, module_id: Some("exam-core".into()), label: "分析模块 exam-core".into(), enqueued_at: chrono::Utc::now() };
-        session_queue::handle_drain_failure(&state, &repo, doomed, ApiError::BadRequest("agent 缺失".into())).await;
-        assert!(state.session_queue.lock().await.is_empty(), "确定性失败必须丢弃（不留死信）");
+        state.session_queue.handle_failure(&state, &repo, doomed, ApiError::BadRequest("agent 缺失".into())).await;
+        assert!(state.session_queue.is_empty().await, "确定性失败必须丢弃（不留死信）");
         // 广播核验：从事件流里捞 queue.changed（enqueued/replaced/requeued/failed 都应出现过）
         let mut saw_failed = false;
         while let Ok(e) = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
@@ -4481,12 +4481,46 @@ mod tests {
         // 事件循环的条件分支成立 → 调 drain；drain 复查发现 ind-b 活动 → 不 pop、不接续
         let (_s, v) = post_queue(&app, &repo, r#"{"kind":"patrol"}"#).await;
         assert_eq!(v["data"]["queued"], true, "ind-b 活动期间 POST 必须入队");
-        assert!(!session_queue::drain_repo_queue(&state, &repo).await, "有活动会话不得 drain");
-        let q = state.session_queue.lock().await;
-        assert!(q.contains_key(&repo), "队项必须保留等下一终态");
-        drop(q);
+        assert!(!state.session_queue.drain(&state, &repo).await, "有活动会话不得 drain");
+        assert!(state.session_queue.peek(&repo).await.is_some(), "队项必须保留等下一终态");
         let active = mgr.status_of(&repo).await.unwrap();
         assert_eq!(active.session_id, "ind-b", "drain 不得误接续");
+    }
+
+    /// R7：WS 契约快照——BusEvent → WsMessage 的事件名与关键载荷字段必须稳定，
+    /// 前端 App.tsx 按 msg.name 匹配，漂移即静默失效（丢弃无提示）。
+    #[test]
+    fn ws_translate_event_name_snapshot() {
+        let cases: Vec<(BusEvent, &str)> = vec![
+            (BusEvent::MapChanged(MapChanged { repo: "r".into(), version: "v".into() }), "map.changed"),
+            (BusEvent::MapInvalid(MapInvalid { repo: "r".into(), error: "e".into() }), "map.invalid"),
+            (BusEvent::Growth { repo: "r".into(), event: serde_json::json!({}) }, "growth.event"),
+            (BusEvent::Progress { repo: "r".into(), progress: serde_json::json!({}) }, "progress.updated"),
+            (BusEvent::SessionStatus(SessionStatusChanged { repo: "r".into(), session_id: "s".into(), status: easyvibe_api_types::SessionStatus::Running }), "session.statusChanged"),
+            (BusEvent::TaskStatus { repo: "r".into(), task_id: "t".into(), status: "running".into(), gate: None }, "task.statusChanged"),
+            (BusEvent::TaskContractViolated { repo: "r".into(), task_id: "t".into(), files: vec!["a".into()] }, "task.contractViolated"),
+            (BusEvent::TaskContractAlert { repo: "r".into(), task_id: "t".into(), files: vec![] }, "task.contractAlert"),
+            (BusEvent::Freshness { repo: "r".into(), status: "stale".into(), latest_commit_at: Some(1), commits_since_map: Some(2) }, "freshness.changed"),
+            (BusEvent::SessionOutput { session_id: "s".into(), seq: 1, stream: "stdout".into(), line: "x".into() }, "session.output"),
+            (BusEvent::PatrolFinished { repo: "r".into(), run_id: "run".into(), status: "ok".into() }, "patrol.finished"),
+            (BusEvent::QueueChanged { repo: "r".into(), change: easyvibe_event_bus::queue::QueueChange::Enqueued {
+                job: QueuedJob { kind: JobKind::Patrol, module_id: None, label: "巡检".into(), enqueued_at: chrono::Utc::now() } } }, "queue.changed"),
+        ];
+        for (ev, want) in cases {
+            assert_eq!(translate(ev).name, want);
+        }
+        // 关键载荷字段（task.* / queue.* 前端直接消费）
+        let m = translate(BusEvent::TaskStatus { repo: "r".into(), task_id: "t".into(), status: "running".into(), gate: Some("p:implement".into()) });
+        assert_eq!(m.data["taskId"], "t");
+        assert_eq!(m.data["status"], "running");
+        assert_eq!(m.data["gate"], "p:implement");
+        let q = translate(BusEvent::QueueChanged { repo: "r".into(), change: easyvibe_event_bus::queue::QueueChange::Failed {
+            job: QueuedJob { kind: JobKind::Submap, module_id: Some("m".into()), label: "分析模块 m".into(), enqueued_at: chrono::Utc::now() },
+            error: "boom".into() } });
+        assert_eq!(q.data["type"], "failed");
+        assert_eq!(q.data["repo"], "r");
+        assert_eq!(q.data["job"]["moduleId"], "m");
+        assert_eq!(q.data["error"], "boom");
     }
 }
 

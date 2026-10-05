@@ -31,7 +31,7 @@ pub struct TaskExecutor {
     /// 内存态即可：spawn 与采集同进程；重启把 running 任务标 interrupted，基线随之作废。
     pub baselines: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>>,
     /// R2 裂缝#3：越界事件出口——auto/supervised 任务无审批关，越界必须主动送达（WS→通知）
-    pub events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+    pub events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
 }
 
 impl TaskExecutor {
@@ -45,7 +45,7 @@ impl TaskExecutor {
         agent_args: Arc<Vec<String>>,
         max_parallel: usize,
         settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
-        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+        events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
     ) -> Arc<Self> {
         Self::assemble(task_repo, approval_repo, None, session_manager, map_service, harness, agent_command, agent_args, max_parallel, settings_repo, events)
     }
@@ -63,7 +63,7 @@ impl TaskExecutor {
         agent_args: Arc<Vec<String>>,
         max_parallel: usize,
         settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
-        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+        events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
     ) -> Arc<Self> {
         Self::assemble(task_repo, approval_repo, Some(agent_session_repo), session_manager, map_service, harness, agent_command, agent_args, max_parallel, settings_repo, events)
     }
@@ -80,7 +80,7 @@ impl TaskExecutor {
         agent_args: Arc<Vec<String>>,
         max_parallel: usize,
         settings_repo: Arc<easyvibe_db::SqliteSettingsRepository>,
-        events: Option<tokio::sync::broadcast::Sender<crate::BusEvent>>,
+        events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             task_repo,
@@ -351,7 +351,7 @@ impl TaskExecutor {
     /// P0 教训（ui-test-2026-10-03）：只写库不广播 = 任务在前端"凭空消失"。
     async fn publish_status(&self, repo: &str, task_id: &str, status: &str, gate: Option<&str>) {
         if let Some(tx) = &self.events {
-            crate::publish(tx, crate::BusEvent::TaskStatus {
+            easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskStatus {
                 repo: repo.into(),
                 task_id: task_id.into(),
                 status: status.into(),
@@ -436,7 +436,7 @@ impl TaskExecutor {
         };
         // M1 配置体系：spawn 现读 settings 优先解析链（env 为 fallback）——
         // 配置改动对下一次 spawn 生效，不缓存快照（与 resolve_llm 同一纪律）
-        let resolved = crate::agent_conf::resolve_agent(&self.settings_repo, Some("task"), &self.agent_command, &self.agent_args).await;
+        let resolved = easyvibe_ai_agent::agent_conf::resolve_agent(&self.settings_repo, Some("task"), &self.agent_command, &self.agent_args).await;
         match self
             .session_manager
             // N26：任务槽超时常态 90 分钟（自由 coding 40-60 分钟是常态，30 分钟一刀切会误杀）
@@ -462,7 +462,7 @@ impl TaskExecutor {
                 // 按它过滤 session.output；不发事件 = 前端列表停在旧快照（sessionId=null），
                 // 终端永远收不到行（2026-10-03 实弹 bug：执行中终端一直"等待 agent 输出"）
                 if let Some(tx) = &self.events {
-                    crate::publish(tx, crate::BusEvent::TaskStatus {
+                    easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskStatus {
                         repo: task.repo.clone(),
                         task_id: task.id.clone(),
                         status: "running".into(),
@@ -481,7 +481,7 @@ impl TaskExecutor {
                     let phase = phase;
                     // B 案：审查槽（M1 起走完整解析链——review 槽参数整体替换，可换便宜模型/收紧权限）
                     let review_resolved =
-                        crate::agent_conf::resolve_agent(&this.settings_repo, Some("review"), &this.agent_command, &this.agent_args).await;
+                        easyvibe_ai_agent::agent_conf::resolve_agent(&this.settings_repo, Some("review"), &this.agent_command, &this.agent_args).await;
                     // L2 哨兵状态：已上报越界集合 + 巡检节拍器
                     let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
                     let sentry_every = std::cmp::max(1, sentry_interval().as_secs() / 2) as u32;
@@ -503,7 +503,7 @@ impl TaskExecutor {
                             if !fresh.is_empty() {
                                 warn!("[task-exec] 任务 {} 过程越界预警：{}", task_id, fresh.join("、"));
                                 if let Some(tx) = &this.events {
-                                    crate::publish(tx, crate::BusEvent::TaskContractAlert {
+                                    easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskContractAlert {
                                         repo: repo_name.clone(),
                                         task_id: task_id.clone(),
                                         files: fresh,
@@ -536,7 +536,7 @@ impl TaskExecutor {
                                             if !files.is_empty() {
                                                 if let Some(tx) = &this.events {
                                                     // broadcast::Sender::send 是同步方法
-                                                    crate::publish(tx, crate::BusEvent::TaskContractViolated {
+                                                    easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskContractViolated {
                                                         repo: repo_name.clone(),
                                                         task_id: task_id.clone(),
                                                         files,
@@ -595,7 +595,7 @@ impl TaskExecutor {
                                             let _ = this.task_repo.update_status(&task_id, "rejected", Some(&note)).await;
                                             let _ = this.task_repo.set_gate(&task_id, Some("rejected")).await;
                                             if let Some(tx) = &this.events {
-                                                crate::publish(tx, crate::BusEvent::TaskStatus {
+                                                easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskStatus {
                                                     repo: repo_name.clone(),
                                                     task_id: task_id.clone(),
                                                     status: "rejected".into(),
@@ -635,7 +635,7 @@ impl TaskExecutor {
                                     // 存量缺口补发：任务执行终态此前只写库不发事件（前端靠轮询才发现）——
                                     // 与 decide_task 对齐，终态即广播 task.statusChanged
                                     if let Some(tx) = &this.events {
-                                        crate::publish(tx, crate::BusEvent::TaskStatus {
+                                        easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskStatus {
                                             repo: repo_name.clone(),
                                             task_id: task_id.clone(),
                                             status: status.into(),
