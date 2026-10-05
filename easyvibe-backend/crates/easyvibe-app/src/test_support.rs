@@ -52,6 +52,9 @@ use tower::ServiceExt;
             framework_transparent: "框架".into(),
             user_entry_skills: vec![],
             custom: task_exec::HarnessCustom::default(),
+            // 测试夹具必填：`Harness.custom_neutral` 由 HEAD fd080d5 引入（harness.rs），
+            // 此处不补齐则 easyvibe-app 测试目标 E0063 无法编译（既有缺陷，非本任务运行时改动）。
+            custom_neutral: task_exec::HarnessCustom::default(),
             rule_development: String::new(),
             rule_bugfix: String::new(),
         }));

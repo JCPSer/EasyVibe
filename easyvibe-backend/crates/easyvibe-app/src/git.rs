@@ -297,8 +297,16 @@ pub async fn commit_all(repo: &Path, message: &str) -> Result<String, ApiError> 
     // R3 C5：产品账簿（地图/归档/会话产物）不进用户提交历史——
     // ① .easyvibe/ 含巡检写回的 map.json，add -A 提交会立刻触发 freshness 自反漂移（越健康越亮警告）
     // ② .claude/ 是 agent STAR 归档，与 .easyvibe/development_docs/ 是同一留痕的两份副本
-    // pathspec 魔法符 :(exclude) 需置于最后；无账簿目录的仓库行为与 add -A 等价
-    git(repo, &["add", "-A", "--", ".", ":(exclude).easyvibe", ":(exclude).claude"]).await?;
+    // 排除不能用 :(exclude) pathspec 直接点名：被 .gitignore 忽略的目录会触发
+    // "The following paths are ignored" 直接失败——改为"全量加（被忽略的目录 git 天然跳过）
+    // → 再把账簿目录的暂存撤下"两步，两种口径下行为一致
+    git(repo, &["add", "-A", "--", "."]).await?;
+    let staged_bookkeeping =
+        git(repo, &["diff", "--cached", "--name-only", "-z", "--", ".easyvibe", ".claude"]).await.unwrap_or_default();
+    if !staged_bookkeeping.is_empty() {
+        // reset 只动暂存区，不碰工作区——账簿文件留在磁盘，改动也不会进本次提交
+        git(repo, &["reset", "-q", "--", ".easyvibe", ".claude"]).await?;
+    }
     git(repo, &["commit", "-m", message]).await?;
     git(repo, &["rev-parse", "--short", "HEAD"]).await.map(|s| s.trim().to_string())
 }
@@ -572,6 +580,47 @@ mod tests {
             rows[0].files
         );
         assert!(dir.join(".easyvibe/map/map.json").exists() && dir.join(".claude/development_docs/t1.json").exists(), "账簿文件必须留在磁盘（不被提交也不被吞掉）");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn commit_all_works_when_bookkeeping_dirs_are_gitignored() {
+        // 回归：.claude 被 .gitignore 忽略时，commit_all 不得因 "The following paths are
+        // ignored by one of your .gitignore files" 失败；已跟踪的 .claude 文件改动也不进提交
+        let dir = std::env::temp_dir().join("ev-commit-gitignored-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".claude/development_docs")).unwrap();
+        std::fs::write(dir.join(".gitignore"), ".claude/\n").unwrap();
+        let git_sync = |args: &[&str]| {
+            assert!(std::process::Command::new("git").args(args).current_dir(&dir).status().unwrap().success())
+        };
+        git_sync(&["init", "-q"]);
+        git_sync(&["config", "user.email", "t@t"]);
+        git_sync(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        std::fs::write(dir.join(".claude/development_docs/tracked.txt"), "v1\n").unwrap();
+        // 被忽略的目录需 -f 才能进历史（模拟"历史上提交过、后来被 ignore"的仓库）
+        git_sync(&["add", "a.txt"]);
+        git_sync(&["add", "-f", ".claude/development_docs/tracked.txt"]);
+        git_sync(&["commit", "-q", "-m", "init"]);
+
+        // 用户改动 + 被忽略目录的新文件 + 已跟踪账簿文件的改动
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(dir.join(".claude/development_docs/t1.json"), "{}\n").unwrap();
+        std::fs::write(dir.join(".claude/development_docs/tracked.txt"), "v2\n").unwrap();
+
+        let short = commit_all(&dir, "fix").await.unwrap();
+        assert_eq!(short.len(), 7);
+        let rows = log(&dir, 5).await.unwrap();
+        assert!(rows[0].files.contains(&"a.txt".to_string()), "用户改动必须提交: {:?}", rows[0].files);
+        assert!(
+            !rows[0].files.iter().any(|f| f.starts_with(".claude")),
+            "被忽略/已跟踪的账簿都不得进提交: {:?}",
+            rows[0].files
+        );
+        // 磁盘现状：新文件与未提交的改动都完好
+        assert!(dir.join(".claude/development_docs/t1.json").exists());
+        assert_eq!(std::fs::read_to_string(dir.join(".claude/development_docs/tracked.txt")).unwrap(), "v2\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
