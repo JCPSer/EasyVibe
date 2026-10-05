@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { ReactFlow, Controls, MiniMap, Panel, useReactFlow, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlertTriangle, Focus, GitBranch, PanelRightOpen, Play, RefreshCw, WifiOff } from 'lucide-react'
+import { AlertTriangle, Focus, GitBranch, PanelRightOpen, RefreshCw, WifiOff } from 'lucide-react'
 
 import type { CodeMap, SubMap } from '@/types/map'
 import { healthColor } from '@/lib/layout'
@@ -98,7 +98,7 @@ export function Canvas({
     setSelection(null)
     setExpandedIds([])
   }, [])
-  const { growth, liveActivity, inducing, arrived, mergedMap, startGrowth, startReinduce, pauseGrowth, restartGrowth, exitGrowth } = useGrowthPlayback(map, backendRepo, {
+  const { growth, inducing, arrived, mergedMap, startReinduce, pauseGrowth, restartGrowth, exitGrowth } = useGrowthPlayback(map, backendRepo, {
     onPatrollingChange,
     onPlaybackStart,
   })
@@ -483,19 +483,6 @@ export function Canvas({
                     归纳中…
                   </span>
                 )}
-                <button
-                  onClick={startGrowth}
-                  disabled={!!growth}
-                  className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold transition-colors disabled:opacity-40 ${
-                    liveActivity && !growth
-                      ? 'border-red-300 bg-red-50 dark:bg-red-950/40 text-red-600 animate-pulse'
-                      : 'border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 text-blue-600 hover:bg-blue-100'
-                  }`}
-                  title={backendRepo ? '观看实时生长（直播 growth.log 事件）' : '回放归纳过程（静态 growth.log）'}
-                >
-                  <Play size={10} />
-                  {liveActivity && !growth ? '归纳活动 · 观看生长' : '生长演示'}
-                </button>
               </div>
             </div>
           </div>

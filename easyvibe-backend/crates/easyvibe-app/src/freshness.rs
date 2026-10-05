@@ -45,7 +45,10 @@ pub fn assess(repo_root: &Path, map: &Value) -> Freshness {
     let commits_since_map = map_generated_at
         .as_deref()
         .and_then(|raw| git_commits_since(repo_root, raw));
-    let status = if latest <= map_ts {
+    // 口径（§13.4）：git 有比地图新的提交即漂移。时间差只做 drifting/stale 分级，
+    // commits_since_map > 0 必须至少 drifting——免疫时钟/时区误差（2026-10-05 实弹修正）。
+    let has_new_commits = commits_since_map.map(|n| n > 0).unwrap_or(latest > map_ts);
+    let status = if !has_new_commits && latest <= map_ts {
         FreshnessStatus::Fresh
     } else if latest - map_ts < STALE_DAYS * 86_400 {
         FreshnessStatus::Drifting
@@ -71,8 +74,9 @@ fn git_commits_since(repo_root: &Path, since_rfc: &str) -> Option<i64> {
     git_output(repo_root, &["rev-list", "--count", "HEAD", &format!("--since={since_rfc}")]).and_then(|s| s.parse().ok())
 }
 
-/// 简易时间戳解析：接受 "YYYY-MM-DDTHH:MM:SS"（可带时区后缀，按 UTC 近似——
-/// 判据是天级漂移，时区误差可忽略）；失败返回 None（→ unknown，不误报）
+/// 简易时间戳解析：接受 "YYYY-MM-DDTHH:MM:SS" 带时区后缀（Z / ±HH:MM）。
+/// 时区必须参与换算——不换算会把 +08:00 的本地时间当成 UTC，地图凭空"新 8 小时"，
+/// 刚生成的地图有后续提交也被判 fresh（2026-10-05 实弹：落后 3 提交却显示 fresh）。
 pub fn parse_ts_like(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     if b.len() < 19 {
@@ -105,7 +109,18 @@ pub fn parse_ts_like(s: &str) -> Option<i64> {
     let doy = (153 * mp + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + se)
+    let utc = days * 86_400 + h * 3600 + mi * 60 + se;
+    // 时区后缀：'Z' = 0；±HH:MM 从第 19 字节起
+    match b.get(19) {
+        None | Some(b'Z') | Some(b'z') => Some(utc),
+        Some(sign @ (b'+' | b'-')) => {
+            let hh = num(b.get(20..22)?)?;
+            let mm = if b.get(22) == Some(&b':') { num(b.get(23..25)?)? } else { 0 };
+            let off = hh * 3600 + mm * 60;
+            Some(if sign == &b'+' { utc - off } else { utc + off })
+        }
+        _ => Some(utc),
+    }
 }
 
 #[cfg(test)]
@@ -114,10 +129,50 @@ mod tests {
 
     #[test]
     fn parse_ts_like_handles_rfc3339_and_garbage() {
-        assert_eq!(parse_ts_like("2026-09-29T15:30:08+08:00"), Some(parse_ts_like("2026-09-29T15:30:08Z").unwrap()));
+        // 时区必须参与换算：+08:00 比 Z 晚 8 小时（不换算会把本地地图时间当 UTC，漂移被误判 fresh）
+        assert_eq!(
+            parse_ts_like("2026-09-29T15:30:08+08:00"),
+            Some(parse_ts_like("2026-09-29T15:30:08Z").unwrap() - 8 * 3600)
+        );
+        assert_eq!(parse_ts_like("2026-09-29T15:30:08+0800"), Some(parse_ts_like("2026-09-29T15:30:08Z").unwrap() - 8 * 3600), "无冒号形态也要认");
+        assert_eq!(parse_ts_like("2026-09-29T15:30:08-05:00"), Some(parse_ts_like("2026-09-29T15:30:08Z").unwrap() + 5 * 3600), "负偏移");
         assert!(parse_ts_like("2026-09-29T15:30:08Z").unwrap() > 0);
         assert!(parse_ts_like("not-a-date").is_none());
         assert!(parse_ts_like("2026-09-29").is_none(), "日级精度不够，必须拒绝（避免误判 fresh）");
+    }
+
+    #[test]
+    fn commits_after_map_force_at_least_drifting() {
+        // 实弹（2026-10-05）：地图生成后又有提交（commits_since_map=3）就必须至少 drifting，
+        // 即使时钟差落在 fresh 侧—— immunity against tz/clock 误差。
+        // 提交日期必须显式摆布：rev-list --since 按提交日期过滤，"现在"生成的提交彼此同秒，
+        // 不摆布的话 --since 落在未来会数出 0（本测试第一版就踩了这个坑）。
+        let dir = std::env::temp_dir().join("ev-freshness-commits");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let commit_at = |msg: &str, iso: &str| {
+            std::fs::write(dir.join("a.txt"), msg).unwrap();
+            std::process::Command::new("git").args(["add", "."]).current_dir(&dir).output().unwrap();
+            std::process::Command::new("git")
+                .args(["commit", "-q", "-m", msg])
+                .env("GIT_AUTHOR_DATE", iso)
+                .env("GIT_COMMITTER_DATE", iso)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+        };
+        std::process::Command::new("git").args(["init", "-q"]).current_dir(&dir).output().unwrap();
+        std::process::Command::new("git").args(["config", "user.email", "t@t"]).current_dir(&dir).output().unwrap();
+        std::process::Command::new("git").args(["config", "user.name", "t"]).current_dir(&dir).output().unwrap();
+        commit_at("before-map", "2026-10-01T00:00:00Z");
+        let map_iso = "2026-10-01T01:00:00Z"; // 地图生成于第 1 与第 2 个提交之间
+        commit_at("c2", "2026-10-01T02:00:00Z");
+        commit_at("c3", "2026-10-01T03:00:00Z");
+        commit_at("c4", "2026-10-01T04:00:00Z");
+        let map = serde_json::json!({"meta": {"generated_at": map_iso}});
+        let f = assess(&dir, &map);
+        assert!(f.status != FreshnessStatus::Fresh, "地图后有 3 个提交不得判 fresh: {f:?}");
+        assert_eq!(f.commits_since_map, Some(3));
     }
 
     #[test]
