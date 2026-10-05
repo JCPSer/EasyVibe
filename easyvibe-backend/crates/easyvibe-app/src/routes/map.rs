@@ -1,6 +1,7 @@
 //! 资源域：地图/子图/成长/保鲜/进度/归纳/巡检 + 队列宿主实现。
 
 use crate::state::*;
+use crate::map_concerns::{assign_concern_ids, diff_concerns, extract_concerns};
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
@@ -247,108 +248,6 @@ pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Res
 /// - 真实模式：**session spawn**（与归纳同路径）。实弹发现直调无 tools 声明的 API
 ///   只会得到模型的 tool_call 幻觉（DSML 伪调用），真实巡检需要 Bash 核查
 ///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
-/// 问题项快照条目（2026-10-05 巡检新旧对照的旧侧）
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OldConcern {
-    pub(crate) scope: &'static str, // "arch" | "module"
-    pub(crate) module: Option<String>,
-    pub(crate) id: Option<String>,
-    pub(crate) finding: String,
-}
-
-/// 从地图 JSON 提取全部 concerns（架构级 + 各模块级）——巡检开始前快照用。
-pub(crate) fn extract_concerns(map: &serde_json::Value) -> Vec<OldConcern> {
-    let mut out = Vec::new();
-    let mut push = |scope: &'static str, module: Option<String>, c: &serde_json::Value| {
-        out.push(OldConcern {
-            scope,
-            module,
-            id: c["id"].as_str().map(Into::into),
-            finding: c["finding"].as_str().unwrap_or_default().into(),
-        });
-    };
-    for c in map["health"]["concerns"].as_array().into_iter().flatten() {
-        push("arch", None, c);
-    }
-    for m in map["modules"].as_array().into_iter().flatten() {
-        let mid = m["id"].as_str().map(Into::into);
-        for c in m["health"]["concerns"].as_array().into_iter().flatten() {
-            push("module", mid.clone(), c);
-        }
-    }
-    out
-}
-
-/// 巡检新旧对照（纯函数；测试全覆盖）：
-/// 两阶段匹配（评审#S3）——先 (scope, module, id) 精确匹配（双侧都有 id），
-/// 剩余项按 (scope, module, finding) 文本精确匹配兜底（旧图无 id 的过渡期数据）；
-/// 仍孤立的旧项计 fixed——但其模块已从新图消失的计 moduleGone（评审#S3：模块没了 ≠ 修好了）。
-pub(crate) fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> serde_json::Value {
-    let new = extract_concerns(new_map);
-    let mut used_new = vec![false; new.len()];
-    let mut used_old = vec![false; old.len()];
-
-    // 阶段 1：id 精确匹配（双侧都有 id 才有锚点意义）
-    for (oi, o) in old.iter().enumerate() {
-        let Some(oid) = &o.id else { continue };
-        for (ni, n) in new.iter().enumerate() {
-            if used_new[ni] || n.id.as_deref() != Some(oid.as_str()) {
-                continue;
-            }
-            if o.scope == n.scope && o.module == n.module {
-                used_old[oi] = true;
-                used_new[ni] = true;
-                break;
-            }
-        }
-    }
-    // 阶段 2：finding 文本精确匹配兜底（只作用于两侧剩余项；新侧不限制 id——
-    // LLM 会给继承来的旧问题也分配新 id，但旧侧无 id 时文本是唯一锚点）
-    for (oi, o) in old.iter().enumerate() {
-        if used_old[oi] || o.id.is_some() {
-            continue;
-        }
-        for (ni, n) in new.iter().enumerate() {
-            if used_new[ni] || n.finding != o.finding {
-                continue;
-            }
-            if o.scope == n.scope && o.module == n.module {
-                used_old[oi] = true;
-                used_new[ni] = true;
-                break;
-            }
-        }
-    }
-
-    let alive_modules: std::collections::HashSet<&str> = new_map["modules"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str())
-        .collect();
-    let item = |c: &OldConcern| serde_json::json!({ "id": c.id, "finding": c.finding });
-    let mut fixed = Vec::new();
-    let mut module_gone = Vec::new();
-    for (oi, o) in old.iter().enumerate() {
-        if used_old[oi] {
-            continue;
-        }
-        match o.scope {
-            "module" if o.module.as_deref().is_some_and(|m| !alive_modules.contains(m)) => {
-                module_gone.push(serde_json::json!({ "module": o.module, "finding": o.finding }));
-            }
-            _ => fixed.push(item(o)),
-        }
-    }
-    let fresh: Vec<_> = new.iter().zip(used_new.iter()).filter(|(_, u)| !**u).map(|(n, _)| item(n)).collect();
-    serde_json::json!({
-        "fixed": fixed,
-        "new": fresh,
-        "persisted": used_old.iter().filter(|b| **b).count(),
-        "moduleGone": module_gone,
-    })
-}
-
 /// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 pub(crate) async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     start_patrol_inner(st, id).await
@@ -419,6 +318,9 @@ pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Respo
             };
             // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
             let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
+            // 秒退假成功防线：记录 spawn 前 map.json mtime——agent 进程退出码 0 但没写回
+            // 地图 = 空转（实弹：13:20 巡检 started==finished 同毫秒，分数照抄旧图当成功）
+            let pre_mtime = std::fs::metadata(repo.map_path()).and_then(|m| m.modified()).ok();
             let session = st
                 .session_manager
                 .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
@@ -441,17 +343,33 @@ pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Respo
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let Some(s) = st2.session_manager.status_of_session(&session_id).await else { continue };
                     if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) { continue }
-                    let succeeded = s.status == easyvibe_api_types::SessionStatus::Succeeded;
+                    let mut succeeded = s.status == easyvibe_api_types::SessionStatus::Succeeded;
+                    let mut fail_reason: Option<String> = None;
+                    // 秒退假成功防线：退出码 0 但 map.json mtime 未前进 = agent 空转
+                    if succeeded {
+                        let post_mtime = std::fs::metadata(repo2.map_path()).and_then(|m| m.modified()).ok();
+                        if matches!((pre_mtime, post_mtime), (Some(a), Some(b)) if a == b) {
+                            succeeded = false;
+                            fail_reason = Some("秒退假成功防线：agent 未写回地图（map.json mtime 未变）——按失败记录".into());
+                            tracing::warn!("[patrol] {}", fail_reason.as_deref().unwrap_or_default());
+                        }
+                    }
                     let result = async {
-                        let snap = st2.map_service.load_map(&repo2).await?;
-                        // 仅 succeeded 写对照（评审#Q1：失败时读到的可能是未写回旧图，存了反而误导）
-                        let diff = if succeeded {
-                            Some(diff_concerns(&old_concerns, &snap.json).to_string())
+                        let mut snap = st2.map_service.load_map(&repo2).await?;
+                        let diff;
+                        if succeeded {
+                            // id 兜底注入（LLM 不遵守 id 规则时由后端保证稳定）+ 原子写回
+                            if assign_concern_ids(&old_concerns, &mut snap.json) > 0 {
+                                easyvibe_map::atomic_write_json(&repo2.map_path(), &snap.json).await?;
+                                info!("[patrol] concerns id 兜底注入完成并写回 map.json");
+                            }
+                            diff = Some(diff_concerns(&old_concerns, &snap.json).to_string());
                         } else {
-                            None
-                        };
+                            // 仅 succeeded 写对照（评审#Q1：失败时读到的可能是未写回旧图，存了反而误导）
+                            diff = None;
+                        }
                         st2.patrol_service
-                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, succeeded, None, diff)
+                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, succeeded, fail_reason, diff)
                             .await
                     }
                     .await;
@@ -459,10 +377,11 @@ pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Respo
                         tracing::warn!("[patrol] 健康历史落库失败: {e}");
                     }
                     // R3 C1：巡检终态广播（健康历史已落库）——前端解除"巡检中"并刷新看板
+                    // 广播用防线修正后的状态（秒退空转报 failed，前端不会误以为成功）
                     publish(&st2.event_bus, BusEvent::PatrolFinished {
                         repo: repo2.id.clone(),
                         run_id: run_id_task.clone(),
-                        status: format!("{:?}", s.status).to_lowercase(),
+                        status: if succeeded { "succeeded".into() } else { "failed".into() },
                     });
                     break;
                 }

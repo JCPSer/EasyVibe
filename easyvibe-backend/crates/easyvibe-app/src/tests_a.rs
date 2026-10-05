@@ -3,6 +3,7 @@
 use crate::assets::*;
 use crate::router::*;
 use crate::routes::agent::*;
+use crate::map_concerns::*;
 use crate::routes::map::*;
 use crate::test_support::*;
 use tower::ServiceExt;
@@ -201,6 +202,36 @@ use tower::ServiceExt;
         let d3 = diff_concerns(&[], &new_map);
         assert_eq!(d3["new"].as_array().unwrap().len(), 3);
         assert_eq!(d3["persisted"], 0);
+    }
+
+    #[test]
+    fn assign_concern_ids_backfills_stable_ids() {
+        // 2026-10-05 实弹回归：LLM 未输出 id 时由后端兜底——
+        // 缺 id 的项按 scope 顺延旧编号分配；已有 id 不动；编号不冲突。
+        let old = vec![
+            OldConcern { scope: "arch", module: None, id: Some("c-arch-1".into()), finding: "A".into() },
+            OldConcern { scope: "module", module: Some("m1".into()), id: Some("c-m1-1".into()), finding: "C".into() },
+            OldConcern { scope: "module", module: Some("m2".into()), id: Some("c-m2-1".into()), finding: "D".into() },
+        ];
+        let mut map = serde_json::json!({
+            "health": { "concerns": [
+                { "severity": "high", "finding": "A 仍在（有 id 不动）", "id": "c-arch-1" },
+                { "severity": "high", "finding": "B 新冒出的架构问题" },
+            ] },
+            "modules": [
+                { "id": "m1", "health": { "concerns": [ { "severity": "high", "finding": "C 仍在但 LLM 没给 id" } ] } },
+                { "id": "m3", "health": { "concerns": [ { "severity": "high", "finding": "E 新模块新问题" } ] } },
+            ],
+        });
+        let changed = assign_concern_ids(&old, &mut map);
+        assert_eq!(changed, 3, "B/C/E 三项补 id，A 已有不动");
+        assert_eq!(map["health"]["concerns"][0]["id"], "c-arch-1");
+        assert_eq!(map["health"]["concerns"][1]["id"], "c-arch-2", "arch 顺延 1 之后");
+        assert_eq!(map["modules"][0]["health"]["concerns"][0]["id"], "c-m1-2", "m1 顺延 c-m1-1 之后");
+        assert_eq!(map["modules"][1]["health"]["concerns"][0]["id"], "c-m3-1", "m3 无旧编号从 1 起");
+        // 二次运行幂等：已有 id 全部不动
+        let again = assign_concern_ids(&old, &mut map);
+        assert_eq!(again, 0, "幂等：不重复分配");
     }
 
     #[tokio::test]

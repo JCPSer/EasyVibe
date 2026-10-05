@@ -792,5 +792,6 @@ impl TaskExecutor {
 #[cfg(test)] mod tests_changes;
 #[cfg(test)] mod tests_contract;
 #[cfg(test)] mod tests_flow;
+#[cfg(test)] mod tests_gates;
 #[cfg(test)] mod tests_harness;
 #[cfg(test)] mod tests_prompt;
