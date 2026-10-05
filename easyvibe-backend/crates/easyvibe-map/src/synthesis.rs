@@ -2,7 +2,7 @@
 //! 归属引擎（files glob → 模块）、patch 解析、合成、确定性校验、candidate 原子落盘，
 //! 以及归纳锚点（induction-state.json）读写。
 //!
-//! 设计红线（与 easyvibe-map-prompt-incremental-v1.md 的纪律一一对应）：
+//! 设计红线（与「小步增量归纳」提示词的纪律一一对应）：
 //! - 禁止删除任何旧模块（越权即拒）；
 //! - patch 里出现的每个模块必须真的 affected（diff 文件按 CURRENT_MAP 的 files glob 归属，
 //!   一个文件匹配多个模块时所有这些模块都算 affected——与 prompt 白名单同一规则）；

@@ -20,12 +20,21 @@ jobs:
         with:
           node-version: 20
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      # 前端 dist / 提示词 / 后端 sidecar 的同步与构建由 tauri.conf 的
-      # beforeBuildCommand（scripts/sync-desktop.sh）统一完成，此处不重复
+      # 前置：证明「本次 tag 打包不会被『缺 manifest』阻断」（T1 全新 checkout 走默认入口成功）
+      - name: 守卫自检（证明 tag 打包路径不被阻断）
+        run: python3 scripts/verify_assets.py --selfcheck
+
+      # 前端 dist / 受管契约文本（含 manifest）/ 后端 sidecar 的同步与构建由 tauri.conf 的
+      # beforeBuildCommand（scripts/sync-desktop.sh）统一完成：默认入口无 manifest 不 fail（自愈），
+      # 生成后跑 --check（源↔副本漂移才 fail）。此处不重复。
 
       - name: Tauri 打包
         uses: tauri-apps/tauri-action@v0
@@ -40,3 +49,8 @@ jobs:
           # tagName: ${{ github.ref_name }}
           # releaseName: 'EasyVibe ${{ github.ref_name }} (Windows)'
           args: --verbose
+
+      # 后置溯源：打包产物所在的树必须由当前源生成（无 manifest = fail 的唯一落点，
+      # 且只在打包成功后的独立步骤里——绝不放进 beforeBuildCommand）
+      - name: 产物溯源校验（严格门禁，后置）
+        run: python3 scripts/verify_assets.py --verify-manifest

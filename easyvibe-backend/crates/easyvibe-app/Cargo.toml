@@ -7,6 +7,10 @@ edition = "2021"
 name = "easyvibe-backend"
 path = "src/main.rs"
 
+[build-dependencies]
+# 编译期从 scripts/assets.json 派生受管资产表（R12：源码零契约名/env 名字面量）
+serde_json.workspace = true
+
 [dependencies]
 easyvibe-common.workspace = true
 easyvibe-api-types.workspace = true

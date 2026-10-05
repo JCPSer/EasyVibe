@@ -2,15 +2,19 @@
 
 use crate::state::data_dir;
 
-/// 出厂资产编译期内嵌——独立分发形态（双击 exe / 单文件拷到干净机器）下环境变量与旁路文件都不存在，
-/// 解析链兜底到这里。单一事实源仍是仓库根的这四个文件：改提示词后重编后端即更新内嵌快照。
-/// DIST 由 build.rs 决定内嵌真身还是占位页（渲染器未构建的 CI 场景），见 EMBEDDED_UI_REAL。
-pub const MAP_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-v2.2.md");
-/// 小步增量归纳（B 方案）prompt——与 v2.2 平级，env 覆盖走独立 EASYVIBE_INCREMENTAL_PROMPT_PATH
-pub const INCREMENTAL_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-incremental-v1.md");
-pub const PATROL_PROMPT: &str = include_str!("../../../../easyvibe-map-patrol-prompt-v2.md");
-pub const MAP_SCHEMA: &str = include_str!("../../../../easyvibe-map-schema-v1.1.json");
-pub const SUBMAP_PROMPT: &str = include_str!("../../../../easyvibe-module-submap-prompt.md");
+// 受管资产名册由 build.rs 从 `scripts/assets.json`（唯一事实源）派生：
+// 常量 MAP_PROMPT / PATROL_PROMPT / MAP_SCHEMA / SUBMAP_PROMPT / INCREMENTAL_PROMPT
+// 与 SPEC 名册均在此展开。改提示词名 / env 名只改名录，编译期自动跟随。
+// 本文件不再出现任何契约文件名或 env 名字面量（由 scripts/verify_assets.py --forbid-literals 守卫）。
+include!(concat!(env!("OUT_DIR"), "/text_assets_gen.rs"));
+
+/// 按 role（见 `scripts/assets.json`）取受管资产条目。
+pub(crate) fn spec(role: &str) -> &'static AssetSpec {
+    SPEC.iter()
+        .find(|s| s.role == role)
+        .unwrap_or_else(|| panic!("资产 role 未在名录中: {role}"))
+}
+
 include!(concat!(env!("OUT_DIR"), "/embedded_dist.rs"));
 
 /// 独立形态（内嵌 UI 可用且未指定外部静态目录）下为 true：启动后自动打开浏览器

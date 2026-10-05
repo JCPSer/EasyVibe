@@ -6,6 +6,10 @@ easyvibe-renderer/dist/
 /easyvibe-backend/target
 node_modules/
 
+# Python（新守卫脚本运行产生的字节码缓存）
+__pycache__/
+*.pyc
+
 # 本地参考材料（第三方仓库/文档，不入库）
 reference/
 

@@ -14,14 +14,12 @@ lsof -ti :7100 | xargs kill -9 2>/dev/null || true
 pkill -f "claude -p --bare --dangerously-skip-permissions" 2>/dev/null || true
 sleep 1
 
+# 受管契约 env 从唯一名录（scripts/assets.json）派生，不再手写（避免清单漂移）
+eval "$(python3 "$ROOT/scripts/verify_assets.py" --print-env)"
+
 echo "▶ 启动 EasyVibe 后端 (127.0.0.1:7101, 仓库: $REPO)"
 cd easyvibe-backend
-EASYVIBE_REPO="$REPO" \
-EASYVIBE_PROMPT_PATH=$ROOT/easyvibe-map-prompt-v2.2.md \
-EASYVIBE_PATROL_PROMPT_PATH=$ROOT/easyvibe-map-patrol-prompt-v2.md \
-EASYVIBE_SCHEMA_PATH=$ROOT/easyvibe-map-schema-v1.1.json \
-EASYVIBE_SUBMAP_PROMPT_PATH=$ROOT/easyvibe-module-submap-prompt.md \
-cargo run &
+EASYVIBE_REPO="$REPO" cargo run &
 
 sleep 3
 echo "▶ 启动渲染器 (http://localhost:7100)"

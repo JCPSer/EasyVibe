@@ -1,0 +1,35 @@
+# 产物副本一致性守卫（R4+R6+R14）：覆盖日常 push/PR，而非只在 tag 打包时。
+# 轻量/秒级：纯 python3，不跑 cargo test / npm build / vitest 全量。
+# 一个实现（scripts/verify_assets.py），多处薄封装（backend tests/asset_guard.rs、
+# renderer archGuard.test.ts、本 workflow、scripts/verify-assets.sh）。
+name: Asset Guard
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # L1 字节层（本地有副本时）+ L2 名录层：源↔副本 sha256、名录↔源码
+      - name: 产物一致性检查（--check）
+        run: python3 scripts/verify_assets.py --check
+
+      # R12+R13′ 防回归闸门：受管名 / env 名 / 陈旧名不得出现在名录以外的源码（含注释）；期望 0 命中
+      - name: 字面量防回归（--forbid-literals）
+        run: python3 scripts/verify_assets.py --forbid-literals
+
+      # T1–T4：生成自愈 / 漂移必红 / 无 manifest 必红 / 同步后必绿（证明 tag 打包不被「缺 manifest」阻断）
+      - name: 守卫自检 T1–T4（--selfcheck）
+        run: python3 scripts/verify_assets.py --selfcheck
+
+      # 入口 shim 可用性（矩阵 §五命令）
+      - name: shim 入口（verify-assets.sh）
+        run: bash scripts/verify-assets.sh --check

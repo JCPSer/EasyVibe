@@ -91,12 +91,9 @@ pub(crate) async fn run() {
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let (prompt_template, prompt_path) = resolve_text_asset(
-        "EASYVIBE_PROMPT_PATH",
-        "easyvibe-map-prompt-v2.2.md",
-        assets::MAP_PROMPT,
-        true,
-    );
+    let map_spec = assets::spec("map_prompt");
+    let (prompt_template, prompt_path) =
+        resolve_text_asset(map_spec.env, map_spec.name, map_spec.embedded, map_spec.persist);
     info!("agent={} args={:?} prompt={}", agent_command, agent_args, prompt_path);
 
     // M3-3/S1-3：harness 装载上移到管线挂载之前——spawn_repo_pipeline 注入点 #8 需要持有它
@@ -303,25 +300,22 @@ pub(crate) async fn run() {
     };
     // 提示词/schema 统一走解析链（env → exe 旁 → cwd → 编译期内嵌落盘），不再因缺文件直接 panic——
     // 独立分发形态（双击 exe）此前死在这里：窗口一闪而过，用户看到的就是"没反应"
-    let (patrol_prompt, _) = resolve_text_asset(
-        "EASYVIBE_PATROL_PROMPT_PATH",
-        "easyvibe-map-patrol-prompt-v2.md",
-        assets::PATROL_PROMPT,
-        true,
-    );
-    let (_, schema_path) = resolve_text_asset("EASYVIBE_SCHEMA_PATH", "easyvibe-map-schema-v1.1.json", assets::MAP_SCHEMA, true);
-    let (submap_prompt, _) = resolve_text_asset(
-        "EASYVIBE_SUBMAP_PROMPT_PATH",
-        "easyvibe-module-submap-prompt.md",
-        assets::SUBMAP_PROMPT,
-        true,
-    );
-    // 增量归纳 prompt（B 方案）：独立 env 名，不干扰 EASYVIBE_PROMPT_PATH
+    let patrol_spec = assets::spec("patrol");
+    let (patrol_prompt, _) =
+        resolve_text_asset(patrol_spec.env, patrol_spec.name, patrol_spec.embedded, patrol_spec.persist);
+    let schema_spec = assets::spec("schema");
+    let (_, schema_path) =
+        resolve_text_asset(schema_spec.env, schema_spec.name, schema_spec.embedded, schema_spec.persist);
+    let submap_spec = assets::spec("submap");
+    let (submap_prompt, _) =
+        resolve_text_asset(submap_spec.env, submap_spec.name, submap_spec.embedded, submap_spec.persist);
+    // 增量归纳 prompt（B 方案）：独立 env 名，不干扰主 prompt 的 env
+    let incremental_spec = assets::spec("incremental");
     let (incremental_prompt, _) = resolve_text_asset(
-        "EASYVIBE_INCREMENTAL_PROMPT_PATH",
-        "easyvibe-map-prompt-incremental-v1.md",
-        assets::INCREMENTAL_PROMPT,
-        true,
+        incremental_spec.env,
+        incremental_spec.name,
+        incremental_spec.embedded,
+        incremental_spec.persist,
     );
 
     // M3-3/S1-3：harness 已在管线挂载前装载（见上），此处仅打日志 + 任务执行引擎 + pending 恢复

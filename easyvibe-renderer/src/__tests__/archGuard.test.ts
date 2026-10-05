@@ -11,6 +11,8 @@
 // 契约冻结（PageId 17 / WS 10 / Canvas props 20）由 repoLayout.test.ts 覆盖，此处不重复。
 // @ts-expect-error vitest 运行时支持 node:fs（tsconfig 无 node 类型）
 import { readFileSync, readdirSync } from 'node:fs'
+// @ts-expect-error vitest 运行时支持 node:child_process
+import { execFileSync } from 'node:child_process'
 // @ts-expect-error vitest 运行时支持 node:path
 import { resolve, dirname, join, normalize } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -299,5 +301,17 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
     expect(hits).toBe(3)
     // 注释中的 /api/ 与 fetch 不误报
     expect(directRestHits('src/api/core.ts')).toBeGreaterThan(0) // 唯一出口自身持有 fetch（在 src/api 内合法）
+  })
+})
+
+// ⑤ 产物副本一致性守卫（R4/R6）：唯一实现在 scripts/verify_assets.py（跨平台 python3），
+// 前端只做薄封装调用同一入口，不重复实现。覆盖：L1 源↔副本 sha256（副本缺失=SKIP，CI 全新
+// checkout 亦成立）+ L2 名录↔源码（--forbid-literals：受管名/env 名/陈旧名不得出现在名录以外的源码）。
+describe('⑤ 产物副本一致性守卫（源↔副本 sha256 + 名录字面量）', () => {
+  it('python3 scripts/verify_assets.py --check 全绿（漂移或字面量外泄即失败）', () => {
+    const script = resolve(cwd, '../scripts/verify_assets.py')
+    // execFileSync 在非零退出时抛错，即测试失败（fail-closed）
+    const out = execFileSync('python3', [script, '--check'], { encoding: 'utf-8' })
+    expect(out).toContain('全部通过')
   })
 })

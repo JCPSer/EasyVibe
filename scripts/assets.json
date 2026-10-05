@@ -1,0 +1,56 @@
+{
+  "_comment": "受管资产的唯一事实源。改契约文本名 / env 名只改这里；其余位置全部派生或由 verify_assets.py 断言。",
+  "version": 1,
+  "text_assets": [
+    {
+      "name": "easyvibe-map-prompt-v2.2.md",
+      "role": "map_prompt",
+      "env": "EASYVIBE_PROMPT_PATH",
+      "rust_const": "MAP_PROMPT",
+      "distribute": true,
+      "persist": true
+    },
+    {
+      "name": "easyvibe-map-patrol-prompt-v2.md",
+      "role": "patrol",
+      "env": "EASYVIBE_PATROL_PROMPT_PATH",
+      "rust_const": "PATROL_PROMPT",
+      "distribute": true,
+      "persist": true
+    },
+    {
+      "name": "easyvibe-map-schema-v1.1.json",
+      "role": "schema",
+      "env": "EASYVIBE_SCHEMA_PATH",
+      "rust_const": "MAP_SCHEMA",
+      "distribute": true,
+      "persist": true
+    },
+    {
+      "name": "easyvibe-module-submap-prompt.md",
+      "role": "submap",
+      "env": "EASYVIBE_SUBMAP_PROMPT_PATH",
+      "rust_const": "SUBMAP_PROMPT",
+      "distribute": true,
+      "persist": false
+    },
+    {
+      "name": "easyvibe-map-prompt-incremental-v1.md",
+      "role": "incremental",
+      "env": "EASYVIBE_INCREMENTAL_PROMPT_PATH",
+      "rust_const": "INCREMENTAL_PROMPT",
+      "distribute": true,
+      "persist": false
+    }
+  ],
+  "stale_names": [
+    "easyvibe-map-patrol-prompt.md",
+    "easyvibe-map-schema-v1.json"
+  ],
+  "cli_assets": [
+    {
+      "source": "run/easyvibe_map_cli.py",
+      "generated": ".easyvibe/map/easyvibe_map_cli.py"
+    }
+  ]
+}

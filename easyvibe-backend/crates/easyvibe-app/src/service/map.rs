@@ -3,7 +3,7 @@
 //! 四类编排：①地图读取 ②巡检 ③增量/全量归纳 ④子图分析 + 队列宿主桥。
 //! HTTP 边界（入参解析 / ETag / 状态码 / 响应包装）留在 `routes/map.rs`。
 
-use crate::assets::resolve_text_asset;
+use crate::assets::{self, resolve_text_asset};
 use crate::freshness;
 use crate::map_concerns::{assign_concern_ids, diff_concerns, extract_concerns};
 use crate::state::*;
@@ -128,12 +128,8 @@ pub(crate) async fn analyze_submap(st: &AppState, id: &str, module_id: &str) -> 
     // 子图提示词每次请求重读（产品内置协议迭代快——避免"改了提示词要重启后端"的叠加
     // （本次实弹：路径修正后的提示词因后端未重启而仍用旧版，DeskWar 两次分析空跑）。
     // 读取失败回退启动时装载的副本，绝不阻断
-    let (template, _) = resolve_text_asset(
-        "EASYVIBE_SUBMAP_PROMPT_PATH",
-        "easyvibe-module-submap-prompt.md",
-        &st.submap_prompt,
-        false,
-    );
+    let submap_spec = assets::spec("submap");
+    let (template, _) = resolve_text_asset(submap_spec.env, submap_spec.name, &st.submap_prompt, submap_spec.persist);
     ensure_agent_available(st)?;
     let prompt = template
         .replace("<REPO_ROOT>", &repo.root.to_string_lossy())
@@ -186,12 +182,9 @@ pub(crate) async fn start_reinduce(st: &AppState, id: &str, force_full: bool) ->
     let prompt = match &mode {
         crate::reinduce::ReinduceMode::Incremental(ctx) => {
             // 每次 spawn 重读（与 submap 同一纪律：提示词迭代免重启）
-            let (template, _) = resolve_text_asset(
-                "EASYVIBE_INCREMENTAL_PROMPT_PATH",
-                "easyvibe-map-prompt-incremental-v1.md",
-                &st.incremental_prompt,
-                false,
-            );
+            let inc_spec = assets::spec("incremental");
+            let (template, _) =
+                resolve_text_asset(inc_spec.env, inc_spec.name, &st.incremental_prompt, inc_spec.persist);
             let current_map = snap_before
                 .as_ref()
                 .and_then(|s| serde_json::to_string(&s.json).ok())

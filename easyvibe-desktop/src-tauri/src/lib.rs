@@ -7,6 +7,10 @@ use std::sync::Mutex;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::ShellExt;
 
+// 受管契约文本的 (env 名, 产物文件名) 名册，由 build.rs 从 scripts/assets.json 派生（唯一事实源）。
+// 两处 sidecar spawn 共用同一张表 —— 不再手写 env 名/文件名。
+include!(concat!(env!("OUT_DIR"), "/asset_env_gen.rs"));
+
 /// 桌面壳内后端固定端口（开发后端用 7101，互不冲突）
 const BACKEND_PORT: u16 = 7151;
 
@@ -76,16 +80,16 @@ pub fn run() {
                 Box<dyn std::error::Error>,
             > {
                 let port_str = BACKEND_PORT.to_string();
-                let (rx, child) = app
+                let mut cmd = app
                     .shell()
                     .sidecar("easyvibe-backend")
                     .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
                     .env("EASYVIBE_PORT", &port_str)
-                    .env("EASYVIBE_STATIC_DIR", static_dir)
-                    .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
-                    .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
-                    .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))
-                    .env("EASYVIBE_SUBMAP_PROMPT_PATH", prompt_dir.join("easyvibe-module-submap-prompt.md"))
+                    .env("EASYVIBE_STATIC_DIR", static_dir);
+                for (k, f) in TEXT_ASSET_ENV.iter().copied() {
+                    cmd = cmd.env(k, prompt_dir.join(f));
+                }
+                let (rx, child) = cmd
                     .spawn()
                     .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
                 Ok((rx, child))
@@ -108,16 +112,16 @@ pub fn run() {
             > {
                 use tauri::Manager as _;
                 let port_str = BACKEND_PORT.to_string();
-                let (rx, child) = app
+                let mut cmd = app
                     .shell()
                     .sidecar("easyvibe-backend")
                     .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
                     .env("EASYVIBE_PORT", &port_str)
-                    .env("EASYVIBE_STATIC_DIR", static_dir)
-                    .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
-                    .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
-                    .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))
-                    .env("EASYVIBE_SUBMAP_PROMPT_PATH", prompt_dir.join("easyvibe-module-submap-prompt.md"))
+                    .env("EASYVIBE_STATIC_DIR", static_dir);
+                for (k, f) in TEXT_ASSET_ENV.iter().copied() {
+                    cmd = cmd.env(k, prompt_dir.join(f));
+                }
+                let (rx, child) = cmd
                     .spawn()
                     .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
                 Ok((rx, child))
