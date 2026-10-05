@@ -1,5 +1,5 @@
 // 数据类型的单一入口。
-// 主图类型由 easyvibe-map-schema-v1.json 自动生成（./generated），禁止手工镜像 schema 字段；
+// 主图类型由 easyvibe-map-schema-v1.1.json 自动生成（./generated），禁止手工镜像 schema 字段；
 // 改数据格式 = 改 Schema → npm run gen:types。
 export type {
   CodeMap,

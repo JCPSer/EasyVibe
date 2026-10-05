@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from '@/lib/toast'
 import { AlertOctagon, AlertTriangle, ArrowRight, Crosshair, Info, Loader2, Wrench, Zap } from 'lucide-react'
 import { buildConcernTask, type TaskDraft } from '@/lib/taskContext'
@@ -79,6 +79,26 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
   // 改进#6：问题卡"自动修复"一键直达（测试员路径优化：5 点击→2 点击）
   const [quickBusy, setQuickBusy] = useState<string | null>(null)
   const [quickDone, setQuickDone] = useState<string | null>(null)
+  // 2026-10-05 巡检新旧对照：最新一轮成功巡检的「修复/新增/持续」——
+  // map prop 随巡检写回而变化，以此作为刷新信号（PatrolFinished 后前端重载地图）
+  const [patrolDiff, setPatrolDiff] = useState<{ fixed: { finding: string }[]; new: { finding: string }[]; persisted: number; moduleGone: { module?: string; finding: string }[] } | null>(null)
+  useEffect(() => {
+    if (!backendRepo) return
+    let dead = false
+    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol-runs`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { data?: { runs?: { status: string; concernsDiff?: unknown }[] } } | null) => {
+        if (dead) return
+        const hit = (d?.data?.runs ?? []).find((x) => x.status === 'succeeded' && x.concernsDiff)
+        const cd = hit?.concernsDiff as typeof patrolDiff
+        setPatrolDiff(cd && (cd.fixed.length || cd.new.length || cd.persisted || cd.moduleGone.length) ? cd : null)
+      })
+      .catch(() => {})
+    return () => {
+      dead = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendRepo, map])
 
   const quickFix = (e: React.MouseEvent, issue: Issue) => {
     e.stopPropagation()
@@ -131,6 +151,23 @@ export function IssuesList({ map, onLocate, onCreateTask, backendRepo, scopeId, 
         <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
           {scopeName ? `选区收敛 · 该模块 ${issues.length} 项` : `共 ${issues.length} 项`} · 按严重度排序，同档按影响面（被依赖数）排序
         </p>
+        {/* 2026-10-05 巡检新旧对照（全量视图专属；选区收敛下数据口径不同不显示——评审#Q2） */}
+        {!scopeName && patrolDiff && (
+          <p
+            className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11px]"
+            title={[
+              ...patrolDiff.fixed.map((f) => `已修复：${f.finding}`),
+              ...patrolDiff.new.map((n) => `新增：${n.finding}`),
+              ...patrolDiff.moduleGone.map((m) => `随模块移除：${m.finding}`),
+            ].join('\n') || undefined}
+          >
+            <span className="font-semibold text-slate-500 dark:text-slate-400">对比上轮巡检</span>
+            {patrolDiff.fixed.length > 0 && <span className="font-bold text-emerald-600">修复 {patrolDiff.fixed.length}</span>}
+            {patrolDiff.new.length > 0 && <span className="font-bold text-amber-600">新增 {patrolDiff.new.length}</span>}
+            <span className="text-slate-400 dark:text-slate-500">持续 {patrolDiff.persisted}</span>
+            {patrolDiff.moduleGone.length > 0 && <span className="text-slate-400 dark:text-slate-500">随模块移除 {patrolDiff.moduleGone.length}</span>}
+          </p>
+        )}
       </div>
 
       {issues.length === 0 && (

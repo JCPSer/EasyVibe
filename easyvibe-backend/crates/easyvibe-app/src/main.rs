@@ -25,8 +25,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// DIST 由 build.rs 决定内嵌真身还是占位页（渲染器未构建的 CI 场景），见 EMBEDDED_UI_REAL。
 mod assets {
     pub const MAP_PROMPT: &str = include_str!("../../../../easyvibe-map-prompt-v2.2.md");
-    pub const PATROL_PROMPT: &str = include_str!("../../../../easyvibe-map-patrol-prompt.md");
-    pub const MAP_SCHEMA: &str = include_str!("../../../../easyvibe-map-schema-v1.json");
+    pub const PATROL_PROMPT: &str = include_str!("../../../../easyvibe-map-patrol-prompt-v2.md");
+    pub const MAP_SCHEMA: &str = include_str!("../../../../easyvibe-map-schema-v1.1.json");
     pub const SUBMAP_PROMPT: &str = include_str!("../../../../easyvibe-module-submap-prompt.md");
     include!(concat!(env!("OUT_DIR"), "/embedded_dist.rs"));
 }
@@ -692,6 +692,108 @@ async fn start_reinduce_inner(st: AppState, id: String) -> Result<Response, AppE
 /// - 真实模式：**session spawn**（与归纳同路径）。实弹发现直调无 tools 声明的 API
 ///   只会得到模型的 tool_call 幻觉（DSML 伪调用），真实巡检需要 Bash 核查
 ///   （wc/git/grep），是工具型任务，必须由带工具的 agent 执行。
+/// 问题项快照条目（2026-10-05 巡检新旧对照的旧侧）
+#[derive(Debug, Clone, PartialEq)]
+struct OldConcern {
+    scope: &'static str, // "arch" | "module"
+    module: Option<String>,
+    id: Option<String>,
+    finding: String,
+}
+
+/// 从地图 JSON 提取全部 concerns（架构级 + 各模块级）——巡检开始前快照用。
+fn extract_concerns(map: &serde_json::Value) -> Vec<OldConcern> {
+    let mut out = Vec::new();
+    let mut push = |scope: &'static str, module: Option<String>, c: &serde_json::Value| {
+        out.push(OldConcern {
+            scope,
+            module,
+            id: c["id"].as_str().map(Into::into),
+            finding: c["finding"].as_str().unwrap_or_default().into(),
+        });
+    };
+    for c in map["health"]["concerns"].as_array().into_iter().flatten() {
+        push("arch", None, c);
+    }
+    for m in map["modules"].as_array().into_iter().flatten() {
+        let mid = m["id"].as_str().map(Into::into);
+        for c in m["health"]["concerns"].as_array().into_iter().flatten() {
+            push("module", mid.clone(), c);
+        }
+    }
+    out
+}
+
+/// 巡检新旧对照（纯函数；测试全覆盖）：
+/// 两阶段匹配（评审#S3）——先 (scope, module, id) 精确匹配（双侧都有 id），
+/// 剩余项按 (scope, module, finding) 文本精确匹配兜底（旧图无 id 的过渡期数据）；
+/// 仍孤立的旧项计 fixed——但其模块已从新图消失的计 moduleGone（评审#S3：模块没了 ≠ 修好了）。
+fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> serde_json::Value {
+    let new = extract_concerns(new_map);
+    let mut used_new = vec![false; new.len()];
+    let mut used_old = vec![false; old.len()];
+
+    // 阶段 1：id 精确匹配（双侧都有 id 才有锚点意义）
+    for (oi, o) in old.iter().enumerate() {
+        let Some(oid) = &o.id else { continue };
+        for (ni, n) in new.iter().enumerate() {
+            if used_new[ni] || n.id.as_deref() != Some(oid.as_str()) {
+                continue;
+            }
+            if o.scope == n.scope && o.module == n.module {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                break;
+            }
+        }
+    }
+    // 阶段 2：finding 文本精确匹配兜底（只作用于两侧剩余项；新侧不限制 id——
+    // LLM 会给继承来的旧问题也分配新 id，但旧侧无 id 时文本是唯一锚点）
+    for (oi, o) in old.iter().enumerate() {
+        if used_old[oi] || o.id.is_some() {
+            continue;
+        }
+        for (ni, n) in new.iter().enumerate() {
+            if used_new[ni] || n.finding != o.finding {
+                continue;
+            }
+            if o.scope == n.scope && o.module == n.module {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                break;
+            }
+        }
+    }
+
+    let alive_modules: std::collections::HashSet<&str> = new_map["modules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    let item = |c: &OldConcern| serde_json::json!({ "id": c.id, "finding": c.finding });
+    let mut fixed = Vec::new();
+    let mut module_gone = Vec::new();
+    for (oi, o) in old.iter().enumerate() {
+        if used_old[oi] {
+            continue;
+        }
+        match o.scope {
+            "module" if o.module.as_deref().is_some_and(|m| !alive_modules.contains(m)) => {
+                module_gone.push(serde_json::json!({ "module": o.module, "finding": o.finding }));
+            }
+            _ => fixed.push(item(o)),
+        }
+    }
+    let fresh: Vec<_> = new.iter().zip(used_new.iter()).filter(|(_, u)| !**u).map(|(n, _)| item(n)).collect();
+    serde_json::json!({
+        "fixed": fixed,
+        "new": fresh,
+        "persisted": used_old.iter().filter(|b| **b).count(),
+        "moduleGone": module_gone,
+    })
+}
+
 /// 两条路径共用写互斥（try_register），终态后健康历史落域 2。
 async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
     start_patrol_inner(st, id).await
@@ -746,11 +848,25 @@ async fn start_patrol_inner(st: AppState, id: String) -> Result<Response, AppErr
             Ok((axum::http::StatusCode::ACCEPTED, Json(serde_json::json!({ "started": true, "runId": run_id, "mode": "stub" }))).into_response())
         }
         LlmMode::Anthropic => {
+            // 2026-10-05 问题项新旧对照：spawn 前快照上轮 concerns（必须在 start_induction 之前——
+            // 窗口期内 agent 完成原子写回后快照会拿到新图，对照全错；评审#S1/S6）。
+            // 读失败降级为空快照（等同首巡语义），不得阻断巡检启动。
+            let snap = st.map_service.load_map(&repo).await.ok();
+            let old_concerns = snap.as_ref().map(|s| extract_concerns(&s.json)).unwrap_or_default();
+            // 评审#S4：占位符在 agent 路径原样传入（会话层只替换 <REPO_ROOT>）——
+            // 此处预渲染 <CURRENT_MAP>（顺带解决上轮地图不可见的 id 继承依据）与 <SCHEMA_PATH>。
+            let prompt = match snap.as_ref().and_then(|s| serde_json::to_string(&s.json).ok()) {
+                Some(map_json) if map_json.len() < 512 * 1024 => st
+                    .patrol_prompt
+                    .replace("<CURRENT_MAP>", &map_json)
+                    .replace("<SCHEMA_PATH>", &st.schema_path),
+                _ => st.patrol_prompt.to_string(),
+            };
             // 真实巡检 = 工具型执行：spawn 带工具的 CLI agent，prompt 要求原子写回 map.json
             let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
             let session = st
                 .session_manager
-                .start_induction(&repo.id, &repo.root, &st.patrol_prompt, &resolved.command, &resolved.args, None)
+                .start_induction(&repo.id, &repo.root, &prompt, &resolved.command, &resolved.args, None)
                 .await?;
             // I1：气泡标签「巡检」
             st.session_manager.note_label(&session.session_id, "巡检".into()).await;
@@ -770,10 +886,17 @@ async fn start_patrol_inner(st: AppState, id: String) -> Result<Response, AppErr
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let Some(s) = st2.session_manager.status_of_session(&session_id).await else { continue };
                     if matches!(s.status, easyvibe_api_types::SessionStatus::Starting | easyvibe_api_types::SessionStatus::Running) { continue }
+                    let succeeded = s.status == easyvibe_api_types::SessionStatus::Succeeded;
                     let result = async {
                         let snap = st2.map_service.load_map(&repo2).await?;
+                        // 仅 succeeded 写对照（评审#Q1：失败时读到的可能是未写回旧图，存了反而误导）
+                        let diff = if succeeded {
+                            Some(diff_concerns(&old_concerns, &snap.json).to_string())
+                        } else {
+                            None
+                        };
                         st2.patrol_service
-                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, s.status == easyvibe_api_types::SessionStatus::Succeeded, None)
+                            .record_from_map(&run_id_task, &repo2.id, &model, &snap.json, succeeded, None, diff)
                             .await
                     }
                     .await;
@@ -977,6 +1100,8 @@ async fn get_health_dashboard(State(st): State<AppState>, Path(id): Path<String>
                 "archScore": r.arch_score,
                 "moduleAvg": module_avg,
                 "moduleCount": module_count,
+                // 2026-10-05 问题项新旧对照（仅 succeeded 巡检有值）
+                "concernsDiff": r.concerns_diff.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
             })
         })
         .collect();
@@ -2854,11 +2979,11 @@ async fn main() {
     // 独立分发形态（双击 exe）此前死在这里：窗口一闪而过，用户看到的就是"没反应"
     let (patrol_prompt, _) = resolve_text_asset(
         "EASYVIBE_PATROL_PROMPT_PATH",
-        "easyvibe-map-patrol-prompt.md",
+        "easyvibe-map-patrol-prompt-v2.md",
         assets::PATROL_PROMPT,
         true,
     );
-    let (_, schema_path) = resolve_text_asset("EASYVIBE_SCHEMA_PATH", "easyvibe-map-schema-v1.json", assets::MAP_SCHEMA, true);
+    let (_, schema_path) = resolve_text_asset("EASYVIBE_SCHEMA_PATH", "easyvibe-map-schema-v1.1.json", assets::MAP_SCHEMA, true);
     let (submap_prompt, _) = resolve_text_asset(
         "EASYVIBE_SUBMAP_PROMPT_PATH",
         "easyvibe-module-submap-prompt.md",
@@ -3321,6 +3446,52 @@ mod tests {
         assert_eq!(resp.status(), axum::http::StatusCode::OK, "chat POST 应成功");
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    }
+
+    #[test]
+    fn diff_concerns_classifies_fixed_new_persisted() {
+        // 2026-10-05 巡检新旧对照：id 继承 / 无 id 文本兜底 / 模块消失区分 / 首巡全 new
+        let map = |concerns: serde_json::Value| {
+            serde_json::json!({
+                "health": { "concerns": concerns["arch"] },
+                "modules": concerns["modules"],
+            })
+        };
+        let old = vec![
+            OldConcern { scope: "arch", module: None, id: Some("c-arch-1".into()), finding: "A".into() },
+            OldConcern { scope: "arch", module: None, id: None, finding: "B".into() },          // 无 id：文本兜底
+            OldConcern { scope: "module", module: Some("m1".into()), id: Some("c-m1-1".into()), finding: "C".into() },
+            OldConcern { scope: "module", module: Some("m2".into()), id: Some("c-m2-1".into()), finding: "D".into() },
+        ];
+        let new_map = map(serde_json::json!({
+            "arch": [
+                { "id": "c-arch-1", "finding": "A 措辞改了也算同一项" },   // id 继承 → persisted
+                { "id": "c-arch-2", "finding": "B" },                        // 无 id 文本兜底 → persisted
+            ],
+            "modules": [
+                { "id": "m1", "health": { "concerns": [{ "id": "c-m1-1", "finding": "C" }] } },
+                // m2 整模块消失 → moduleGone，不算 fixed
+            ],
+        }));
+        let d = diff_concerns(&old, &new_map);
+        assert_eq!(d["persisted"], 3, "id 继承 1 + 文本兜底 1 + 模块内继承 1");
+        assert_eq!(d["fixed"].as_array().unwrap().len(), 0);
+        assert_eq!(d["new"].as_array().unwrap().len(), 0);
+        assert_eq!(d["moduleGone"].as_array().unwrap().len(), 1);
+
+        // 新问题 + 修复并存（m1 仍在但 concern 被修 = fixed；m2 整模块消失 = moduleGone）
+        let new_map2 = map(serde_json::json!({
+            "arch": [ { "id": "c-arch-9", "finding": "新问题" } ],
+            "modules": [ { "id": "m1", "health": { "concerns": [] } } ],
+        }));
+        let d2 = diff_concerns(&old, &new_map2);
+        assert_eq!(d2["new"].as_array().unwrap().len(), 1);
+        assert_eq!(d2["fixed"].as_array().unwrap().len(), 3, "A（id 未命中）+ B（文本未命中）+ C（m1 还在但 concern 没了）");
+        assert_eq!(d2["moduleGone"].as_array().unwrap().len(), 1, "D 随 m2 整模块消失");
+        // 首巡（旧为空）→ 全 new（架构 2 + m1 模块 1 = 3）
+        let d3 = diff_concerns(&[], &new_map);
+        assert_eq!(d3["new"].as_array().unwrap().len(), 3);
+        assert_eq!(d3["persisted"], 0);
     }
 
     #[tokio::test]
@@ -4000,7 +4171,7 @@ mod tests {
             }).await.unwrap();
             state.health_repo.finish_run(&easyvibe_db::FinishPatrolRun {
                 id: rid, finished_at: "1".into(), status: status.to_string(), arch_score: Some(60),
-                error: None, prompt_tokens: None, completion_tokens: None,
+                error: None, prompt_tokens: None, completion_tokens: None, concerns_diff: None,
             }).await.unwrap();
             state.health_repo.insert_module_health(&easyvibe_db::ModuleHealthRow {
                 run_id: format!("prune-run-{i}"), module_id: "m1".into(), name: Some("m1".into()), score: 60,

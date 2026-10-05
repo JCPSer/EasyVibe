@@ -261,6 +261,7 @@ impl<R: HealthRepository> PatrolService<R> {
                         error: None,
                         prompt_tokens: Some(pt as i64),
                         completion_tokens: Some(ct as i64),
+                        concerns_diff: None, // Stub 路径无新旧对照（评审#B2：通道在 finish_run）
                     })
                     .await?;
                 Ok(summary)
@@ -275,6 +276,7 @@ impl<R: HealthRepository> PatrolService<R> {
                         error: Some(e.to_string()),
                         prompt_tokens: None,
                         completion_tokens: None,
+                        concerns_diff: None,
                     })
                     .await?;
                 Err(e)
@@ -324,6 +326,7 @@ impl<R: HealthRepository> PatrolService<R> {
         map: &Value,
         succeeded: bool,
         error: Option<String>,
+        concerns_diff: Option<String>,
     ) -> Result<(), ApiError> {
         self.repo_health
             .create_run(&NewPatrolRun { id: run_id.to_string(), repo: repo_id.to_string(), started_at: now_iso(), model: model.to_string() })
@@ -340,6 +343,7 @@ impl<R: HealthRepository> PatrolService<R> {
                 error,
                 prompt_tokens: None,     // 会话型 CLI agent 无法回报 usage（M3-5 记档）
                 completion_tokens: None,
+                concerns_diff,
             })
             .await?;
         Ok(())

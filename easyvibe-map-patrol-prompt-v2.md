@@ -27,4 +27,8 @@
 2. **再全局架构评估**：站在全图判断架构级 health 变化（跨模块耦合形态、分层合理性、逆向依赖密度、职责重叠/缺失）；**禁止取模块平均分，模块全绿 ≠ 架构健康**
 3. **携带上轮健康基线**：对比上轮 health（score/coupling/complexity/churn/decay_flags），明显漂移时在 review_note 说明原因（如"近 3 月 churn 上升导致 score 下降"）
 4. concerns 至多 3 条/级（severity: critical/high；finding=现状，suggestion=建议；宁缺毋滥）
+5. concerns 每项必须带稳定 `id`：架构级 `c-arch-N`、模块级 `c-<module_id>-N`（N 从 1 递增）。
+   **先读仓库 `.easyvibe/map/map.json` 上轮 concerns 并沿用其 id**——同一问题即使措辞改写也保持
+   原 id（这是「修复/新增/持续」对照的锚点）；新发现的问题在该 scope 顺延最大 N+1 分配新 id；
+   不再成立的问题整条移除。id 只增不改、不跨 scope 复用
 5. 更新 `meta.last_patrol_at` 为当前时间；`meta.map_freshness` 按漂移程度置 fresh/drifting/stale

@@ -1,6 +1,6 @@
 /* eslint-disable */
 /**
- * 本文件由 scripts/gen-types.mjs 从 easyvibe-map-schema-v1.json 自动生成，请勿手改。
+ * 本文件由 scripts/gen-types.mjs 从 easyvibe-map-schema-v1.1.json 自动生成，请勿手改。
  * 修改数据格式请改 Schema，然后 npm run gen:types。
  */
 
@@ -186,6 +186,10 @@ export interface Concern {
    * 建议：一句话给出改法
    */
   suggestion: string;
+  /**
+   * 稳定标识：c-arch-N（架构级）/ c-<module_id>-N（模块级）；巡检继承上轮同问题 id
+   */
+  id?: string;
 }
 export interface MapEdge {
   /**

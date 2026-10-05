@@ -21,6 +21,9 @@ pub struct PatrolRunRow {
     pub error: Option<String>,
     pub prompt_tokens: Option<i64>,     // M3-5：token 用量记录（§10 #4 第一步）
     pub completion_tokens: Option<i64>,
+    /// 2026-10-05 问题项新旧对照（JSON：{fixed:[{id,finding}],new:[…],persisted:n, moduleGone:[…]}）；
+    /// 仅 succeeded 巡检写入，失败/进行时为 NULL
+    pub concerns_diff: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +102,8 @@ pub struct FinishPatrolRun {
     pub error: Option<String>,
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
+    /// 问题项新旧对照 JSON（仅 succeeded 写入；评审#Q1：失败存 NULL 防误导）
+    pub concerns_diff: Option<String>,
 }
 
 /// M4-3 健康看板：单次巡检的模块分聚合（趋势图"模块平均"线 + 巡检记录表的数据面）
@@ -172,7 +177,7 @@ impl HealthRepository for SqliteHealthRepository {
 
     async fn finish_run(&self, fin: &FinishPatrolRun) -> Result<(), ApiError> {
         sqlx::query(
-            "UPDATE patrol_runs SET finished_at = ?, status = ?, arch_score = ?, error = ?, prompt_tokens = ?, completion_tokens = ? WHERE id = ?",
+            "UPDATE patrol_runs SET finished_at = ?, status = ?, arch_score = ?, error = ?, prompt_tokens = ?, completion_tokens = ?, concerns_diff = ? WHERE id = ?",
         )
         .bind(&fin.finished_at)
         .bind(&fin.status)
@@ -180,6 +185,7 @@ impl HealthRepository for SqliteHealthRepository {
         .bind(&fin.error)
         .bind(fin.prompt_tokens)
         .bind(fin.completion_tokens)
+        .bind(&fin.concerns_diff)
         .bind(&fin.id)
         .execute(&self.pool)
         .await
@@ -211,7 +217,7 @@ impl HealthRepository for SqliteHealthRepository {
 
     async fn list_runs(&self, repo: &str, limit: i64) -> Result<Vec<PatrolRunRow>, ApiError> {
         let rows = sqlx::query_as::<_, PatrolRunRowSql>(
-            "SELECT id, repo, started_at, finished_at, status, model, arch_score, error, prompt_tokens, completion_tokens
+            "SELECT id, repo, started_at, finished_at, status, model, arch_score, error, prompt_tokens, completion_tokens, concerns_diff
              FROM patrol_runs WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
         )
         .bind(repo)
@@ -312,6 +318,7 @@ struct PatrolRunRowSql {
     finished_at: Option<String>,
     status: String,
     model: Option<String>,
+    concerns_diff: Option<String>,
     arch_score: Option<i64>,
     error: Option<String>,
     prompt_tokens: Option<i64>,
@@ -331,6 +338,7 @@ impl From<PatrolRunRowSql> for PatrolRunRow {
             error: r.error,
             prompt_tokens: r.prompt_tokens,
             completion_tokens: r.completion_tokens,
+            concerns_diff: r.concerns_diff,
         }
     }
 }
@@ -1867,6 +1875,7 @@ mod tests {
             arch_score: Some(58),
             error: None,
             prompt_tokens: Some(100),
+            concerns_diff: None,
             completion_tokens: Some(50),
         })
         .await
@@ -1896,7 +1905,7 @@ mod tests {
             let status = status.to_string();
             async move {
                 repo.create_run(&NewPatrolRun { id: id.clone(), repo: "demo".into(), started_at: started, model: "stub".into() }).await.unwrap();
-                repo.finish_run(&FinishPatrolRun { id, finished_at: now(), status, arch_score: arch, error: None, prompt_tokens: None, completion_tokens: None }).await.unwrap();
+                repo.finish_run(&FinishPatrolRun { id, finished_at: now(), status, arch_score: arch, error: None, prompt_tokens: None, completion_tokens: None, concerns_diff: None }).await.unwrap();
             }
         };
         let mk_module = |run_id: &str, module_id: &str, score: i64| {

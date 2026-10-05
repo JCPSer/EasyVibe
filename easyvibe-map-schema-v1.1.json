@@ -383,6 +383,10 @@
               "suggestion": {
                 "type": "string",
                 "description": "建议：一句话给出改法"
+              },
+              "id": {
+                "type": "string",
+                "description": "稳定标识：c-arch-N（架构级）/ c-<module_id>-N（模块级）；巡检继承上轮同问题 id"
               }
             }
           }

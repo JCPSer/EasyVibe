@@ -14,7 +14,7 @@ echo "▶ 同步静态资源与提示词"
 rm -rf "$DESKTOP/src-tauri/resources/dist"
 cp -R "$ROOT/easyvibe-renderer/dist" "$DESKTOP/src-tauri/resources/dist"
 mkdir -p "$DESKTOP/src-tauri/resources/prompts"
-for f in easyvibe-map-prompt-v2.2.md easyvibe-map-patrol-prompt.md easyvibe-map-schema-v1.json easyvibe-module-submap-prompt.md; do
+for f in easyvibe-map-prompt-v2.2.md easyvibe-map-patrol-prompt-v2.md easyvibe-map-schema-v1.1.json easyvibe-module-submap-prompt.md; do
   cp "$ROOT/$f" "$DESKTOP/src-tauri/resources/prompts/"
 done
 
