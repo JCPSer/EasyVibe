@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./resources/主界面示意图渲染.png" alt="EasyVibe — The VibeCoding IDE with built-in architecture governance" width="100%">
+  <img src="./resources/screenshot-main.png" alt="EasyVibe — The VibeCoding IDE with built-in architecture governance" width="100%">
 </p>
 
 <p align="center">
