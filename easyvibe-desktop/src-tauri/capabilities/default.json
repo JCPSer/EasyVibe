@@ -29,6 +29,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-is-focused",
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+    "notification:default"
   ]
 }

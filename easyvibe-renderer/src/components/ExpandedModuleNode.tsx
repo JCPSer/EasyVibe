@@ -16,6 +16,9 @@ export type ExpandedModuleNodeType = Node<
     onAnalyze?: () => void
     /** 改进#2：agent 过程直播——最近输出 */
     agentLines?: string[]
+    /** 2026-10-05 M4：分析中会话 id → 运行页看完整流水 */
+    analyzeSessionId?: string
+    onOpenRuns?: (sessionId: string) => void
     /** M4-1 诚实三态：失败原因（启动失败/会话失败/超时），必须说人话 */
     analyzeError?: string
     /** 点击头部折叠收起（2026-10-04 实弹：点头部也应能收起，不只工具栏入口） */
@@ -127,13 +130,25 @@ export const ExpandedModuleNode = memo(function ExpandedModuleNode({ data }: Nod
         )}
       </div>
       {/* 改进#2：agent 过程直播——分析中显示它正在输出的内容（来自会话 stdout 流） */}
-      {data.loading && data.agentLines && data.agentLines.length > 0 && (
+      {data.loading && (data.agentLines?.length || data.analyzeSessionId) && (
         <div className="mt-1.5 space-y-0.5 border-t border-slate-100 dark:border-slate-800 pt-1.5">
-          {data.agentLines.slice(-3).map((l, i) => (
+          {data.agentLines?.slice(-3).map((l, i) => (
             <p key={i} className="truncate font-mono text-micro leading-3.5 text-slate-400 dark:text-slate-500">
               <span className="text-emerald-500">›</span> {l}
             </p>
           ))}
+          {/* M4：4 行速览的尽头是完整流水——分析中可直接跳「运行」页 */}
+          {data.analyzeSessionId && data.onOpenRuns && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onOpenRuns!(data.analyzeSessionId!)
+              }}
+              className="text-micro font-semibold text-blue-500 hover:text-blue-600"
+            >
+              看完整流水 →
+            </button>
+          )}
         </div>
       )}
     </div>

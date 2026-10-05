@@ -19,6 +19,7 @@ export function TaskPage({
   onCreateTask,
   externalFocus,
   onGoChat,
+  onOpenRuns,
 }: {
   backendRepo: string | null
   map: CodeMap
@@ -27,6 +28,8 @@ export function TaskPage({
   externalFocus?: { id: string; nonce: number } | null
   /** v0.2 互指条：跳「任务对话」页 */
   onGoChat?: () => void
+  /** 2026-10-05 M4：任务会话 → 运行页看完整流水 */
+  onOpenRuns?: (sessionId: string) => void
 }) {
   // v4 修订（用户裁定）：默认看板（多任务全景是首页心智），点卡跳流水线看单任务全程
   const [view, setView] = useState<View>('board')
@@ -97,7 +100,7 @@ export function TaskPage({
       </div>
       {/* 视图区（组件常驻，display 切换保状态——终端缓冲/选中不丢） */}
       <div className="min-h-0 flex-1" style={view === 'pipeline' ? undefined : { display: 'none' }}>
-        <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} focusTask={focusTask} />
+        <TaskWorkflowPage backendRepo={backendRepo} map={map} onCreateTask={onCreateTask} focusTask={focusTask} onOpenRuns={onOpenRuns} />
       </div>
       <div className="min-h-0 flex-1" style={view === 'board' ? undefined : { display: 'none' }}>
         <TaskBoardPage backendRepo={backendRepo} onOpenWorkflow={() => setView('pipeline')} onSelectTask={openPipeline} onCreateTask={onCreateTask} />

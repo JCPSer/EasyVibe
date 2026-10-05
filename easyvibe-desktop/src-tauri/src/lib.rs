@@ -16,6 +16,7 @@ struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+            .plugin(tauri_plugin_notification::init())
         // D5-2：单实例锁——第二个实例直接把已有窗口拉到前台（routa 反面教材：双开抢端口）
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {

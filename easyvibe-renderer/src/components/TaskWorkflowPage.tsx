@@ -394,6 +394,7 @@ export function TaskWorkflowPage({
   map,
   onCreateTask,
   focusTask,
+  onOpenRuns,
 }: {
   backendRepo: string | null
   map: CodeMap
@@ -401,6 +402,8 @@ export function TaskWorkflowPage({
   onCreateTask: (d: TaskDraft) => void
   /** v4 修订：看板点卡跳入——按 nonce 选中对应任务（首次挂载也生效） */
   focusTask?: { id: string; nonce: number } | null
+  /** 2026-10-05 M4：本任务会话 → 运行页看完整流水（终端只留 200 行） */
+  onOpenRuns?: (sessionId: string) => void
 }) {
   const [tasks, setTasks] = useState<TaskItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -795,6 +798,15 @@ export function TaskWorkflowPage({
                       <span className="tnum ml-auto flex items-center gap-1.5">
                         <span className="flex h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> LIVE · 已运行 {duration(sel)}
                       </span>
+                      {onOpenRuns && sel.sessionId && (
+                        <button
+                          onClick={() => onOpenRuns(sel.sessionId!)}
+                          className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
+                          title="跳「运行」页看本会话的完整流水（含历史回放）"
+                        >
+                          完整流水 →
+                        </button>
+                      )}
                     </div>
                     <pre
                       ref={termRef}

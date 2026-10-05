@@ -48,6 +48,7 @@ import type { TaskDraft } from '@/lib/taskContext'
 import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitQueueChanged, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
 import { enqueue } from '@/lib/sessionQueue'
+import { sysNotify } from '@/lib/notify'
 import { pushTerminalLine } from '@/lib/terminalBuffer'
 import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
@@ -84,6 +85,8 @@ function buildFlow(
   agentLinesFor?: (id: string) => string[] | undefined,
   analyzeErrorFor?: (id: string) => string | undefined,
   onCollapse?: (id: string) => void,
+  onOpenRuns?: (sessionId: string) => void,
+  submapSessionIdFor?: (id: string) => string | undefined,
 ) {
   // 展开元信息：加载中给 4 个骨架位；错误态不再给骨架（M4-1 诚实三态——此前 error 也渲染"分析中…"骨架，
   // 造成"头部报错 + 身体永远转圈"的撕裂画面）
@@ -168,6 +171,8 @@ function buildFlow(
             agentLines: agentLinesFor?.(mod.id),
             analyzeError: analyzeErrorFor?.(mod.id),
             onCollapse: onCollapse ? () => onCollapse(mod.id) : undefined,
+            analyzeSessionId: submapSessionIdFor?.(mod.id),
+            onOpenRuns: onOpenRuns ? (sid: string) => onOpenRuns(sid) : undefined,
           },
           sourcePosition: Position.Bottom,
           targetPosition: Position.Top,
@@ -548,6 +553,7 @@ function Canvas({
   onChatAbout,
   onGoWorkbench,
   onInspectEdge,
+  onOpenRuns,
   onOpenDeps,
   lensRequest,
   onLensRequestConsumed,
@@ -578,6 +584,8 @@ function Canvas({
   onGoWorkbench?: () => void
   /** 2026-10-05 依赖透镜：边浮卡 [详情] → 跳依赖体检页并聚焦对应卡片 */
   onInspectEdge?: (cardId: string) => void
+  /** 2026-10-05 M4：画布「分析中」模块 → 运行页看该会话流水 */
+  onOpenRuns?: (sessionId: string) => void
   /** 2026-10-05 右栏「耦合概览」入口（DetailPanel 上抛） */
   onOpenDeps?: () => void
   /** 2026-10-05 依赖透镜跳入：选中模块 + 打开 solo 聚焦 */
@@ -1004,7 +1012,7 @@ function Canvas({
   const growthVisible = growth ? arrived : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id], toggleExpand),
+    () => buildFlow(mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, (id) => agentLines[submapSessions[id] ?? ''], (id) => submapErrors[id], toggleExpand, onOpenRuns, (id) => submapSessions[id]),
     [mergedMap, selection, filters, effectiveExpanded, onSelectLayer, retrySubmap, growthVisible, analyzeSubmap, agentLines, submapSessions, submapErrors, toggleExpand],
   )
 
@@ -1756,7 +1764,7 @@ export default function App() {
   const [depsFocus, setDepsFocus] = useState<string | null>(null)
   /** 2026-10-05 依赖透镜：DepsPage「在画布上看」→ 画布选中并开 solo（filters 状态本体在 Canvas） */
   const [lensRequest, setLensRequest] = useState<string | null>(null)
-  /** 2026-10-05 用量页 → 运行页会话 deeplink */
+  /** 2026-10-05 用量页/任务页/画布 → 运行页会话 deeplink */
   const [runsFocus, setRunsFocus] = useState<string | null>(null)
   // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
   const [onboarding, setOnboarding] = useState(loadOnboarding)
@@ -1826,6 +1834,25 @@ export default function App() {
       saveUiPref('ui.page', p)
     },
     [saveUiPref],
+  )
+
+  // 2026-10-05 系统级通知：窗口失焦/后台时送达通知中心（toast 只有前台可见）。
+  // 会话失败 = 需要人来看；排队 drained+started = 离开等排队的用户该回来了。
+  useEffect(
+    () =>
+      onSessionEvent((e) => {
+        if (e.repo !== backendRepo || e.status !== 'failed') return
+        void sysNotify('EasyVibe · 会话失败', `会话 ${e.sessionId} 执行失败——回来看看原因`)
+      }),
+    [backendRepo],
+  )
+  useEffect(
+    () =>
+      onQueueChanged((e) => {
+        if (e.repo !== backendRepo || e.type !== 'drained' || !e.started) return
+        void sysNotify('EasyVibe · 排队任务已开始', e.job?.label ?? '')
+      }),
+    [backendRepo],
   )
 
   // v0.2：「就此对话」统一收口——带上下文跳「任务对话」页（Canvas 工具栏/详情视图/占位页签共用）
@@ -2424,6 +2451,11 @@ export default function App() {
       </div>
   )
 
+  const openRunsSession = useCallback((sessionId: string) => {
+    setRunsFocus(sessionId)
+    handlePageChange('runs')
+  }, [handlePageChange])
+
   const PAGES: Record<PageId, React.ReactNode> = {
     map: (
       <CanvasBoundary>
@@ -2469,6 +2501,7 @@ export default function App() {
               setDepsFocus(cardId)
               handlePageChange('deps')
             }}
+            onOpenRuns={openRunsSession}
             onOpenDeps={() => handlePageChange('deps')}
             lensRequest={lensRequest}
             onLensRequestConsumed={() => setLensRequest(null)}
@@ -2477,7 +2510,7 @@ export default function App() {
         </ReactFlowProvider>
       </CanvasBoundary>
     ),
-    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
+    tasks: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
     runs: (
       <RunsPage
         backendRepo={backendRepo}
@@ -2521,8 +2554,8 @@ export default function App() {
     ),
     // v4 P1：任务编排/任务工作流两个旧页签删除，统一从「任务」页进入（视图切换）；
     // 旧 id 保留映射，兼容存量回调（合约预警"去评审"等）——落点都是 TaskPage
-    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
-    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} />,
+    todo: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
+    review: <TaskPage backendRepo={backendRepo} map={map} onCreateTask={openTaskDraft} externalFocus={taskFocus} onGoChat={() => handlePageChange('workbench')} onOpenRuns={openRunsSession} />,
     changes: (
       <ChangesPage
         backendRepo={backendRepo}
