@@ -259,13 +259,25 @@ function PhaseDocReview({
             }`}
           >
             <ShieldAlert size={11} className={review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className={`text-micro font-bold ${review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
                 子 agent 初审：{review.verdict === 'pass' ? '通过' : '未通过'}
                 {review.verdict !== 'pass' && <span className="ml-1 font-normal">（建议打回重做，最终由你裁决）</span>}
               </p>
               <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{review.summary}</p>
             </div>
+            {/* 2026-10-05 用户裁定：初审已给出意见——打回不许再让用户手填理由。
+                一键按初审意见打回（意见随打回注入，agent 带着重跑本阶段）。 */}
+            {!readonly && review.verdict !== 'pass' && onDecide && (
+              <button
+                onClick={() => onDecide('rejected', review.summary)}
+                disabled={!!deciding}
+                className="shrink-0 rounded-lg bg-red-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-red-700 disabled:opacity-40"
+                title="以子 agent 初审意见为打回理由直接打回（无需手填）"
+              >
+                按此意见打回
+              </button>
+            )}
           </div>
         )}
         {!doc && !missing && (
@@ -331,7 +343,7 @@ function PhaseDocReview({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
-              placeholder="打回意见（必填）——agent 将带着意见重做本阶段"
+              placeholder="打回意见（必填）——已预填子 agent 初审意见，可直接确认或修改"
               className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
             />
             <div className="flex gap-2">
@@ -357,7 +369,11 @@ function PhaseDocReview({
               {deciding === 'approved' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} 评审通过，进入下一阶段
             </button>
             <button
-              onClick={() => setRejecting(true)}
+              onClick={() => {
+                // 2026-10-05 用户裁定：初审已给意见——打回理由预填初审摘要（可改），不强迫用户手填
+                if (review && review.verdict !== 'pass') setNote(review.summary)
+                setRejecting(true)
+              }}
               disabled={!!deciding}
               className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-2 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
             >
@@ -1168,8 +1184,10 @@ export function TaskWorkflowPage({
                           </button>
                           <button
                             onClick={() => {
+                              // 2026-10-05 用户裁定：子 agent 审查未通过时理由预填审查意见（可改），不强迫手填
+                              const rv = sel.result?.review
+                              setRejectNote(rv && rv.verdict === 'fail' ? rv.summary : '')
                               setRejecting(true)
-                              setRejectNote('')
                             }}
                             disabled={!!deciding}
                             className="rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-1.5 text-[12px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
