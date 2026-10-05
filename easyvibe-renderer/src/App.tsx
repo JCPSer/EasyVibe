@@ -2176,20 +2176,6 @@ export default function App() {
       .catch((e) => setError(String(e)))
   }, [backendRepo, reloadTick])
 
-  if (error && !backendRepo) {
-    return (
-      <div className="flex h-screen items-center justify-center text-[13px] text-red-500">
-        静态数据加载失败（/data/map.json）：{error}
-      </div>
-    )
-  }
-  const switchRepo = (id: string) => {
-    if (id === backendRepo) return
-    setMap(null)
-    setError(null)
-    setBackendRepo(id)
-  }
-
   // D5 仓库管理：刷新列表（添加/移除后）；后端事实源是 /api/repos
   const refreshRepos = useCallback(() => {
     fetch('/api/repos')
@@ -2201,7 +2187,6 @@ export default function App() {
       })
       .catch(() => {})
   }, [])
-
   // 添加本地仓库：桌面壳走系统目录选择器（Tauri dialog），浏览器降级为路径输入
   const addRepo = useCallback(async (): Promise<boolean> => {
     let path: string | null = null
@@ -2237,7 +2222,6 @@ export default function App() {
       return false
     }
   }, [refreshRepos])
-
   // 重审 P1：移除仓库现在会杀活动会话（此前 running 的 agent 成孤儿占死写互斥）；
   // wipe=true 额外抹掉该仓库在本地库的全部痕迹（任务/会话/审批/巡检/事件/仓库级设置）
   const removeRepo = useCallback(async (id: string, wipe: boolean) => {
@@ -2255,8 +2239,30 @@ export default function App() {
       toast('移除失败（需要后端在线）', 'error')
     }
   }, [backendRepo, refreshRepos])
-
   // P0 审查前端#1：地图加载失败不再一律渲染"归纳中"——
+  const openRunsSession = useCallback((sessionId: string) => {
+    setRunsFocus(sessionId)
+    handlePageChange('runs')
+  }, [handlePageChange])
+
+  if (error && !backendRepo) {
+    return (
+      <div className="flex h-screen items-center justify-center text-[13px] text-red-500">
+        静态数据加载失败（/data/map.json）：{error}
+      </div>
+    )
+  }
+  const switchRepo = (id: string) => {
+    if (id === backendRepo) return
+    setMap(null)
+    setError(null)
+    setBackendRepo(id)
+  }
+
+
+
+
+
   // MapGate 用 /progress 区分"真在归纳"（等待页）与"真出错"（错误卡：重试/开始归纳）
   if (backendRepo && (error || !map)) {
     return <MapGate repo={backendRepo} error={error} onRetry={() => setReloadTick((t) => t + 1)} agentReady={agentState.found !== false} />
@@ -2470,11 +2476,6 @@ export default function App() {
         </div>
       </div>
   )
-
-  const openRunsSession = useCallback((sessionId: string) => {
-    setRunsFocus(sessionId)
-    handlePageChange('runs')
-  }, [handlePageChange])
 
   const PAGES: Record<PageId, React.ReactNode> = {
     map: (

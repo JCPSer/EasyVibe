@@ -167,28 +167,8 @@ pub fn run() {
             });
             }
 
-            // 2026-10-05 白屏自愈补环：后端「死→活」翻转时无条件重载 webview。
-            // 覆盖 monitor 管不到的场景——端口复用路径无 sidecar、他实例的后端、
-            // 系统级 SIGKILL（实弹 signal=Some(9)）后的人工复活。WKWebView 对失败的
-            // 主文档导航永不自动重试，必须有人推它一把。
-            {
-                let app_handle_watch = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut was_up = false;
-                    loop {
-                        let up = std::net::TcpStream::connect(("127.0.0.1", BACKEND_PORT)).is_ok();
-                        if up && !was_up {
-                            // 首次翻转（含启动期）不 reload——开窗流程自己会加载；
-                            // 只对「曾经死过又活了」的翻转重载
-                            if let Some(win) = app_handle_watch.get_webview_window("main") {
-                                let _ = win.eval("window.location.reload()");
-                            }
-                        }
-                        was_up = up;
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    }
-                });
-            }
+            // 2026-10-05 白屏自愈补环【已停用——实弹嫌疑：启动期对正在首载的 webview eval(reload)
+            // 疑似把 WKWebView 打入永不完成的加载态（Cmd+R 也无效）。先回归验证，再设计更安全的恢复。】
 
             // 等后端就绪再开窗（最多 30s）；超时渲染启动错误页而非白屏（routa 模式：
             // 给出 API 地址 / 日志位置 / 重试按钮——企业级产品不展示裸错误）
