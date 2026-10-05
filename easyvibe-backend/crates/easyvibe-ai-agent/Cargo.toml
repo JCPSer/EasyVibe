@@ -8,6 +8,9 @@ easyvibe-common.workspace = true
 easyvibe-api-types.workspace = true
 easyvibe-map.workspace = true
 easyvibe-db.workspace = true
+# agent_conf（执行 agent 配置解析，自 app 层下沉）：resolve_agent 需 SessionManager
+easyvibe-session.workspace = true
+futures-util.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

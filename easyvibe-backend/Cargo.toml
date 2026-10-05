@@ -8,6 +8,7 @@ members = [
     "crates/easyvibe-db",
     "crates/easyvibe-api-types",
     "crates/easyvibe-common",
+    "crates/easyvibe-event-bus",
 ]
 
 [workspace.dependencies]
@@ -17,6 +18,8 @@ axum = { version = "0.8", features = ["ws"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# QueueHost 对象安全 + Send 的异步 trait 方法（event-bus 与 app 共用）
+async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
@@ -33,6 +36,8 @@ easyvibe-map = { path = "crates/easyvibe-map" }
 easyvibe-session = { path = "crates/easyvibe-session" }
 easyvibe-ai-agent = { path = "crates/easyvibe-ai-agent" }
 easyvibe-db = { path = "crates/easyvibe-db" }
+easyvibe-event-bus = { path = "crates/easyvibe-event-bus" }
+futures-util = "0.3"
 
 [profile.release]
 lto = true
