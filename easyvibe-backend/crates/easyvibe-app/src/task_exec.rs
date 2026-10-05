@@ -514,6 +514,8 @@ impl TaskExecutor {
             Some(r) => r,
             None => {
                 let _ = self.task_repo.update_status(&task.id, "failed", Some("仓库未注册")).await;
+                // 状态迁移必须广播（与 publish_status 惯例配对）——否则前端列表停在旧快照
+                self.publish_status(&task.repo, &task.id, "failed", None).await;
                 return;
             }
         };
@@ -521,7 +523,9 @@ impl TaskExecutor {
             warn!("[task-exec] {} 并发已满（4），稍后重试", task.id);
             // N25 幽灵防线：execute 已把状态置 running，此处必须退回 pending——
             // retry 循环只扫 pending，留在 running 的任务永远捞不回（假活至重启）
+            // 2026-10-06 实弹：只写库不广播，前端停在"执行中"快照——排队态必须同步给界面
             let _ = self.task_repo.update_status(&task.id, "pending", None).await;
+            self.publish_status(&task.repo, &task.id, "pending", task.gate.as_deref()).await;
             let this = self.clone();
             let repo = task.repo.clone();
             tokio::spawn(async move {
@@ -775,6 +779,7 @@ impl TaskExecutor {
                             // None：会话状态被清理等异常——按失败收尸，防幽灵 running
                             None => {
                                 let _ = this.task_repo.update_status(&task_id, "failed", Some("会话状态丢失")).await;
+                                this.publish_status(&repo_name, &task_id, "failed", None).await;
                                 break;
                             }
                             _ => {}
@@ -788,6 +793,7 @@ impl TaskExecutor {
                 // （N25 幽灵在 permits 满路径防过、此处漏掉；348-358 曾留有同款意图的死代码）
                 warn!("[task-exec] 任务 {} 遇到写互斥，退回 pending 排队延迟重试", task.id);
                 let _ = self.task_repo.update_status(&task.id, "pending", None).await;
+                self.publish_status(&task.repo, &task.id, "pending", task.gate.as_deref()).await;
                 let this = self.clone();
                 let repo = task.repo.clone();
                 tokio::spawn(async move {
@@ -798,6 +804,7 @@ impl TaskExecutor {
             Err(e) => {
                 warn!("[task-exec] 任务 {} spawn 失败: {e}", task.id);
                 let _ = self.task_repo.update_status(&task.id, "failed", Some(&e.to_string())).await;
+                self.publish_status(&task.repo, &task.id, "failed", None).await;
             }
         }
     }
