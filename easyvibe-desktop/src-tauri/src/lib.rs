@@ -194,12 +194,14 @@ pub fn run() {
                     )
                     .title("EasyVibe")
                     .inner_size(1500.0, 940.0)
-                    .min_inner_size(1100.0, 700.0)
+                    .min_inner_size(1100.0, 700.0);
                     // macOS 原生红绿灯 + 自绘标题栏（参考 multica/Electron hiddenInset 范式）：
                     // Overlay = 隐藏系统标题栏但保留原生交通灯悬浮于内容上方，
                     // 拖拽由前端透明热区负责（见 AppShell 的 startDragging）
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true);
+                    #[cfg(target_os = "macos")]
+                    let builder = builder
+                        .title_bar_style(tauri::TitleBarStyle::Overlay)
+                        .hidden_title(true);
                     // 2026-10-05 红绿灯纵向居中：系统默认把灯居中在 28pt 幻影子标题栏
                     // （灯心 14pt），我们的自绘 header 是 40px（中线 20pt）——灯偏上。
                     // wry 语义（读源码 + 实测定标）：容器高 = 按钮帧高(28) + y，灯心 = 容器中线。
@@ -230,6 +232,14 @@ pub fn run() {
         .expect("error while building EasyVibe desktop");
 
     app.run(|app, event| {
+        // Windows must exit after its only window is destroyed; otherwise the
+        // single-instance guard keeps a windowless process alive on relaunch.
+        #[cfg(target_os = "windows")]
+        if matches!(&event, tauri::RunEvent::WindowEvent {
+            label, event: tauri::WindowEvent::Destroyed, ..
+        } if label == "main") {
+            app.exit(0);
+        }
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = app.try_state::<SidecarState>() {
                 if let Ok(mut guard) = state.0.lock() {

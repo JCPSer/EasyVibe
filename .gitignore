@@ -15,6 +15,10 @@ reference/
 
 # 桌面端 sidecar 二进制（跨平台编译产物，不入库）
 /easyvibe-desktop/binaries/
+/easyvibe-desktop/src-tauri/binaries/
+/easyvibe-desktop/src-tauri/resources/
+/easyvibe-desktop/src-tauri/target/
+/easyvibe-desktop/src-tauri/gen/
 
 # 内部文档与原型（本地保留，不入库）
 /docs/

@@ -72,3 +72,46 @@ The renderer startup test now imports the checked-in Hover map fixture instead
 of depending on the maintainer's absolute home-directory path. Full application
 tests and macOS validation were not run. Existing compiler and bundle-size
 warnings remain outside this integration change.
+
+## Windows desktop validation on 2026-10-05
+
+The native x64 MSVC release and NSIS installer were built and installed over the
+existing 0.2.0 application. The Windows configuration builds frontend/backend
+and stages resources with `scripts/sync-desktop.ps1`; generated resources,
+sidecars, schemas and target directories are ignored. Local builds disable
+signed updater artifacts. macOS-only title-bar methods are platform guarded,
+and the Windows release does not open a console window.
+
+- Agent configuration: 5 tests passed, excluding the existing Unix-only probe.
+- Settings API round-trip regression: passed, using actual JSON PUT requests.
+- Desktop startup: native EasyVibe window, bundled backend `/api/health` OK,
+  frontend HTTP 200, installed Codex executable detected and resolved.
+- Installer payload: backend SHA256 matches the release build; desktop binary
+  matches except for Tauri's expected `UNK` to `NSS` installer bundle marker.
+- Window close/relaunch: closing the main window exits the Windows process and
+  its sidecar; reopening creates a working native window.
+- Installed application connection probe: `compatible`, output `ok`, 38.3 seconds.
+
+The settings API stores string values as JSON. Agent resolution and status now
+decode those values while retaining compatibility with older raw values; a
+saved `"codex"` no longer becomes a quoted executable name or falls back to
+Claude. Explicit argument arrays and slot overrides remain supported.
+
+The initial WebSocket probe timed out at 120 seconds on this computer. The
+successful probe used an HTTPS provider scoped to this application's saved
+arguments (the user's global Codex configuration and model were retained):
+
+```text
+exec --skip-git-repo-check --json --sandbox workspace-write
+-c model_provider="easyvibe_http"
+-c model_providers.easyvibe_http.name="OpenAI"
+-c model_providers.easyvibe_http.requires_openai_auth=true
+-c model_providers.easyvibe_http.supports_websockets=false
+```
+
+These arguments use the existing ChatGPT login. Codex CLI 0.159.2 rejects
+overriding the reserved `openai` provider, so the transport workaround uses its
+own provider ID. The built-in Codex preset remains unchanged; the workaround
+is specific to this machine's network.
+See the [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+for provider transport and authentication options.

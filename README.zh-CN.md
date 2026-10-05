@@ -160,6 +160,22 @@ cd easyvibe-backend && cargo build
 cd easyvibe-renderer && npm install && npm run dev
 ```
 
+编译 Windows 桌面安装包，需要 Node.js、Rust MSVC 工具链、Visual Studio C++
+Build Tools 和 WebView2。先准备[集成检查说明](tests/codex-integration.md)中提到的
+Harness 源文件，然后在仓库根目录打开 PowerShell 执行：
+
+```powershell
+cd easyvibe-renderer
+npm ci
+cd ../easyvibe-desktop
+npm ci
+npx tauri build -- --locked
+```
+
+Windows 配置通过 PowerShell 编译并打包前端、后端和提示词，按当前用户安装。
+安装包输出到 `easyvibe-desktop/src-tauri/target/release/bundle/nsis/`。
+本地 Windows 构建不生成带签名的自动更新产物。
+
 macOS 交叉编译 Windows 后端（静态链接、零 DLL 依赖）：
 
 ```bash

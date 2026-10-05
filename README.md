@@ -160,6 +160,24 @@ cd easyvibe-backend && cargo build
 cd easyvibe-renderer && npm install && npm run dev
 ```
 
+To build the Windows desktop installer, install Node.js, Rust's MSVC toolchain,
+Visual Studio C++ Build Tools, and WebView2. Supply the Harness source files
+described in [the integration checks](tests/codex-integration.md), then run from
+the repository root in PowerShell:
+
+```powershell
+cd easyvibe-renderer
+npm ci
+cd ../easyvibe-desktop
+npm ci
+npx tauri build -- --locked
+```
+
+The Windows configuration uses PowerShell to build and package the frontend,
+backend and prompts. The per-user installer is written to
+`easyvibe-desktop/src-tauri/target/release/bundle/nsis/`.
+Local Windows builds do not generate signed updater artifacts.
+
 Cross-compile the Windows backend from macOS (statically linked, zero DLL dependencies):
 
 ```bash
