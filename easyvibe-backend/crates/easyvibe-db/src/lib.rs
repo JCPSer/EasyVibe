@@ -1343,6 +1343,14 @@ impl AgentSessionRepo {
         Ok(())
     }
 
+    /// Codex reports tokens but no price, model, or cache-write count.
+    pub async fn set_codex_usage(&self, id: &str, input: i64, output: i64, cached: i64) -> Result<(), ApiError> {
+        sqlx::query("UPDATE agent_sessions SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, usage_source = 'codex-turn' WHERE id = ?")
+            .bind(input).bind(output).bind(cached).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
     /// 终态收尾：status/terminal_at/exit_code/label/kind。INSERT OR IGNORE 在前——
     /// 无 spawn 的外部会话（Stub 巡检，cli='stub'）此前无行，这里补插地基行。
     pub async fn finalize(
@@ -1609,6 +1617,23 @@ mod tests {
 
     fn now() -> String {
         format!("{:?}", std::time::SystemTime::now())
+    }
+
+    #[tokio::test]
+    async fn codex_usage_keeps_unreported_cost_unknown() {
+        let db = Database::connect_memory().await.unwrap();
+        let repo = AgentSessionRepo::new(db.pool().clone());
+        repo.upsert_started("codex", "r", "codex", "2026-10-05T08:00:00Z").await.unwrap();
+        repo.set_codex_usage("codex", 100, 10, 40).await.unwrap();
+        let rows = repo.list("r", 10).await.unwrap();
+        let r = &rows[0];
+        assert_eq!(r.input_tokens, Some(100));
+        assert_eq!(r.output_tokens, Some(10));
+        assert_eq!(r.cache_read_tokens, Some(40));
+        assert_eq!(r.usage_source.as_deref(), Some("codex-turn"));
+        assert!(r.cost_usd.is_none());
+        assert!(r.cache_write_tokens.is_none());
+        assert!(r.model.is_none());
     }
 
     #[tokio::test]

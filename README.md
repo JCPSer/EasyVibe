@@ -115,6 +115,11 @@ Every development task — feature or bugfix — flows through the harness: **re
 - **Streaming chat** — real-time terminal with `stream-json` output, interrupt, markdown & mermaid rendering, image attachments
 - **Auto-detection & connection testing** — the app finds installed agents and verifies connectivity before you spend a token
 
+For Codex, install the CLI, run `codex login`, then select and save the **Codex CLI** preset in settings.
+The default is `codex exec --json --sandbox workspace-write`, with live messages, command/file-change summaries, and task-result capture.
+Connection probes use a read-only sandbox and allow a temporary non-repository directory. Reported token usage is persisted; unreported cost and model remain unknown.
+Reselect the preset to upgrade an existing plain-text configuration. Codex remains experimental; validate against a test repository first. See [integration validation](./tests/codex-integration.md).
+
 <p align="center">
   <img src="./resources/对话面板原型.png" alt="Agent Chat" width="820">
 </p>

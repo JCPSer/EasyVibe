@@ -429,7 +429,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
 
           {/* 页脚口径 */}
           <p className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-900/60 px-3 py-2 text-center text-micro text-slate-400 dark:text-slate-500">
-            口径：花费优先取 agent 自报成本，缺失时按模型价格表估算；订阅制计费与实际账单可能有差异，仅供参考。被终止的会话无用量回报，显示「—」。
+            口径：花费取 agent 自报成本。Codex 回报 token 用量，费用未回报时显示「—」；订阅制计费与实际账单可能有差异。被终止且未回报用量的会话显示「—」。
           </p>
         </>
       )}

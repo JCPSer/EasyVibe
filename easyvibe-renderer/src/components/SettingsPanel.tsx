@@ -448,7 +448,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                     onClick={() => void testAgent()}
                     disabled={agentBusy !== null}
                     className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
-                    title="用当前已保存的配置发起一次最小真实调用（约 1-30 秒），验证协议兼容"
+                    title="用当前已保存的配置发起一次最小真实调用，验证协议兼容；Codex 网络重试时最长等待 120 秒"
                   >
                     {agentBusy === 'test' ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} 测试连接
                   </button>
@@ -525,7 +525,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
                   </button>
                 )}
                 <span className="ml-auto text-micro text-slate-300 dark:text-slate-600">
-                  协议：{agentStatus?.effective.type === 'claude' ? 'stream-json 流式' : 'plain 纯文本（完成后输出）'}
+                  协议：{agentStatus?.effective.type === 'claude' ? 'stream-json 流式' : agentStatus?.effective.type === 'codex' ? 'Codex JSONL 实时输出' : 'plain 纯文本（完成后输出）'}
                 </span>
               </div>
             </div>

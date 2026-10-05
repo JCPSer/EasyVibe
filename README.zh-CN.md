@@ -115,6 +115,11 @@ LLM 归纳的架构地图，存储在**仓库内**（`.easyvibe/map/`）——gi
 - **流式对话**——stream-json 真实时终端、可打断、Markdown/Mermaid 渲染、图片附件
 - **自动探测与测试连接**——自动发现已装 agent，先测连通再烧钱
 
+Codex 接入：先安装 Codex CLI 并执行 `codex login`，再在设置中选择 **Codex CLI** 预设并保存。
+默认以 `codex exec --json --sandbox workspace-write` 运行，支持实时消息、命令/文件变更摘要及任务结果归档。
+连接测试使用只读沙箱，允许在临时目录运行；Codex 的 token 用量会保存，未回报的费用与模型名显示为未知。
+已有纯文本配置需重新选择预设；Codex 接入仍标记为实验，建议先在测试仓库验证。详见 [接入验证](./tests/codex-integration.md)。
+
 <p align="center">
   <img src="./resources/对话面板原型.png" alt="Agent 对话" width="820">
 </p>

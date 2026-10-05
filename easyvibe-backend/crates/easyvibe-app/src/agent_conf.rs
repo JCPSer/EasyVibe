@@ -9,11 +9,11 @@ pub struct AgentPreset {
     pub id: &'static str,
     pub label: &'static str,
     pub default_args: &'static [&'static str],
-    pub agent_type: &'static str, // claude（stream-json 解析）/ plain（完成态纯文本）
+    pub agent_type: &'static str, // claude / codex JSONL / plain
     pub stability: &'static str,  // stable / experimental
 }
 
-/// 本期预设三家（拍板 2026-10-03）：claude 稳定；codex/opencode 实验（plain 无流式）
+/// Codex uses structured exec events and a writable workspace sandbox.
 pub const PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "claude",
@@ -25,8 +25,8 @@ pub const PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "codex",
         label: "Codex CLI",
-        default_args: &["exec"],
-        agent_type: "plain",
+        default_args: &["exec", "--json", "--sandbox", "workspace-write"],
+        agent_type: "codex",
         stability: "experimental",
     },
     AgentPreset {
@@ -42,19 +42,30 @@ pub fn preset_by_id(id: &str) -> Option<&'static AgentPreset> {
     PRESETS.iter().find(|p| p.id == id)
 }
 
+fn command_preset(command: &str) -> Option<&'static AgentPreset> {
+    let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    let name = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".cmd"))
+        .or_else(|| name.strip_suffix(".bat")).unwrap_or(name);
+    preset_by_id(name)
+}
+
+pub fn default_args_for_command(command: &str) -> Vec<String> {
+    command_preset(command).unwrap_or(&PRESETS[0]).default_args.iter().map(|s| s.to_string()).collect()
+}
+
 /// 解析结果：spawn 直接消费
 pub struct ResolvedAgent {
     pub command: String,       // 绝对路径（经兜底链解析；未找到时回落为原命令名）
     pub args: Vec<String>,
-    pub agent_type: String,    // claude / plain
+    pub agent_type: String,    // claude / codex / plain
     pub source: String,        // settings / env / default（命令来源）
     pub preset: String,        // 生效预设 id（解析用；custom 表示用户改参）
 }
 
 /// settings 优先解析链（方案 §2.2）：
-/// 1. command：settings.agent.command → env_command → "claude"
+/// 1. command：settings.agent.command → settings preset → env_command → "claude"
 /// 2. args：槽位参数（整体替换）→ settings.agent.args.global → env_args → 当前 preset 默认 → claude 默认
-/// 3. 绝对路径兜底链；4. type：settings → preset 推断 → custom 按 args 含 stream-json 推断
+/// 3. 绝对路径兜底链；4. type：settings → 实际参数的输出协议
 /// 读一条 agent 设置（空值视为未配置）
 async fn cfg(settings: &easyvibe_db::SqliteSettingsRepository, key: &str) -> Option<String> {
     settings
@@ -72,9 +83,13 @@ pub async fn resolve_agent(
     env_command: &str,
     env_args: &[String],
 ) -> ResolvedAgent {
+    let configured_preset = cfg(settings, "agent.preset").await;
     // 1. 命令
     let (command, source) = match cfg(settings, "agent.command").await {
         Some(c) => (c, "settings".to_string()),
+        None if configured_preset.as_deref().and_then(preset_by_id).is_some() => {
+            (configured_preset.clone().unwrap(), "settings".to_string())
+        }
         None => {
             if env_command == "claude" {
                 ("claude".to_string(), "default".to_string())
@@ -85,7 +100,11 @@ pub async fn resolve_agent(
     };
 
     // 2. 参数（槽位整体替换 → 全局 → env → preset 默认）
-    let preset_id = cfg(settings, "agent.preset").await.unwrap_or_else(|| "claude".into());
+    let preset_id = configured_preset.unwrap_or_else(|| {
+        command_preset(&command).map(|p| p.id).unwrap_or("claude").to_string()
+    });
+    // Startup defaults for another CLI must not leak into a selected preset.
+    let env_matches = command_preset(env_command).map(|p| p.id) == Some(preset_id.as_str());
     let default_args = |id: &str| {
         preset_by_id(id)
             .map(|p| p.default_args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
@@ -97,7 +116,7 @@ pub async fn resolve_agent(
             None => match cfg(settings, "agent.args.global").await {
                 Some(v) => serde_json::from_str(&v).unwrap_or_else(|_| default_args(&preset_id)),
                 None => {
-                    if !env_args.is_empty() {
+                    if !env_args.is_empty() && (source != "settings" || env_matches) {
                         env_args.to_vec()
                     } else {
                         default_args(&preset_id)
@@ -109,7 +128,7 @@ pub async fn resolve_agent(
         match cfg(settings, "agent.args.global").await {
             Some(v) => serde_json::from_str(&v).unwrap_or_else(|_| default_args(&preset_id)),
             None => {
-                if !env_args.is_empty() {
+                if !env_args.is_empty() && (source != "settings" || env_matches) {
                     env_args.to_vec()
                 } else {
                     default_args(&preset_id)
@@ -124,17 +143,7 @@ pub async fn resolve_agent(
     // 4. 协议类型
     let agent_type = match cfg(settings, "agent.type").await {
         Some(t) => t,
-        None => match preset_by_id(&preset_id) {
-            Some(p) if preset_id != "custom" => p.agent_type.to_string(),
-            // custom（或未知 preset）：按 args 是否含 stream-json 推断（与 session lib 解析探测一致）
-            _ => {
-                if args.iter().any(|a| a.contains("stream-json")) {
-                    "claude".into()
-                } else {
-                    "plain".into()
-                }
-            }
-        },
+        None => easyvibe_session::output_protocol(&args).to_string(),
     };
 
     ResolvedAgent { command, args, agent_type, source, preset: preset_id }
@@ -181,6 +190,27 @@ pub fn resolve_agent_command(cmd: &str) -> String {
     ] {
         if std::path::Path::new(&cand).is_file() {
             return cand;
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            for name in &names {
+                let p = std::path::Path::new(&appdata).join("npm").join(name);
+                if p.is_file() { return p.to_string_lossy().into_owned(); }
+            }
+        }
+        // The desktop app bundles Codex under a versioned bin directory.
+        if cmd == "codex" {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                let base = std::path::Path::new(&local).join("OpenAI/Codex/bin");
+                if let Ok(entries) = std::fs::read_dir(base) {
+                    let mut candidates: Vec<_> = entries.flatten().map(|e| e.path().join("codex.exe"))
+                        .filter(|p| p.is_file()).collect();
+                    candidates.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+                    if let Some(p) = candidates.last() { return p.to_string_lossy().into_owned(); }
+                }
+            }
         }
     }
     cmd.to_string()
@@ -238,19 +268,22 @@ pub struct AgentTestResult {
     pub sample: String,
 }
 
-/// 协议兼容测试（方案 §3.2）：最小 prompt 真实会话，30s 上限。
+/// 协议兼容测试：最小 prompt 真实会话；Codex 允许网络重试/传输回退。
 /// 用独立假仓库 id 注册会话——不与任何真实仓库的单会话纪律冲突。
 pub async fn run_agent_test(sessions: &easyvibe_session::SessionManager, resolved: &ResolvedAgent) -> AgentTestResult {
     let started = std::time::Instant::now();
     let repo_id = "__agent_test__";
+    let test_args = connection_test_args(resolved);
+    let timeout_secs = if command_preset(&resolved.command).is_some_and(|p| p.id == "codex") { 120 } else { 30 };
+    let mut output_rx = sessions.subscribe_output();
     let session = match sessions
         .start_induction(
             repo_id,
             &std::env::temp_dir(),
             "只输出 ok 两个字母，不要输出其他任何内容",
             &resolved.command,
-            &resolved.args,
-            Some(std::time::Duration::from_secs(30)),
+            &test_args,
+            Some(std::time::Duration::from_secs(timeout_secs)),
         )
         .await
     {
@@ -265,7 +298,7 @@ pub async fn run_agent_test(sessions: &easyvibe_session::SessionManager, resolve
         }
     };
     let sid = session.session_id.clone();
-    // 等终态（30s 总上限；会话自身超时也会杀）
+    // 等终态；会话自身超时也会杀进程。
     let outcome = loop {
         match sessions.status_of_session(&sid).await {
             Some(s)
@@ -285,12 +318,12 @@ pub async fn run_agent_test(sessions: &easyvibe_session::SessionManager, resolve
                 }
             }
             _ => {
-                if started.elapsed() > std::time::Duration::from_secs(32) {
+                if started.elapsed() > std::time::Duration::from_secs(timeout_secs + 2) {
                     let _ = sessions.kill(&sid).await;
                     return AgentTestResult {
                         ok: false,
                         latency_ms: started.elapsed().as_millis() as u64,
-                        protocol: "incompatible: 超时（30s 无终态）".into(),
+                        protocol: format!("incompatible: 超时（{timeout_secs}s 无终态）"),
                         sample: String::new(),
                     };
                 }
@@ -303,7 +336,19 @@ pub async fn run_agent_test(sessions: &easyvibe_session::SessionManager, resolve
     let latency_ms = started.elapsed().as_millis() as u64;
     if !outcome {
         // Failed = 非 0 退出；无输出则按未消费 prompt 说
-        let protocol = if out.trim().is_empty() {
+        let mut diagnostics = String::new();
+        loop {
+            match output_rx.try_recv() {
+                Ok(e) if e.session_id == sid && (e.stream == easyvibe_session::OutputStream::Stderr || e.line.starts_with("[错误]")) => {
+                    diagnostics = e.line;
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+        let protocol = if !diagnostics.trim().is_empty() {
+            format!("incompatible: {}", diagnostics.chars().take(200).collect::<String>())
+        } else if out.trim().is_empty() {
             "incompatible: 未消费 prompt/无输出（非 0 退出）".to_string()
         } else {
             "incompatible: 非 0 退出".to_string()
@@ -314,6 +359,26 @@ pub async fn run_agent_test(sessions: &easyvibe_session::SessionManager, resolve
         return AgentTestResult { ok: false, latency_ms, protocol: "incompatible: 无输出".into(), sample };
     }
     AgentTestResult { ok: true, latency_ms, protocol: "compatible".into(), sample }
+}
+
+fn connection_test_args(resolved: &ResolvedAgent) -> Vec<String> {
+    if !command_preset(&resolved.command).is_some_and(|p| p.id == "codex") {
+        return resolved.args.clone();
+    }
+    // The probe uses stdin in a non-repository directory. Replace, rather than
+    // duplicate, sandbox flags (Clap rejects repeated options).
+    let mut args = Vec::new();
+    let mut source = resolved.args.iter();
+    while let Some(arg) = source.next() {
+        if arg == "--sandbox" || arg == "-s" {
+            source.next();
+        } else if !arg.starts_with("--sandbox=") && arg != "--skip-git-repo-check"
+            && arg != "--dangerously-bypass-approvals-and-sandbox" && arg != "--full-auto" && arg != "--approve-for-me" {
+            args.push(arg.clone());
+        }
+    }
+    args.extend(["--skip-git-repo-check".into(), "--sandbox".into(), "read-only".into()]);
+    args
 }
 
 #[cfg(test)]
@@ -375,10 +440,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_type_inference_including_custom() {
         let s = mem_settings().await;
-        // preset=codex → plain
+        // preset=codex → structured exec events
         set(&s, "agent.preset", "codex").await;
         let r = resolve_agent(&s, None, "claude", &[]).await;
-        assert_eq!(r.agent_type, "plain");
+        assert_eq!(r.agent_type, "codex");
         // preset=custom 且 args 含 stream-json → claude（与 session lib 探测一致）
         set(&s, "agent.preset", "custom").await;
         set(&s, "agent.args.global", r#"["--output-format","stream-json"]"#).await;
@@ -392,6 +457,39 @@ mod tests {
         set(&s, "agent.type", "claude").await;
         let r = resolve_agent(&s, None, "claude", &[]).await;
         assert_eq!(r.agent_type, "claude");
+    }
+
+    #[tokio::test]
+    async fn codex_selection_does_not_inherit_claude_arguments() {
+        let s = mem_settings().await;
+        set(&s, "agent.preset", "codex").await;
+        let r = resolve_agent(&s, None, "claude", &default_args_for_command("claude")).await;
+        assert_eq!(r.preset, "codex");
+        assert_eq!(r.agent_type, "codex");
+        assert!(r.args.contains(&"--json".into()));
+        assert!(!r.args.contains(&"--dangerously-skip-permissions".into()));
+        assert_eq!(command_preset(&r.command).unwrap().id, "codex");
+        set(&s, "agent.args.review", r#"["exec","--sandbox","read-only"]"#).await;
+        let review = resolve_agent(&s, Some("review"), "claude", &[]).await;
+        assert_eq!(review.agent_type, "plain", "slot override controls the actual protocol");
+        let s = mem_settings().await;
+        let env = resolve_agent(&s, None, "C:\\tools\\codex.exe", &[]).await;
+        assert_eq!(env.preset, "codex");
+        assert_eq!(env.agent_type, "codex");
+    }
+
+    #[test]
+    fn codex_connection_probe_replaces_write_permissions() {
+        let r = ResolvedAgent {
+            command: "C:\\Program Files\\codex.exe".into(),
+            args: vec!["exec".into(), "--json".into(), "--sandbox".into(), "workspace-write".into()],
+            agent_type: "codex".into(), preset: "codex".into(), source: "settings".into(),
+        };
+        let args = connection_test_args(&r);
+        assert_eq!(args.iter().filter(|a| a.as_str() == "--sandbox").count(), 1);
+        assert!(args.contains(&"read-only".into()));
+        assert!(args.contains(&"--skip-git-repo-check".into()));
+        assert!(!args.contains(&"workspace-write".into()));
     }
 
     #[tokio::test]

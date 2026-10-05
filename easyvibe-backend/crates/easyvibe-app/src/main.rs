@@ -2607,10 +2607,8 @@ async fn main() {
     let agent_command = resolve_agent_command(&agent_command);
     info!("[boot] agent CLI 解析为: {agent_command}");
     let agent_args: Vec<String> = std::env::var("EASYVIBE_AGENT_ARGS")
-        .unwrap_or_else(|_| "-p --bare --dangerously-skip-permissions --output-format stream-json --verbose".into())
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_else(|_| agent_conf::default_args_for_command(&agent_command));
     let (prompt_template, prompt_path) = resolve_text_asset(
         "EASYVIBE_PROMPT_PATH",
         "easyvibe-map-prompt-v2.2.md",
@@ -2766,6 +2764,9 @@ async fn main() {
                     Meta::Model(m) => repo.set_model(&e.session_id, m).await,
                     Meta::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, turns } => {
                         repo.set_usage(&e.session_id, *input_tokens, *output_tokens, *cache_read_tokens, *cache_write_tokens, *cost_usd, *duration_ms, *turns).await
+                    }
+                    Meta::CodexUsage { input_tokens, output_tokens, cached_input_tokens } => {
+                        repo.set_codex_usage(&e.session_id, *input_tokens, *output_tokens, *cached_input_tokens).await
                     }
                     Meta::ExitCode(_) => Ok(()), // 退出码随终态事件 finalize 统一写
                 };

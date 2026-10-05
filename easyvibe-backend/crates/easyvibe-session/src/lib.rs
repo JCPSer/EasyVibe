@@ -18,6 +18,19 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+mod codex;
+
+/// Detect the actual output format, including user-overridden slot arguments.
+pub fn output_protocol(args: &[String]) -> &'static str {
+    if args.iter().any(|a| a == "stream-json" || a == "--output-format=stream-json") {
+        "claude"
+    } else if args.iter().any(|a| a == "exec") && args.iter().any(|a| a == "--json") {
+        "codex"
+    } else {
+        "plain"
+    }
+}
+
 /// 会话完成/状态变化的回调（app 层翻译为 WS 事件）
 pub type SessionEventSender = tokio::sync::mpsc::Sender<SessionStatusChanged>;
 
@@ -41,7 +54,7 @@ pub enum OutputStream {
 /// M1/U1 会话元事件（2026-10-05）：真实模型名 / token 用量 / 退出码，看门任务边读边分派。
 /// 设计约束（docs/llm-usage-page-design-v1.md §1.2）：result 事件不进 1MB 缓冲、
 /// 终态后补解析不可行——解析必须在读行循环内做；被 kill 的会话无 result 事件，usage 恒 NULL。
-/// 首期只解析 claude stream-json；其余 CLI 的 usage 列留 NULL 诚实降级。
+/// Claude 自报成本；Codex 仅回报 token，费用保持 NULL。
 #[derive(Debug, Clone)]
 pub enum SessionMetaUpdate {
     /// spawn 入口已知（命令名）——落盘桥据此刻写 agent_sessions 行
@@ -61,6 +74,7 @@ pub enum SessionMetaUpdate {
         duration_ms: i64,
         turns: i64,
     },
+    CodexUsage { input_tokens: i64, output_tokens: i64, cached_input_tokens: i64 },
     /// 进程退出码（被 kill/超时无退出码则不分派）
     ExitCode(i32),
 }
@@ -432,6 +446,8 @@ impl SessionManager {
         // M2：每会话 seq 单调计数（stdout/stderr 共用一个——seq 是全会话的行序号）
         let out_seq = Arc::new(AtomicU64::new(0));
         let err_seq = out_seq.clone();
+        let final_seq = out_seq.clone();
+        let final_output_tx = err_output_tx.clone();
         let out_session_id = session_id.clone();
         // P0：终止通道（主动 kill / 超时共用）——notify 幂等，重复 kill 无副作用
         let kill_notify = Arc::new(tokio::sync::Notify::new());
@@ -453,13 +469,17 @@ impl SessionManager {
         // 2026-10-03 实弹：claude --output-format stream-json 时每行是一个 JSON 事件——
         // 还原成可读文本再进直播/缓冲，否则终端刷原始 JSON、[EASYVIBE-RESULT] 协议行
         // 也会被 JSON 转义而解析不到。由 args 自动探测，老参数（纯文本）行为不变。
-        let stream_json = args.iter().any(|a| a.contains("stream-json"));
+        let protocol = output_protocol(args);
+        let codex_completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let codex_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let meta_tx = self.meta_tx.clone();
         let meta_tx2 = self.meta_tx.clone();
         tokio::spawn(async move {
             use tokio::io::AsyncBufReadExt as _;
             let out_id = session_id_task.clone();
             let out_repo = repo.clone();
+            let completed = codex_completed.clone();
+            let failed = codex_failed.clone();
             let out_task = tokio::spawn(async move {
                 let mut lines = 0u64;
                 if let Some(mut s) = stdout {
@@ -471,7 +491,27 @@ impl SessionManager {
                             Ok(_) => {
                                 // stream-json 模式：JSON 事件 → 可读文本（无可展示内容则跳过该行）；
                                 // M1/U1：跳过的 system/result 事件在这里分派元数据去落盘
-                                let payload: String = if stream_json {
+                                let mut capture = true;
+                                let payload: String = if protocol == "codex" {
+                                    let Some(ev) = codex::parse(&line) else {
+                                        line.clear();
+                                        continue;
+                                    };
+                                    if ev.completed { completed.store(true, Ordering::SeqCst); }
+                                    if ev.failed { failed.store(true, Ordering::SeqCst); }
+                                    if let Some((input_tokens, output_tokens, cached_input_tokens)) = ev.usage {
+                                        let _ = meta_tx.send(SessionMetaEvent {
+                                            repo: out_repo.clone(), session_id: out_id.clone(),
+                                            update: SessionMetaUpdate::CodexUsage { input_tokens, output_tokens, cached_input_tokens },
+                                        });
+                                    }
+                                    capture = ev.capture;
+                                    let Some(text) = ev.text else {
+                                        line.clear();
+                                        continue;
+                                    };
+                                    text
+                                } else if protocol == "claude" {
                                     match parse_stream_event(&line) {
                                         Some(text) => text,
                                         None => {
@@ -506,16 +546,20 @@ impl SessionManager {
                                 // M4-1：捕获进缓冲（1MB 封顶，保头丢尾——RESULT 行在末尾）。
                                 // stream-json 模式缓冲的是还原后的文本——协议行保持纯文本形态，
                                 // take_output 消费方（RESULT/REVIEW 解析）零改动
-                                if let Ok(mut buf) = stdout_buf.lock() {
-                                    if buf.len() < 1_048_576 {
-                                        buf.push_str(&payload);
-                                        if !payload.ends_with('\n') {
-                                            buf.push('\n');
+                                if capture {
+                                    if let Ok(mut buf) = stdout_buf.lock() {
+                                        if buf.len() < 1_048_576 {
+                                            buf.push_str(&payload);
+                                            if !payload.ends_with('\n') {
+                                                buf.push('\n');
+                                            }
+                                        } else {
+                                            // Keep protocol lines even when a long session fills the buffer.
+                                            for line in payload.lines().filter(|l| l.starts_with("[EASYVIBE-RESULT]") || l.starts_with("[EASYVIBE-REVIEW]")) {
+                                                buf.push_str(&line.chars().take(4096).collect::<String>());
+                                                buf.push('\n');
+                                            }
                                         }
-                                    } else if payload.contains("[EASYVIBE-RESULT]") {
-                                        // 超帽时仍保留 RESULT 归档行（短行，替换式保底）
-                                        let trimmed: String = payload.chars().take(4096).collect();
-                                        buf.push_str(&trimmed);
                                     }
                                 }
                                 line.clear();
@@ -564,7 +608,7 @@ impl SessionManager {
                 _ = tokio::time::sleep(timeout) => Outcome::Killed("会话超时（agent 挂死防线）"),
                 s = child.wait() => Outcome::Exited(s),
             };
-            let (status, _exit_code) = match outcome {
+            let (mut status, _exit_code) = match outcome {
                 Outcome::Killed(reason) => {
                     warn!("[session {session_id_task}] 被终止: {reason}");
                     if let Err(e) = child.start_kill() {
@@ -594,6 +638,15 @@ impl SessionManager {
             };
             // 子进程已退出：管道写端关闭，排空任务很快收尾
             let _ = tokio::join!(out_task, err_task);
+            // A zero process exit without a completed turn must not approve a task.
+            if protocol == "codex" && status == SessionStatus::Succeeded
+                && (!codex_completed.load(Ordering::SeqCst) || codex_failed.load(Ordering::SeqCst)) {
+                status = SessionStatus::Failed;
+                let _ = final_output_tx.send(SessionOutput {
+                    session_id: session_id_task.clone(), seq: final_seq.fetch_add(1, Ordering::SeqCst),
+                    stream: OutputStream::Stderr, line: "[err] Codex 未成功完成 turn，请检查执行日志".into(),
+                });
+            }
             // 终态清理：kill 通道随会话结束回收（stdout 缓冲由消费者 take_output 领取，见 M4-1 契约）
             killers.write().await.remove(&session_id_task);
             let final_status = SessionStatusChanged { repo: repo.clone(), session_id: session_id_task.clone(), status };
