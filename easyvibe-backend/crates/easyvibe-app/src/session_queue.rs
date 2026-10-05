@@ -143,6 +143,45 @@ pub(crate) async fn get_session_queue(
     Ok(axum::Json(serde_json::json!({ "success": true, "data": { "active": active, "queued": queued } })).into_response())
 }
 
+/// GET /sessions/overview（2026-10-05 全局运行指示）：跨仓库的活动会话 + 排队任务。
+/// 单仓库互斥但跨仓库并行合法（用户明示接受并发 agent）——切到 B 发起分析时
+/// A 的会话必须全局可见，否则多仓库用户丢失后台任务感知。
+pub(crate) async fn get_sessions_overview(
+    axum::extract::State(st): axum::extract::State<AppState>,
+) -> Result<axum::response::Response, AppError> {
+    let mut active = Vec::new();
+    for s in st.session_manager.all_active().await {
+        let label = st
+            .session_manager
+            .label_of(&s.session_id)
+            .await
+            .unwrap_or_else(|| format!("会话 {}", s.session_id));
+        active.push(serde_json::json!({
+            "sessionId": s.session_id,
+            "repo": s.repo,
+            "label": label,
+            "status": format!("{:?}", s.status).to_lowercase(),
+            "startedAt": st.session_manager.started_at_of(&s.session_id).await,
+        }));
+    }
+    let queued: Vec<_> = st
+        .session_queue
+        .lock()
+        .await
+        .iter()
+        .map(|(repo, j)| {
+            serde_json::json!({
+                "repo": repo,
+                "kind": j.kind.as_str(),
+                "label": j.label,
+                "moduleId": j.module_id,
+                "enqueuedAt": j.enqueued_at,
+            })
+        })
+        .collect();
+    Ok(axum::Json(serde_json::json!({ "success": true, "data": { "active": active, "queued": queued } })).into_response())
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EnqueueBody {

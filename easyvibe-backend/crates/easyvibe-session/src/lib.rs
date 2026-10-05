@@ -297,6 +297,18 @@ impl SessionManager {
         self.active.read().await.get(repo_id).cloned()
     }
 
+    /// 全局活动会话（跨仓库视角——单仓库互斥，但 A 仓库分析时切到 B 发起分析 =
+    /// 两会话并行合法；状态丸/运行页的全局指示器消费此查询）
+    pub async fn all_active(&self) -> Vec<SessionStatusChanged> {
+        self.active
+            .read()
+            .await
+            .values()
+            .filter(|s| matches!(s.status, SessionStatus::Starting | SessionStatus::Running))
+            .cloned()
+            .collect()
+    }
+
     /// I1：app 层各发起入口打展示标签（「归纳」「巡检」「分析模块 X」「自动归纳」「任务执行」）
     pub async fn note_label(&self, session_id: &str, label: String) {
         self.labels.write().await.insert(session_id.to_string(), label.clone());

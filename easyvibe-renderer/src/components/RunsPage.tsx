@@ -16,7 +16,7 @@ import {
 import { onQueueChanged, onSessionEvent, onSessionOutput } from '@/lib/growthBus'
 import { toast } from '@/lib/toast'
 import { toMs } from '@/lib/diffStat'
-import { formatElapsed, isEmptyState, kindFromLabel, type SessionQueueKind, type SessionQueueSnapshot } from '@/lib/sessionQueue'
+import { formatElapsed, kindFromLabel, type SessionQueueKind } from '@/lib/sessionQueue'
 
 // 「运行」页（docs/runs-page-design-v1.md M2 完成体）：
 // 左栏三态会话列表（运行中/排队中/历史——历史为 agent_sessions 库表，重启后仍可回放）
@@ -32,8 +32,22 @@ interface StreamLine {
   t: number
 }
 
+interface OverviewActive {
+  sessionId: string
+  repo: string
+  label: string
+  status: string
+  startedAt?: string | null
+}
+interface OverviewQueued {
+  repo: string
+  kind: string
+  label: string
+  enqueuedAt?: string | null
+}
 interface HistoryRow {
   id: string
+  repo: string
   kind: string
   label?: string | null
   startedAt: string
@@ -106,7 +120,9 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   /** WS 重连信号：触发全量补拉（断线期间的行按 seq 差集拉回） */
   resyncKey?: number
 }) {
-  const [snap, setSnap] = useState<SessionQueueSnapshot | null>(null)
+  // 跨仓库全局视角（2026-10-05）：A 仓库分析中切到 B，A 的会话仍在此可见
+  const [overview, setOverview] = useState<{ active: OverviewActive[]; queued: OverviewQueued[] }>({ active: [], queued: [] })
+  const sessionsRepoRef = useRef<Map<string, string>>(new Map())
   const [history, setHistory] = useState<HistoryRow[]>([])
   // 各会话流水（内存态；历史会话选中时从库表回放补入；每会话按 seq 去重）
   const [streams, setStreams] = useState<Map<string, StreamLine[]>>(new Map())
@@ -144,10 +160,11 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
 
   /** 回放/补拉：afterSeq 之后的行（历史会话 afterSeq=0 全量回放） */
   const backfill = useCallback(
-    (sessionId: string, afterSeq = 0) => {
-      if (!backendRepo) return
+    (sessionId: string, afterSeq = 0, repoOverride?: string) => {
+      const repo = repoOverride ?? sessionsRepoRef.current.get(sessionId) ?? backendRepo
+      if (!repo) return
       fetch(
-        `/api/repos/${encodeURIComponent(backendRepo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${afterSeq}&limit=5000`
+        `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${afterSeq}&limit=5000`
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { seq: number; stream: string; line: string; ts: string }[] } | null) => {
@@ -167,26 +184,34 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
     if (!backendRepo) return
     fetch(`/api/repos/${encodeURIComponent(backendRepo)}/agent-sessions`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: HistoryRow[] } | null) => setHistory(d?.data ?? []))
+      .then((d: { data?: HistoryRow[] } | null) => {
+        const rows = d?.data ?? []
+        setHistory(rows)
+        rows.forEach((r) => sessionsRepoRef.current.set(r.id, r.repo))
+      })
       .catch(() => {})
   }, [backendRepo])
 
-  /** 选中会话：无内存流水时从库表回放 */
+  /** 选中会话：无内存流水时从库表回放（按会话所属仓库——支持跨仓库选中） */
   const select = useCallback(
-    (id: string) => {
+    (id: string, repo?: string) => {
       setSelectedId(id)
-      if (!seqSeenRef.current.get(id)?.size) backfill(id)
+      if (repo) sessionsRepoRef.current.set(id, repo)
+      if (!seqSeenRef.current.get(id)?.size) backfill(id, 0, repo)
     },
     [backfill]
   )
 
   const pull = useCallback(() => {
-    if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/session-queue`)
+    fetch('/sessions/overview')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: SessionQueueSnapshot } | null) => setSnap(d?.data ?? null))
+      .then((d: { data?: { active: OverviewActive[]; queued: OverviewQueued[] } } | null) => {
+        const ov = d?.data ?? { active: [], queued: [] }
+        setOverview(ov)
+        ov.active.forEach((a) => sessionsRepoRef.current.set(a.sessionId, a.repo))
+      })
       .catch(() => {})
-  }, [backendRepo])
+  }, [])
 
   useEffect(() => {
     pull()
@@ -236,9 +261,12 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
 
   // 已运行时长 tick：interval 只强制重渲染，渲染期现取 wall clock
   const [, forceRender] = useReducer((x: number) => x + 1, 0)
-  const active = snap?.active ?? null
-  const startedMs = active?.startedAt ? toMs(active.startedAt) : null
-  const needTicker = startedMs !== null || !!snap?.queued
+  const activeList = overview.active
+  const active = selectedId ? activeList.find((a) => a.sessionId === selectedId) ?? null : null
+  const selectedAliveRow = active
+  const startedMs = selectedAliveRow?.startedAt ? toMs(selectedAliveRow.startedAt) : null
+  const anyTicker = activeList.length > 0 || overview.queued.length > 0
+  const needTicker = startedMs !== null || anyTicker
   useEffect(() => {
     if (!needTicker) return
     const t = window.setInterval(forceRender, 1000)
@@ -257,7 +285,8 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   const selectedLines = useMemo(() => (selectedId ? streams.get(selectedId) ?? [] : []), [selectedId, streams])
   const selectedMeta: { label: string; status: 'alive' | 'succeeded' | 'failed' } | null = useMemo(() => {
     if (!selectedId) return null
-    if (active && active.sessionId === selectedId) return { label: active.label, status: 'alive' }
+    const ovRow = overview.active.find((a) => a.sessionId === selectedId)
+    if (ovRow) return { label: ovRow.label, status: 'alive' }
     const row = history.find((h) => h.id === selectedId)
     if (row) return { label: row.label ?? row.id, status: row.status === 'failed' ? 'failed' : 'succeeded' }
     return { label: selectedId, status: 'alive' }
@@ -265,8 +294,6 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   const blocks = useMemo(() => (tier === 'timeline' ? toBlocks(selectedLines) : []), [tier, selectedLines])
   const rate = linesPerMinute(selectedLines, now)
   const lastText = useMemo(() => lastTextOf(selectedLines), [selectedLines])
-  const activeLines = active ? streams.get(active.sessionId) ?? [] : []
-  const activeLastText = lastTextOf(activeLines)
 
   if (!backendRepo) {
     return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
@@ -284,8 +311,8 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
       .catch(() => toast('终止失败（请确认后端在线后重试）。', 'error'))
   }
 
-  const cancelQueue = () => {
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/session-queue`, { method: 'DELETE' })
+  const cancelQueue = (q: OverviewQueued) => {
+    fetch(`/api/repos/${encodeURIComponent(q.repo)}/session-queue`, { method: 'DELETE' })
       .then(async (r) => {
         if (r.status === 404) toast('没有排队任务', 'error')
         else if (!r.ok) toast(`取消排队失败（HTTP ${r.status}）`, 'error')
@@ -296,7 +323,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   }
 
   const elapsed = startedMs !== null ? formatElapsed(now - startedMs) : null
-  const queuedAt = snap?.queued?.enqueuedAt ? toMs(snap.queued.enqueuedAt) : null
+
   const histKind = (row: HistoryRow): SessionQueueKind =>
     row.kind === 'patrol' ? 'patrol' : row.kind === 'submap' ? 'submap' : 'reinduce'
 
@@ -331,31 +358,48 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
       <div className="grid min-h-0 flex-1 grid-cols-4 gap-3">
         {/* 左栏：会话列表 */}
         <div className="col-span-1 min-h-0 space-y-3 overflow-y-auto pr-1">
-          {/* 运行中 */}
+          {/* 运行中（跨仓库——A 仓库分析中切到 B 仍可见） */}
           <section>
             <p className="mb-1.5 flex items-center gap-1.5 text-cap font-semibold text-slate-400 dark:text-slate-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> 运行中
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> 运行中{activeList.length > 0 ? `（${activeList.length}）` : ''}
             </p>
-            {active ? (
-              <button
-                onClick={() => select(active.sessionId)}
-                className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                  selectedId === active.sessionId
-                    ? 'border-blue-400 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30'
-                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {(() => {
-                    const Icon = kindIcon(kindFromLabel(active.label))
-                    return <Icon size={13} className="shrink-0 text-blue-500" />
-                  })()}
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{active.label}</span>
-                  <span className="tnum text-micro text-slate-400 dark:text-slate-500">{elapsed !== null ? `已运行 ${elapsed}` : '…'}</span>
-                </div>
-                <p className="mt-1 truncate text-micro text-slate-400 dark:text-slate-500">{activeLastText || '等待输出…'}</p>
-                <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">输出 {linesPerMinute(activeLines, now)} 行/分</p>
-              </button>
+            {activeList.length > 0 ? (
+              <div className="space-y-1.5">
+                {activeList.map((a) => {
+                  const lines = streams.get(a.sessionId) ?? []
+                  const st = a.startedAt ? toMs(a.startedAt) : null
+                  const foreign = backendRepo && a.repo !== backendRepo
+                  return (
+                    <button
+                      key={a.sessionId}
+                      onClick={() => select(a.sessionId, a.repo)}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                        selectedId === a.sessionId
+                          ? 'border-blue-400 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const Icon = kindIcon(kindFromLabel(a.label))
+                          return <Icon size={13} className="shrink-0 text-blue-500" />
+                        })()}
+                        <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{a.label}</span>
+                        {foreign && (
+                          <span className="shrink-0 rounded bg-blue-50 dark:bg-blue-950/40 px-1 py-px text-micro font-semibold text-blue-600 dark:text-blue-300">
+                            {a.repo}
+                          </span>
+                        )}
+                        <span className="tnum shrink-0 text-micro text-slate-400 dark:text-slate-500">
+                          {st !== null ? formatElapsed(now - st) : '…'}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-micro text-slate-400 dark:text-slate-500">{lastTextOf(lines) || '等待输出…'}</p>
+                      <p className="tnum mt-0.5 text-micro text-slate-400 dark:text-slate-500">输出 {linesPerMinute(lines, now)} 行/分</p>
+                    </button>
+                  )
+                })}
+              </div>
             ) : (
               <p className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-3 py-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
                 没有运行中的会话
@@ -363,23 +407,36 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
             )}
           </section>
 
-          {/* 排队中 */}
-          {snap?.queued && (
+          {/* 排队中（跨仓库） */}
+          {overview.queued.length > 0 && (
             <section>
               <p className="mb-1.5 flex items-center gap-1.5 text-cap font-semibold text-slate-400 dark:text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> 排队中
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> 排队中（{overview.queued.length}）
               </p>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
-                <div className="flex items-center gap-2">
-                  <Clock size={12} className="shrink-0 text-amber-500" />
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-600 dark:text-slate-300">{snap.queued.label}</span>
-                  <button onClick={cancelQueue} className="rounded px-1 text-slate-300 dark:text-slate-600 hover:text-red-500" title="取消排队">
-                    ✕
-                  </button>
-                </div>
-                <p className="mt-1 text-micro text-slate-400 dark:text-slate-500">
-                  排队 {queuedAt !== null ? formatElapsed(now - queuedAt) : '…'} · 当前会话结束后自动开始
-                </p>
+              <div className="space-y-1.5">
+                {overview.queued.map((q) => {
+                  const qt = q.enqueuedAt ? toMs(q.enqueuedAt) : null
+                  const foreign = backendRepo && q.repo !== backendRepo
+                  return (
+                    <div key={q.repo} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
+                      <div className="flex items-center gap-2">
+                        <Clock size={12} className="shrink-0 text-amber-500" />
+                        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-600 dark:text-slate-300">{q.label}</span>
+                        {foreign && (
+                          <span className="shrink-0 rounded bg-amber-50 dark:bg-amber-950/40 px-1 py-px text-micro font-semibold text-amber-600 dark:text-amber-300">
+                            {q.repo}
+                          </span>
+                        )}
+                        <button onClick={() => cancelQueue(q)} className="rounded px-1 text-slate-300 dark:text-slate-600 hover:text-red-500" title="取消排队">
+                          ✕
+                        </button>
+                      </div>
+                      <p className="mt-1 text-micro text-slate-400 dark:text-slate-500">
+                        {foreign ? `${q.repo} · ` : ''}排队 {qt !== null ? formatElapsed(now - qt) : '…'} · 当前会话结束后自动开始
+                      </p>
+                    </div>
+                  )
+                })}
               </div>
             </section>
           )}
@@ -591,7 +648,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
             </>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6">
-              {isEmptyState(snap) && history.length === 0 ? (
+              {overview.active.length === 0 && overview.queued.length === 0 && history.length === 0 ? (
                 <>
                   <Activity size={20} className="text-slate-300 dark:text-slate-600" />
                   <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">当前没有运行中的 agent</p>
