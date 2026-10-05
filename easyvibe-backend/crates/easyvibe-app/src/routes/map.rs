@@ -225,6 +225,17 @@ pub(crate) async fn start_reinduce_inner(st: AppState, id: String) -> Result<Res
                             }
                         }
                     }
+                    // 归纳终态：立即重估保鲜并推送 freshness.changed——否则头部"落后提示"要等
+                    // 30 分钟定时器才刷新（2026-10-05 实弹：归纳完成后 chip 仍显示"已过时 1 个新提交"）
+                    if let Ok(snap) = st2.map_service.load_map(&repo2).await {
+                        let f = crate::freshness::assess(&repo2.root, &snap.json);
+                        publish(&st2.event_bus, BusEvent::Freshness {
+                            repo: repo2.id.clone(),
+                            status: f.status.as_str().to_string(),
+                            latest_commit_at: f.latest_commit_at,
+                            commits_since_map: f.commits_since_map,
+                        });
+                    }
                     break;
                 }
                 // 实弹#4 防线：进度 100% 落盘超过 90s 但会话仍 Running（agent 已交付未自行退出）
@@ -395,6 +406,16 @@ pub(crate) async fn start_patrol_inner(st: AppState, id: String) -> Result<Respo
                         run_id: run_id_task.clone(),
                         status: if succeeded { "succeeded".into() } else { "failed".into() },
                     });
+                    // 巡检也会写回地图：即时重估保鲜并推送（与归纳终态同一纪律——不等 30 分钟定时器）
+                    if let Ok(snap) = st2.map_service.load_map(&repo2).await {
+                        let f = crate::freshness::assess(&repo2.root, &snap.json);
+                        publish(&st2.event_bus, BusEvent::Freshness {
+                            repo: repo2.id.clone(),
+                            status: f.status.as_str().to_string(),
+                            latest_commit_at: f.latest_commit_at,
+                            commits_since_map: f.commits_since_map,
+                        });
+                    }
                     break;
                 }
             });

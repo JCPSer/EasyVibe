@@ -107,6 +107,14 @@ export function useGrowthPlayback(
     return () => clearInterval(t)
   }, [growth?.playing])
 
+  // 归纳完成：短暂展示后自动退出回放条。live 生长条的唯一来源是归纳/排队接续，
+  // 停在"归纳完成 xx%"等用户手动关是死胡同（2026-10-05 实弹）；新地图经 map.changed 自动刷新
+  useEffect(() => {
+    if (!growth?.done) return
+    const t = setTimeout(() => setGrowth(null), 1600)
+    return () => clearTimeout(t)
+  }, [growth?.done])
+
   const startGrowth = useCallback(() => {
     const url = backendRepo ? `/api/repos/${backendRepo}/growth` : '/data/growth.log'
     fetch(url)
