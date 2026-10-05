@@ -1029,26 +1029,10 @@ export function TaskWorkflowPage({
                   </div>
                 )}
 
-                {/* ④ diff 关：子agent初审结论（有则置顶）+ 双栏查看器 */}
+                {/* ④ diff 关：双栏查看器；审查结论横幅统一在下方审查区块渲染（2026-10-05
+                    去重：此处原有置顶横幅与审查区块重复，删除其一） */}
                 {stage === 3 && (
                   <div className="flex min-h-0 flex-1 flex-col">
-                    {sel.result?.review && (
-                      <div
-                        className={`mx-4 mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
-                          sel.result.review.verdict === 'pass'
-                            ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60'
-                            : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/60'
-                        }`}
-                      >
-                        <ShieldAlert size={11} className={sel.result.review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
-                        <div className="min-w-0">
-                          <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                            子 agent 初审：{sel.result.review.verdict === 'pass' ? '通过' : '未通过'}
-                          </p>
-                          <p className="mt-0.5 line-clamp-2 text-micro leading-4 text-slate-600 dark:text-slate-300">{sel.result.review.summary}</p>
-                        </div>
-                      </div>
-                    )}
                     <div className="flex min-h-0 flex-1">
                     <div className="w-52 shrink-0 overflow-y-auto border-r border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-2">
                       <p className="flex items-center gap-1 px-1.5 pb-1.5 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
