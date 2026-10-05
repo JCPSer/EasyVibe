@@ -4,8 +4,7 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { Activity, BookOpen, Bot, CircleHelp, FileDown, FolderOpen, LayoutGrid, Lightbulb, Loader2, Plug, Plus, ScrollText, Settings, WifiOff, X } from 'lucide-react'
 
 import type { CodeMap } from '@/types/map'
-import { loadOnboarding, markCheck, markWelcomeShown, dismiss, completeAll, resetForReview, clearTaskIdea, loadTaskIdea, CHECK_KEYS } from '@/lib/onboarding'
-import { ONBOARDING_COPY } from '@/lib/onboardingCopy'
+import { markWelcomeShown, dismiss, resetForReview, clearTaskIdea, loadTaskIdea } from '@/lib/onboarding'
 import { AppShell, type PageId } from '@/components/AppShell'
 import { PlaceholderPage } from '@/components/PlaceholderPage'
 import { ModulesPage } from '@/components/ModulesPage'
@@ -37,6 +36,8 @@ import { isTauriRuntime } from '@/lib/env'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
 import { connectWs } from '@/lib/ws'
+import { useAgentState } from '@/hooks/useAgentState'
+import { useOnboarding } from '@/hooks/useOnboarding'
 export default function App() {
   const [map, setMap] = useState<CodeMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -47,54 +48,8 @@ export default function App() {
   // 离线时切换器显示"未选择仓库/尚未挂载"与画布上的演示数据自相矛盾（用户截图的困惑点）。
   // 三态显式化：null=探测中 / true=在线 / false=离线（演示数据模式）
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
-  // M2 引导与降级：执行 agent 状态（found=null 探测中/离线——按可用处理，只有显式 false 才拦截）
-  const [agentState, setAgentState] = useState<{
-    found: boolean | null
-    detected: { command: string; path: string; version: string | null }[]
-  }>({ found: null, detected: [] })
-  const loadAgentState = useCallback(() => {
-    fetch('/api/agent/status')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { data?: { effective?: { found: boolean }; detected?: { command: string; path: string; version: string | null }[] } } | null) => {
-        if (d?.data?.effective) {
-          setAgentState({ found: d.data.effective.found, detected: d.data.detected ?? [] })
-        }
-      })
-      .catch(() => {})
-  }, [])
-  // 后端在线后加载 agent 状态 + 30s 轮询（装好后自然恢复，无需手动刷新）
-  useEffect(() => {
-    if (backendOnline !== true) return
-    loadAgentState()
-    const t = window.setInterval(loadAgentState, 30000)
-    return () => window.clearInterval(t)
-  }, [backendOnline, loadAgentState])
-
-  // M2"采用"动作的端点序列（方案 §5.2）：settings/set → test → status；任一步失败保留横幅并报原因
-  const adoptAgent = async (command: string) => {
-    try {
-      const presetId = ['claude', 'codex', 'opencode'].includes(command) ? command : 'custom'
-      const put = (key: string, value: unknown) =>
-        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key, value }) })
-      const [r1, r2] = await Promise.all([put('agent.command', command), put('agent.preset', presetId)])
-      if (!r1.ok || !r2.ok) throw new Error('配置写入失败')
-      const r3 = await fetch('/api/agent/test', { method: 'POST' })
-      const d3 = await r3.json().catch(() => null)
-      toast(
-        d3?.data?.ok ? `已采用 ${command}，协议兼容（${d3.data.latencyMs}ms）` : `已采用 ${command}，但协议测试未通过：${d3?.data?.protocol ?? '未知'}`,
-        d3?.data?.ok ? 'info' : 'error',
-      )
-      loadAgentState()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '采用失败', 'error')
-    }
-  }
-
-  const CLAUDE_INSTALL_CMD = 'npm install -g @anthropic-ai/claude-code'
-  const copyInstallCmd = () => {
-    void navigator.clipboard?.writeText(CLAUDE_INSTALL_CMD)
-    toast('安装命令已复制——在终端粘贴执行，完成后回到这里点"重新探测"')
-  }
+  // M2 引导与降级：执行 agent 状态（探测 + 30s 轮询 + 采用 + 安装命令）抽为 hook
+  const { agentState, adoptAgent, copyInstallCmd } = useAgentState(backendOnline)
   const [reloadTick, setReloadTick] = useState(0)
   // 运行会话气泡重拉信号：WS onopen（重连）时递增，作为 resyncKey 传给 SessionBubble（I5②）
   const [queueResyncTick, setQueueResyncTick] = useState(0)
@@ -167,9 +122,8 @@ export default function App() {
   const [lensRequest, setLensRequest] = useState<string | null>(null)
   /** 2026-10-05 用量页/任务页/画布 → 运行页会话 deeplink */
   const [runsFocus, setRunsFocus] = useState<string | null>(null)
-  // 2026-10-04 新手引导：版本化状态（lib/onboarding）+ 帮助菜单强制重开
-  const [onboarding, setOnboarding] = useState(loadOnboarding)
-  const [welcomeOpen, setWelcomeOpen] = useState(false)
+  // 新手引导状态机（B5）抽为 hook：版本化状态 + 欢迎页开合 + 事件驱动勾选 + firstApproval 轮询 + 收尾
+  const { onboarding, setOnboarding, welcomeOpen, setWelcomeOpen, markFirstTask } = useOnboarding({ page, hasMap: !!map, repoCount: repos.length, backendRepo })
   // ui-test P1：表单创建成功 → 任务页流水线选中该任务（nonce 区分多次跳入）
   const [taskFocus, setTaskFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [overlay, setOverlay] = useState<'views' | 'suggest' | null>(null)
@@ -283,55 +237,6 @@ export default function App() {
     },
     [handlePageChange],
   )
-
-  // ---------- 新手引导：事件驱动勾选（调研 C2——完成 = 真实激活动作，不是"看过"） ----------
-  useEffect(() => {
-    if (repos.length > 0) setOnboarding((prev) => markCheck(prev, 'addRepo'))
-  }, [repos.length])
-  useEffect(() => {
-    if (page === 'map' && map) setOnboarding((prev) => markCheck(prev, 'viewMap'))
-  }, [page, map])
-  useEffect(() => {
-    if (page === 'health' || page === 'drift') setOnboarding((prev) => markCheck(prev, 'viewHealth'))
-  }, [page])
-  // firstApproval：轮询探测"任何任务存在审批记录"（只在本项未完成时跑，30s 节拍）
-  useEffect(() => {
-    if (!backendRepo || onboarding.checklist.firstApproval === 'done') return
-    let dead = false
-    const probe = async () => {
-      try {
-        const r = await fetch(`/api/repos/${backendRepo}/tasks`)
-        const d: { data?: { id: string }[] } = r.ok ? await r.json() : null
-        for (const t of (d?.data ?? []).slice(0, 5)) {
-          const ra = await fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(t.id)}/approvals`)
-          if (!ra.ok) continue
-          const da: { data?: unknown[] } = await ra.json()
-          if ((da?.data?.length ?? 0) > 0) {
-            if (!dead) setOnboarding((prev) => markCheck(prev, 'firstApproval'))
-            return
-          }
-        }
-      } catch {
-        /* 后端离线等场景静默 */
-      }
-    }
-    void probe()
-    const t = window.setInterval(() => void probe(), 30000)
-    return () => {
-      dead = true
-      window.clearInterval(t)
-    }
-  }, [backendRepo, onboarding.checklist.firstApproval])
-  // 全部完成 → 庆祝 + 自动收尾（只触发一次）
-  const onboardDoneRef = useRef(-1)
-  useEffect(() => {
-    const n = CHECK_KEYS.filter((k) => onboarding.checklist[k] === 'done').length
-    if (n === CHECK_KEYS.length && onboardDoneRef.current !== n) {
-      toast(ONBOARDING_COPY.checklist.doneToast, 'info')
-      setOnboarding((prev) => completeAll(prev))
-    }
-    onboardDoneRef.current = n
-  }, [onboarding])
 
   // 每项目记忆：右栏宽度 / 面板开合随项目持久化（M4-1 状态持久化，防刷新丢位置）。
   // 页签不恢复（2026-10-03 用户裁定）：切换仓库固定落架构地图——上次在 A 仓库看任务，
@@ -798,7 +703,7 @@ export default function App() {
             }
             onTaskCreated={(id) => {
               setTaskFocus({ id, nonce: Date.now() })
-              setOnboarding((prev) => markCheck(prev, 'firstTask'))
+              markFirstTask()
               handlePageChange('tasks')
             }}
             onChatAbout={goChatAbout}
@@ -1049,7 +954,7 @@ export default function App() {
           onClose={() => setTaskDraft(null)}
           onCreated={(id) => {
             setTaskFocus({ id, nonce: Date.now() })
-            setOnboarding((prev) => markCheck(prev, 'firstTask'))
+            markFirstTask()
             handlePageChange('tasks')
           }}
           onLocateModule={() => handlePageChange('map')}
