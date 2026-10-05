@@ -185,6 +185,9 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(session_queue::delete_session_queue),
         )
         .route("/repos/{id}/patrol-runs", get(list_patrol_runs).delete(prune_patrol_runs))
+        // 全局运行指示（2026-10-05）：跨仓库活动会话 + 队列——d928389 实现 handler 但漏注册，
+        // 前端 404 静默兜底 = 巡检/归纳进行中状态丸与运行页永远空白（实弹 bug）。
+        .route("/sessions/overview", get(session_queue::get_sessions_overview))
         .route("/repos/{id}/agent-sessions", get(list_agent_sessions))
         .route("/repos/{id}/usage", get(get_usage))
         .route("/repos/{id}/health-dashboard", get(get_health_dashboard))
@@ -3800,6 +3803,19 @@ mod tests {
         let created = summary.iter().find(|r| r.name == "task.created");
         assert!(created.is_some(), "创建事件必须落库: {:?}", summary);
         assert!(created.unwrap().count >= 2);
+    }
+
+    #[tokio::test]
+    async fn sessions_overview_route_registered() {
+        // 2026-10-05 实弹回归（巡检后无运行状态显示的根因）：d928389 实现了 handler
+        // 却漏注册路由，前端 404 静默兜底使状态丸/运行页永远空白——路由必须在版。
+        let (state, _repo) = chat_state("sessions-overview-route").await;
+        let app = build_router(state);
+        let resp = app
+            .oneshot(axum::http::Request::get("/api/sessions/overview").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK, "/api/sessions/overview 必须已注册");
     }
 
     #[tokio::test]

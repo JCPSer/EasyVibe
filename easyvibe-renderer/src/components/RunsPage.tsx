@@ -203,7 +203,7 @@ export function RunsPage({ backendRepo, initialSessionId, onInitialConsumed, res
   )
 
   const pull = useCallback(() => {
-    fetch('/sessions/overview')
+    fetch('/api/sessions/overview')
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { active: OverviewActive[]; queued: OverviewQueued[] } } | null) => {
         const ov = d?.data ?? { active: [], queued: [] }

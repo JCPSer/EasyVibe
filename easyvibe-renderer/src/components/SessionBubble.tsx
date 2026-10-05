@@ -43,7 +43,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns }: { back
   }, [ov])
 
   const pull = useCallback(() => {
-    fetch('/sessions/overview')
+    fetch('/api/sessions/overview')
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Overview } | null) => setOv(d?.data ?? { active: [], queued: [] }))
       .catch(() => {})
