@@ -46,6 +46,9 @@ pub enum OutputStream {
 pub enum SessionMetaUpdate {
     /// spawn 入口已知（命令名）——落盘桥据此刻写 agent_sessions 行
     Cli(String),
+    /// app 层 note_label 即播——运行期落库 label/kind（此前仅终态 finalize 才写，
+    /// 运行中的会话在用量/运行页显示 unknown/归纳误标，2026-10-05 实弹）
+    Label(String),
     /// system init 事件的真实模型名（不等终态，kill 也能拿到）
     Model(String),
     /// result 事件的会话级累计 usage（claude 自报口径，含缓存折扣价）
@@ -296,7 +299,20 @@ impl SessionManager {
 
     /// I1：app 层各发起入口打展示标签（「归纳」「巡检」「分析模块 X」「自动归纳」「任务执行」）
     pub async fn note_label(&self, session_id: &str, label: String) {
-        self.labels.write().await.insert(session_id.to_string(), label);
+        self.labels.write().await.insert(session_id.to_string(), label.clone());
+        // M1.1：标签同时经元事件落库（运行期 kind/label 可见——用量/运行页不再等终态）
+        let repo_id = self
+            .by_id
+            .read()
+            .await
+            .get(session_id)
+            .map(|s| s.repo.clone())
+            .unwrap_or_default();
+        let _ = self.meta_tx.send(SessionMetaEvent {
+            repo: repo_id,
+            session_id: session_id.to_string(),
+            update: SessionMetaUpdate::Label(label),
+        });
     }
 
     /// I1：会话注册时刻（气泡已运行时长的数据源；缺失则不显示时长）

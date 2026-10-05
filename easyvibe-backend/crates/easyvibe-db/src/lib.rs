@@ -1290,6 +1290,19 @@ impl AgentSessionRepo {
         Ok(())
     }
 
+    /// M1.1：运行期落库标签与类型（note_label 即播——此前仅终态 finalize 才写，
+    /// 运行中的会话在用量/运行页显示 unknown 或「归纳」误标，2026-10-05 实弹）
+    pub async fn set_label_kind(&self, id: &str, label: &str, kind: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE agent_sessions SET label = ?, kind = ? WHERE id = ?")
+            .bind(label)
+            .bind(kind)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
     pub async fn set_model(&self, id: &str, model: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE agent_sessions SET model = ? WHERE id = ?")
             .bind(model)

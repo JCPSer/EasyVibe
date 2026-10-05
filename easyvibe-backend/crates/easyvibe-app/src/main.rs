@@ -2759,6 +2759,10 @@ async fn main() {
                         let cmd = cli.rsplit(['/', '\\']).next().unwrap_or(cli).to_string();
                         repo.upsert_started(&e.session_id, &e.repo, &cmd, &chrono::Utc::now().to_rfc3339()).await
                     }
+                    Meta::Label(label) => {
+                        let kind = session_kind_from_label(label);
+                        repo.set_label_kind(&e.session_id, label, kind).await
+                    }
                     Meta::Model(m) => repo.set_model(&e.session_id, m).await,
                     Meta::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, turns } => {
                         repo.set_usage(&e.session_id, *input_tokens, *output_tokens, *cache_read_tokens, *cache_write_tokens, *cost_usd, *duration_ms, *turns).await

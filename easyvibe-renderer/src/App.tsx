@@ -49,6 +49,7 @@ import { isIssueModule } from '@/components/IssuesList'
 import { emitFreshnessEvent, emitGrowthEvent, emitPatrolFinished, emitQueueChanged, emitSessionEvent, emitSessionOutput, emitTaskEvent, notifyWsClosed, onFreshnessEvent, onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, onSessionOutput, onTaskEvent, setWsCloseListener } from '@/lib/growthBus'
 import { enqueue } from '@/lib/sessionQueue'
 import { sysNotify } from '@/lib/notify'
+import { isTauriRuntime } from '@/lib/env'
 import { pushTerminalLine } from '@/lib/terminalBuffer'
 import { track } from '@/lib/analytics'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/lib/growthMerge'
@@ -1835,6 +1836,25 @@ export default function App() {
     },
     [saveUiPref],
   )
+
+  // 2026-10-05 白屏自愈：后端运行期死亡时壳会自重启并广播 backend-recovered——
+  // 届时 webview 已空白，唯一能做的就是整页重载（React 状态丢失可接受，数据都在后端）
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    import('@tauri-apps/api/event')
+      .then((m) => m.listen('backend-recovered', () => window.location.reload()))
+      .then((fn) => {
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
 
   // 2026-10-05 系统级通知：窗口失焦/后台时送达通知中心（toast 只有前台可见）。
   // 会话失败 = 需要人来看；排队 drained+started = 离开等排队的用户该回来了。

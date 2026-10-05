@@ -59,33 +59,109 @@ pub fn run() {
                 app.manage(SidecarState(Mutex::new(None)));
             } else {
             let port_str = BACKEND_PORT.to_string();
+            // spawn 独立函数：壳内唯一 spawn 点（首启与崩溃自重启共用同一组 env）
+            fn spawn_sidecar(
+                app: &tauri::App,
+                static_dir: &std::path::Path,
+                prompt_dir: &std::path::Path,
+            ) -> Result<
+                (
+                    tauri::async_runtime::Receiver<tauri_plugin_shell::process::CommandEvent>,
+                    tauri_plugin_shell::process::CommandChild,
+                ),
+                Box<dyn std::error::Error>,
+            > {
+                let port_str = BACKEND_PORT.to_string();
+                let (rx, child) = app
+                    .shell()
+                    .sidecar("easyvibe-backend")
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+                    .env("EASYVIBE_PORT", &port_str)
+                    .env("EASYVIBE_STATIC_DIR", static_dir)
+                    .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
+                    .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
+                    .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))
+                    .env("EASYVIBE_SUBMAP_PROMPT_PATH", prompt_dir.join("easyvibe-module-submap-prompt.md"))
+                    .spawn()
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                Ok((rx, child))
+            }
             // spawn 返回 (事件接收端, 子进程句柄)。消费事件流：Stdout/Stderr 行转发到壳日志
             // （routa pipe_child_logs 模式——后端日志与壳日志汇流到一处，排障只看一个流）
-            let (rx, child) = app
-                .shell()
-                .sidecar("easyvibe-backend")
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
-                .env("EASYVIBE_PORT", &port_str)
-                .env("EASYVIBE_STATIC_DIR", &static_dir)
-                .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
-                .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
-                .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))
-                .env("EASYVIBE_SUBMAP_PROMPT_PATH", prompt_dir.join("easyvibe-module-submap-prompt.md"))
-                .spawn()
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            let (mut rx, child) = spawn_sidecar(app, &static_dir, &prompt_dir)?;
             app.manage(SidecarState(Mutex::new(Some(child))));
+            // AppHandle 版：自重启路径用（壳已 setup 完，只有 handle）
+            fn spawn_sidecar_handle(
+                app: &tauri::AppHandle,
+                static_dir: &std::path::Path,
+                prompt_dir: &std::path::Path,
+            ) -> Result<
+                (
+                    tauri::async_runtime::Receiver<tauri_plugin_shell::process::CommandEvent>,
+                    tauri_plugin_shell::process::CommandChild,
+                ),
+                Box<dyn std::error::Error>,
+            > {
+                use tauri::Manager as _;
+                let port_str = BACKEND_PORT.to_string();
+                let (rx, child) = app
+                    .shell()
+                    .sidecar("easyvibe-backend")
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+                    .env("EASYVIBE_PORT", &port_str)
+                    .env("EASYVIBE_STATIC_DIR", static_dir)
+                    .env("EASYVIBE_PROMPT_PATH", prompt_dir.join("easyvibe-map-prompt-v2.2.md"))
+                    .env("EASYVIBE_PATROL_PROMPT_PATH", prompt_dir.join("easyvibe-map-patrol-prompt.md"))
+                    .env("EASYVIBE_SCHEMA_PATH", prompt_dir.join("easyvibe-map-schema-v1.json"))
+                    .env("EASYVIBE_SUBMAP_PROMPT_PATH", prompt_dir.join("easyvibe-module-submap-prompt.md"))
+                    .spawn()
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                Ok((rx, child))
+            }
+            let app_handle_mon = app.handle().clone();
+            let static_dir_mon = static_dir.clone();
+            let prompt_dir_mon = prompt_dir.clone();
             tauri::async_runtime::spawn(async move {
                 use tauri_plugin_shell::process::CommandEvent;
-                let mut rx = rx;
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(line) => eprintln!("[sidecar][stdout] {}", String::from_utf8_lossy(&line)),
-                        CommandEvent::Stderr(line) => eprintln!("[sidecar][stderr] {}", String::from_utf8_lossy(&line)),
-                        CommandEvent::Error(e) => eprintln!("[sidecar][error] {e}"),
-                        CommandEvent::Terminated(payload) => {
-                            eprintln!("[sidecar][terminated] code={:?} signal={:?}", payload.code, payload.signal)
+                loop {
+                    match rx.recv().await {
+                        Some(CommandEvent::Stdout(line)) => eprintln!("[sidecar][stdout] {}", String::from_utf8_lossy(&line)),
+                        Some(CommandEvent::Stderr(line)) => eprintln!("[sidecar][stderr] {}", String::from_utf8_lossy(&line)),
+                        Some(CommandEvent::Error(e)) => eprintln!("[sidecar][error] {e}"),
+                        Some(CommandEvent::Terminated(payload)) => {
+                            eprintln!("[sidecar][terminated] code={:?} signal={:?}——启动自重启", payload.code, payload.signal);
+                            // 2026-10-05 白屏根治：运行期后端死亡 = webview 空白且无法自救。
+                            // 自重启（3 次退避）→ 健康后通知前端 reload——用户视角只是页面刷新了一下。
+                            let mut recovered = false;
+                            for attempt in 1..=3u32 {
+                                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                match spawn_sidecar_handle(&app_handle_mon, &static_dir_mon, &prompt_dir_mon) {
+                                    Ok((new_rx, child)) => {
+                                        rx = new_rx;
+                                        if let Some(state) = app_handle_mon.try_state::<SidecarState>() {
+                                            *state.0.lock().unwrap() = Some(child);
+                                        }
+                                        eprintln!("[sidecar] 自重启成功（第 {attempt} 次）");
+                                        recovered = true;
+                                        break;
+                                    }
+                                    Err(e) => eprintln!("[sidecar] 自重启失败（第 {attempt} 次）: {e}"),
+                                }
+                            }
+                            if recovered {
+                                // 等端口健康再通知前端（最多 15s）
+                                for _ in 0..30 {
+                                    if std::net::TcpStream::connect(("127.0.0.1", BACKEND_PORT)).is_ok() { break; }
+                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                }
+                                use tauri::Emitter as _;
+                                let _ = app_handle_mon.emit_to("main", "backend-recovered", ());
+                            } else {
+                                eprintln!("[sidecar] 自重启三次均失败——请查看 ~/.easyvibe/logs/ 后重启应用");
+                            }
                         }
-                        _ => {}
+                        Some(_) => {}
+                        None => break,
                     }
                 }
             });

@@ -24,7 +24,9 @@ export function TaskFormPanel({ backendRepo, draft, map, onClose, onCreated, onL
   const [description, setDescription] = useState(draft.description)
   const [acceptance, setAcceptance] = useState(draft.acceptance)
   const [selected, setSelected] = useState<string[]>(draft.modules)
-  const [trust, setTrust] = useState<'manual' | 'auto' | 'supervised'>('supervised')
+  // 2026-10-05 卡控修复：默认 manual——supervised 低危会自动过计划关直接开发，
+// 用户预期是「先看需求矩阵与方案再放行」（盲测 P0 语义保留，按需手选 supervised/auto）
+const [trust, setTrust] = useState<'manual' | 'auto' | 'supervised'>('manual')
   const [showContext, setShowContext] = useState(true)
   const [sending, setSending] = useState(false)
   const [created, setCreated] = useState<string | null>(null)
