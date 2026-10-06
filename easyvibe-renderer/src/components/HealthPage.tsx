@@ -137,9 +137,17 @@ export function HealthPage({
   const latest = succeeded[0] ?? null
   const prev = succeeded[1] ?? null
 
-  // KPI 口径：巡检记录优先，无记录回落当前地图
-  const archScore = latest?.archScore ?? map?.health.score ?? null
-  const moduleAvg = latest && latest.moduleCount > 0 ? latest.moduleAvg : null
+  // KPI 口径（2026-10-06 实弹修正）：按"测量时间新旧"裁决，不再无条件巡检优先——
+  // 归纳后新地图的自评分是对**当前代码**的最新证据，应盖过针对**旧代码**的巡检分
+  // （实弹：巡检 89 后重新归纳，地图自评 74，看板仍报 89——双地讲一个数，用户不知信谁）。
+  // 来源必须标注：两个分数的严格程度不同（巡检 rubric 体检 vs 归纳自评粗分）。
+  const mapScore = map?.health.score ?? null
+  const mapAt = map?.meta?.generated_at ? toMs(map.meta.generated_at) : null
+  const patrolAt = latest?.finishedAt ? toMs(latest.finishedAt) : null
+  const mapNewer = mapScore !== null && (patrolAt === null || (mapAt !== null && mapAt > patrolAt))
+  const archScore = mapNewer ? mapScore : latest?.archScore ?? mapScore
+  const scoreSource = latest === null || mapNewer ? 'map' : 'patrol'
+  const moduleAvg = !mapNewer && latest && latest.moduleCount > 0 ? latest.moduleAvg : null
   const mapModuleAvg = useMemo(() => {
     if (!map || map.modules.length === 0) return null
     const avg = Math.round(map.modules.reduce((s, m) => s + (Number.isFinite(m.health.score) ? m.health.score : 0), 0) / map.modules.length)
@@ -226,7 +234,16 @@ export function HealthPage({
           <p className="tnum mt-1 text-[22px] font-bold leading-6" style={{ color: archScore !== null ? healthColor(archScore) : '#94a3b8' }}>
             {archScore ?? '—'} <span className="text-cap font-normal text-slate-300 dark:text-slate-600">/ 100</span>
           </p>
-          {archScore !== null && <Delta now={archScore} prev={prev?.archScore ?? null} />}
+          {/* 来源标注：消除"地图说 74 / 看板说 89"的双地歧义（2026-10-06 实弹） */}
+          {scoreSource === 'patrol' && latest?.finishedAt ? (
+            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">巡检分 · {absTime(latest.finishedAt)}</p>
+          ) : scoreSource === 'map' && latest !== null ? (
+            <p className="mt-0.5 text-micro text-amber-600 dark:text-amber-400">地图自评 · 新地图待巡检</p>
+          ) : (
+            <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">地图自评</p>
+          )}
+          {/* 跨口径的 Delta（地图自评 vs 巡检分）是拿两把尺子相减，隐藏防误导 */}
+          {archScore !== null && !(mapNewer && latest !== null) && <Delta now={archScore} prev={prev?.archScore ?? null} />}
           <div className="absolute right-3 top-1/2 -translate-y-1/2">{archScore !== null && <Ring score={archScore} />}</div>
         </div>
         <div className="lift relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
