@@ -5,6 +5,7 @@
 //! WS 面在 `ws`，启动装配在 `bootstrap`，资产在 `assets`。
 mod assets;
 mod bootstrap;
+mod db_ports;
 mod router;
 mod routes;
 mod service;

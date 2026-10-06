@@ -2,7 +2,7 @@
 
 use crate::assets::*;
 use crate::router::*;
-use crate::routes::agent::*;
+use crate::service::agent::{llm_test_inner, LlmTestBody};
 use easyvibe_map::concerns::*;
 use crate::service::map::*;
 use crate::test_support::*;

@@ -52,7 +52,7 @@ pub(crate) async fn run_subagent_review(
     agent_args: &[String],
     repo_id: &str,
     repo_root: &std::path::Path,
-    task: &TaskRow,
+    task: &TaskRecord,
     custom: &HarnessCustom,
     rules: (&str, &str),
 ) -> Option<ReviewVerdict> {
@@ -86,7 +86,7 @@ pub(crate) async fn run_phase_doc_review(
     agent_args: &[String],
     repo_id: &str,
     repo_root: &std::path::Path,
-    task: &TaskRow,
+    task: &TaskRecord,
     phase: u8,
     custom: &HarnessCustom,
 ) -> Option<ReviewVerdict> {
@@ -160,8 +160,7 @@ pub(crate) async fn await_review_verdict(
 /// 实施审查结论并入 tasks.result.review（含 at 毫秒时间戳——前端「人工复审」
 /// 轮次完成判定的依据：点击发起后轮询到 at ≥ 点击时刻即知本轮已出结论）。
 /// result 可能不存在（复审发生在采集前），此时新建 JSON 骨架。
-pub(crate) async fn merge_review_verdict(task_repo: &easyvibe_db::SqliteTaskRepository, task_id: &str, v: &ReviewVerdict) {
-    use easyvibe_db::TaskRepository as _;
+pub(crate) async fn merge_review_verdict(task_repo: &dyn TaskStore, task_id: &str, v: &ReviewVerdict) {
     let Ok(Some(row)) = task_repo.get(task_id).await else { return };
     let mut rv: serde_json::Value = row
         .result
@@ -178,12 +177,11 @@ pub(crate) async fn merge_review_verdict(task_repo: &easyvibe_db::SqliteTaskRepo
 /// 初审结论并入 tasks.result.phaseReviews（key = analysis / solution）——
 /// result 可能尚不存在（阶段 1/2 不采集产物），此时新建 JSON 骨架。
 pub(crate) async fn merge_phase_review(
-    task_repo: &easyvibe_db::SqliteTaskRepository,
+    task_repo: &dyn TaskStore,
     task_id: &str,
     key: &str,
     v: &ReviewVerdict,
 ) {
-    use easyvibe_db::TaskRepository as _;
     let Ok(Some(row)) = task_repo.get(task_id).await else { return };
     let mut rv: serde_json::Value = row
         .result

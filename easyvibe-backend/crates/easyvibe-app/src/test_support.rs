@@ -59,17 +59,15 @@ use tower::ServiceExt;
             rule_bugfix: String::new(),
         }));
         let executor = task_exec::TaskExecutor::new(
-            task_repo.clone(),
-            approval_repo.clone(),
-            session_manager.clone(),
-            svc.clone(),
-            harness.clone(),
-            Arc::new("true".into()),
-            Arc::new(vec![]),
-            4,
-            settings_repo.clone(),
-            None,
-        );
+    task_repo.clone(),
+    approval_repo.clone(),
+    session_manager.clone(),
+    svc.clone(),
+    harness.clone(),
+    4,
+    Arc::new(crate::db_ports::AgentSlotAdapter::new(settings_repo.clone(), Arc::new("true".into()), Arc::new(vec![]))),
+    None,
+);
         let cipher = easyvibe_common::SecretCipher::from_hex_key(&"ab".repeat(32)).unwrap();
         AppState {
             map_service: svc,

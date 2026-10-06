@@ -244,3 +244,246 @@ pub(crate) async fn chat_once(st: &AppState, id: &str, body: ChatHttpRequest) ->
         "usage": usage,
     }))
 }
+
+// ============================================================================
+// c-arch-7 R1：routes/chat.rs 的下沉编排（零语义改动）
+// 含会话 CRUD/消息分页/压缩/重置与「视图」FS 编排——routes 只做 HTTP 边界。
+// ============================================================================
+
+#[derive(serde::Deserialize)]
+pub(crate) struct CreateConversationRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct RenameConversationRequest {
+    pub title: String,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct SaveViewRequest {
+    pub name: String,
+    #[serde(default)]
+    pub nodes: Vec<String>, // ["module:exam-core", ...]
+    #[serde(default)]
+    pub edges: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub annotations: Vec<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct RenameViewRequest {
+    pub name: String,
+}
+
+/// 会话列表（含各自运行态摘要）。
+pub(crate) async fn list_conversations(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let convs = st.conversation_repo.list_by_repo(id).await?;
+    let mut items = Vec::new();
+    for c in &convs {
+        items.push(conversation_summary(st, c).await);
+    }
+    Ok(serde_json::json!({ "success": true, "data": items }))
+}
+
+/// 建会话（id = chat:<repo>:<毫秒时间戳>）。
+pub(crate) async fn create_conversation(st: &AppState, id: &str, title: Option<&str>) -> Result<serde_json::Value, ApiError> {
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let cid = format!("chat:{id}:{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let conv = st.conversation_repo.create(&cid, id, title).await?;
+    Ok(serde_json::json!({ "success": true, "data": conversation_summary(st, &conv).await }))
+}
+
+/// 会话改名（空名 400；会话须属于该仓库）。
+pub(crate) async fn rename_conversation(st: &AppState, id: &str, cid: &str, title: &str) -> Result<(), ApiError> {
+    if title.trim().is_empty() {
+        return Err(ApiError::BadRequest("会话名不能为空".into()));
+    }
+    resolve_conv(st, id, Some(cid)).await?;
+    st.conversation_repo.rename(cid, title.trim()).await?;
+    Ok(())
+}
+
+/// 删除会话（每仓库至少保留一个）。
+pub(crate) async fn delete_conversation(st: &AppState, id: &str, cid: &str) -> Result<(), ApiError> {
+    resolve_conv(st, id, Some(cid)).await?;
+    let convs = st.conversation_repo.list_by_repo(id).await?;
+    if convs.len() <= 1 {
+        return Err(ApiError::BadRequest("每个仓库至少保留一个会话".into()));
+    }
+    st.conversation_repo.delete(cid).await?;
+    Ok(())
+}
+
+/// 会话消息分页（?before / ?limit 缺省 50、clamp(1,200)）+ 内联审批卡数据源。
+pub(crate) async fn get_chat(
+    st: &AppState,
+    id: &str,
+    conv: Option<&str>,
+    before: Option<i64>,
+    limit: i64,
+) -> Result<serde_json::Value, ApiError> {
+    use easyvibe_db::TaskRepository as _;
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let limit = limit.clamp(1, 200);
+    // M4-2 多会话：?conv=<id> 选择会话（缺省=最近活跃）
+    let conv = resolve_conv(st, id, conv).await?;
+    let messages = st.conversation_repo.list_messages(&conv.id, before, limit).await?;
+    let has_more = messages.len() as i64 == limit;
+    // 内联审批数据源：该会话关联任务中等待审批的门（AionUI 内联审批卡模式）
+    let pending_approvals: Vec<serde_json::Value> = st.task_repo.list_by_conversation(&conv.id).await.unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.status == "awaiting_approval")
+        .map(|t| serde_json::json!({ "taskId": t.id, "title": t.title, "gate": t.gate }))
+        .collect();
+    Ok(serde_json::json!({
+        "success": true,
+        "data": {
+            "conversation": { "id": conv.id, "title": conv.title },
+            "summary": conv.summary,
+            "messages": messages,
+            "hasMore": has_more,
+            "pendingApprovals": pending_approvals,
+            "usage": { "promptTokens": conv.prompt_tokens, "completionTokens": conv.completion_tokens },
+        }
+    }))
+}
+
+/// 手动压缩（§10a：对话界面"压缩上下文"按钮；自动阈值兜底之外的主动手段）。
+pub(crate) async fn compact_chat(st: &AppState, id: &str, conv: Option<&str>) -> Result<serde_json::Value, ApiError> {
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let _guard = st.chat_lock.lock().await;
+    let budget = resolve_adv_i64(st, id, "adv.contextBudget", DEFAULT_CONTEXT_BUDGET).await;
+    let trace = maybe_compact(st, id, conv, budget, 0, true).await?;
+    Ok(serde_json::json!({ "success": true, "data": { "compacted": trace.is_some(), "trace": trace } }))
+}
+
+/// 新对话：清空消息与摘要（会话行保留，token 计数归零）。
+pub(crate) async fn reset_chat(st: &AppState, id: &str, conv: Option<&str>) -> Result<(), ApiError> {
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let _guard = st.chat_lock.lock().await;
+    let conv = resolve_conv(st, id, conv).await?;
+    st.conversation_repo.reset(&conv.id).await?;
+    Ok(())
+}
+
+/// 视图列表（F1b 读侧）：.easyvibe/views/*.json 引用式视图，供前端"视图"页签消费。
+pub(crate) async fn list_views(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
+    let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let dir = repo.root.join(".easyvibe/views");
+    let mut items: Vec<serde_json::Value> = vec![];
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { continue };
+            items.push(serde_json::json!({
+                "slug": path.file_stem().and_then(|s| s.to_str()).unwrap_or(""),
+                "name": v["name"],
+                "createdAt": v["created_at"],
+                "nodes": v["nodes"].as_array().map(|a| a.len()).unwrap_or(0),
+                "view": v,
+            }));
+        }
+    }
+    items.sort_by(|a, b| b["createdAt"].as_str().cmp(&a["createdAt"].as_str()));
+    Ok(serde_json::json!({ "success": true, "data": items }))
+}
+
+/// 视图 slug 安全字符集（保存/改名/删除三处同防线：非白名单字符一律替换为 `-`）。
+fn view_slug(raw: &str) -> String {
+    raw.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c) { c } else { '-' })
+        .collect()
+}
+
+/// 删除视图（F1b 读侧闭环）：slug 复用保存时的安全字符集，防线同 save_view。
+pub(crate) async fn delete_view(st: &AppState, id: &str, slug: &str) -> Result<(), ApiError> {
+    let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let safe = view_slug(slug);
+    if safe.is_empty() || safe != slug {
+        return Err(ApiError::BadRequest("非法视图标识".into()));
+    }
+    let path = repo.root.join(".easyvibe/views").join(format!("{safe}.json"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| ApiError::Internal(format!("删除视图失败: {e}")))?;
+    }
+    Ok(())
+}
+
+/// 视图改名（重审 P1）：改名 = 新 slug 写文件 + 删旧文件；slug 冲突 409。
+pub(crate) async fn rename_view(st: &AppState, id: &str, slug: &str, name: &str) -> Result<serde_json::Value, ApiError> {
+    let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    // 旧 slug 校验与 delete_view 同防线
+    let safe_old = view_slug(slug);
+    if safe_old.is_empty() || safe_old != slug {
+        return Err(ApiError::BadRequest("非法视图标识".into()));
+    }
+    if name.trim().is_empty() {
+        return Err(ApiError::BadRequest("视图名不能为空".into()));
+    }
+    let new_slug: String = view_slug(name).trim_matches('-').chars().take(40).collect();
+    let new_slug = if new_slug.is_empty() {
+        return Err(ApiError::BadRequest("视图名需至少含一个字母或数字".into()));
+    } else {
+        new_slug
+    };
+    let dir = repo.root.join(".easyvibe/views");
+    let old_path = dir.join(format!("{safe_old}.json"));
+    if !old_path.is_file() {
+        return Err(ApiError::NotFound(format!("视图 {slug} 不存在")));
+    }
+    let new_path = dir.join(format!("{new_slug}.json"));
+    if new_slug != safe_old && new_path.exists() {
+        return Err(ApiError::Conflict(format!("已存在同名视图 {new_slug}，请换一个名字")));
+    }
+    let raw = std::fs::read_to_string(&old_path).map_err(|e| ApiError::Internal(format!("读取视图失败: {e}")))?;
+    let mut v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| ApiError::Internal(format!("视图解析失败: {e}")))?;
+    v["name"] = serde_json::Value::String(name.trim().to_string());
+    std::fs::write(&new_path, serde_json::to_string_pretty(&v).unwrap_or_else(|_| raw.clone()))
+        .map_err(|e| ApiError::Internal(format!("写入视图失败: {e}")))?;
+    if new_slug != safe_old {
+        let _ = std::fs::remove_file(&old_path);
+    }
+    Ok(serde_json::json!({ "success": true, "data": { "slug": new_slug } }))
+}
+
+/// 存为视图（F1b 首次消费）：按格式规范 §9 写 .easyvibe/views/<slug>.json（引用式，不存布局）。
+/// 2026-10-04 审计 P1：同名冲突从"静默另存后缀"改为 409——前端弹覆盖确认（force=true 覆盖）。
+pub(crate) async fn save_view(
+    st: &AppState,
+    id: &str,
+    body: SaveViewRequest,
+    force: bool,
+) -> Result<serde_json::Value, ApiError> {
+    let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let slug: String = view_slug(&body.name).trim_matches('-').chars().take(40).collect();
+    let slug = if slug.is_empty() {
+        format!("view-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0))
+    } else {
+        slug
+    };
+    let view_path = repo.root.join(".easyvibe/views").join(format!("{slug}.json"));
+    if view_path.exists() && !force {
+        return Err(ApiError::Conflict(format!("已存在同名视图 {slug}")));
+    }
+    let view = serde_json::json!({
+        "version": "1.0",
+        "name": body.name,
+        "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
+        "source": { "conversation_id": "manual" },
+        "nodes": body.nodes.iter().map(|r| serde_json::json!({ "ref": r })).collect::<Vec<_>>(),
+        "edges": body.edges,
+        "annotations": body.annotations,
+    });
+    let dir = repo.root.join(".easyvibe/views");
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| ApiError::Internal(format!("创建 views 目录失败: {e}")))?;
+    let path = dir.join(format!("{slug}.json"));
+    easyvibe_map::atomic_write_json(&path, &view).await?;
+    Ok(serde_json::json!({ "success": true, "data": { "path": path.to_string_lossy() } }))
+}

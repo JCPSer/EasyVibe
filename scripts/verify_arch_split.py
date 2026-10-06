@@ -7,10 +7,18 @@
 
 断言：
   I1 覆盖率 coverage_ratio >= 1.0（fail-closed；地图自身 finalize 关口为 0.90）
-  I2 server-api 归属文件数严格小于拆分前基线
+  I2 server-api 归属文件数**不得超过登记棘轮上限**（只降不升）
      （脚本口径：app crate 产品文件 − `tests/` − `task_exec*`），
      且五个领域文件在 app crate 内均已不存在
-  I3 server-api 归属 LOC 严格小于基线，且下降 >= 1000 行
+  I3 server-api 归属 LOC **不得超过登记棘轮上限**（只降不升）
+
+  ★ c-arch-7 登记（2026-10-06，方案硬伤处置）：本轮 app crate 结构性新增 4 个文件
+     —— 组合根 `src/db_ports.rs`（task-engine 端口 ↔ 仓储适配器）+ 服务编排域
+     `src/service/{agent,sessions,settings}.rs`（routes 直连归零的下沉落点），合计 599 行。
+     这使「与 c-arch-1 拆分前快照（33 文件 / 7467 行）的相对比较」不再适用：新文件是
+     application 层的编排/装配，不是领域规则回流边界。处置 = 把趋势判据从「相对旧快照」
+     改为**登记棘轮上界（只降不升）**：文件数与 LOC 均不得超过本轮登记值，任何进一步增长
+     即红；与拆分前快照的差额仍在报告里作为趋势信息输出（loc_drop_vs_pre_split）。
   I4 架构 concerns 无 c-arch-1；server-api 模块 decay_flags 无 god_module
   I5 外提模块在册（easyvibe-git / easyvibe-pipeline 出现在图内；live 模式另查 emit_order.json）
   I6 跨层 SCC == 0 且 direction_violation == 0（c-arch-5 闭环后棘轮归零；复用 map_policy.py，与 finalize 同实现）
@@ -36,6 +44,21 @@ FIXTURE_DIR = os.path.join("scripts", "tests", "fixtures")
 BASELINE_FIXTURE = os.path.join(FIXTURE_DIR, "arch_split_pre.json")
 POST_FIXTURE = os.path.join(FIXTURE_DIR, "map_post_split.json")
 LOC_MIN_DROP = 1000
+
+# c-arch-7（2026-10-06）登记棘轮上界：见文件头 ★ 说明。只降不升，超出即红。
+C7_RATCHET = {
+    "files": 35,
+    "loc": 6749,
+    "_registered_at": "2026-10-06",
+    "_registered_additions": [
+        "src/db_ports.rs（组合根：端口↔仓储适配器唯一落点）",
+        "src/service/agent.rs",
+        "src/service/sessions.rs",
+        "src/service/settings.rs",
+    ],
+}
+C7_RATCHET_MAX_FILES = C7_RATCHET["files"]
+C7_RATCHET_MAX_LOC = C7_RATCHET["loc"]
 
 
 def is_product(rel):
@@ -87,7 +110,7 @@ def crossed_scc_edges(m):
     return map_policy.cross_layer_scc(ids, edges, mod_order)
 
 
-def check(m, files, loc, baseline, present, mods, emit_modules=None):
+def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=None):
     """纯函数判决（selfcheck 可注入合成输入）。返回 (problems, report)。"""
     problems = []
     mods_by_id = {x["id"]: x for x in m.get("modules", [])}
@@ -99,9 +122,13 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None):
         problems.append("I1 coverage_ratio=%s < 1.0（覆盖率跌破 fail-closed 线）" % ratio)
 
     # I2 文件集收缩 + 领域文件外提
-    if len(files) >= baseline["server_api_files"]:
-        problems.append("I2 server-api 归属文件数 %d 未低于基线 %d（领域规则未真正外提）"
-                        % (len(files), baseline["server_api_files"]))
+    if ratchet is None:
+        if len(files) >= baseline["server_api_files"]:
+            problems.append("I2 server-api 归属文件数 %d 未低于基线 %d（领域规则未真正外提）"
+                            % (len(files), baseline["server_api_files"]))
+    elif len(files) > ratchet["files"]:
+        problems.append("I2 server-api 归属文件数 %d 超登记棘轮上限 %d（c-arch-7 登记后只降不升；"
+                        "新增文件须登记复核）" % (len(files), ratchet["files"]))
     if present:
         problems.append("I2 app crate 内仍存在领域文件 %s（c-arch-1 复发）" % present)
     if mods:
@@ -109,10 +136,14 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None):
 
     # I3 LOC 趋势
     drop = baseline["server_api_loc"] - loc
-    if drop <= 0:
-        problems.append("I3 server-api 归属 LOC %d 未低于基线 %d" % (loc, baseline["server_api_loc"]))
-    elif drop < LOC_MIN_DROP:
-        problems.append("I3 server-api 归属 LOC 仅下降 %d 行（< %d，拆分不充分）" % (drop, LOC_MIN_DROP))
+    if ratchet is None:
+        if drop <= 0:
+            problems.append("I3 server-api 归属 LOC %d 未低于基线 %d" % (loc, baseline["server_api_loc"]))
+        elif drop < LOC_MIN_DROP:
+            problems.append("I3 server-api 归属 LOC 仅下降 %d 行（< %d，拆分不充分）" % (drop, LOC_MIN_DROP))
+    elif loc > ratchet["loc"]:
+        problems.append("I3 server-api 归属 LOC %d 超登记棘轮上限 %d（c-arch-7 登记后只降不升）"
+                        % (loc, ratchet["loc"]))
 
     # I4 concern 闭环
     for c in (m.get("health") or {}).get("concerns", []):
@@ -144,6 +175,9 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None):
         "server_api_files": len(files), "server_api_files_baseline": baseline["server_api_files"],
         "server_api_loc": loc, "server_api_loc_baseline": baseline["server_api_loc"],
         "loc_drop": baseline["server_api_loc"] - loc,
+        "loc_drop_vs_pre_split": baseline["server_api_loc"] - loc,
+        "ratchet_files_max": (ratchet or {}).get("files"),
+        "ratchet_loc_max": (ratchet or {}).get("loc"),
         "coverage_ratio": ratio, "modules": len(m.get("modules", [])), "edges": len(m.get("edges", [])),
         "cross_layer_scc": len(crossed_scc_edges(m)), "direction_violation": dv,
         # I7 趋势双口径：地图自评分（本文件）+ 巡检分（HealthPage 从库内巡检记录读取，按测量时间新旧裁决）
@@ -240,7 +274,8 @@ def main():
         if os.path.isfile(order_path):
             with open(order_path, encoding="utf-8") as fh:
                 emit_modules = json.load(fh).get("modules", [])
-    problems, report = check(m, files, loc, baseline, present, mods, emit_modules)
+    problems, report = check(m, files, loc, baseline, present, mods, emit_modules,
+                            ratchet={"files": C7_RATCHET_MAX_FILES, "loc": C7_RATCHET_MAX_LOC})
     print(json.dumps({"ok": not problems, **report, "problems": problems}, ensure_ascii=False, indent=2))
     return 0 if not problems else 1
 

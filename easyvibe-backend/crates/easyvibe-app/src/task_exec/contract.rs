@@ -5,7 +5,7 @@ use super::*;
 /// 改进#7 supervised 风险预评估（v1 确定性规则——LLM 评估为记档增强）。
 /// 高危信号：大范围改动（>3 模块）/ 高危关键词 / 动低分模块（<50 分，手术风险高）。
 /// 返回 (是否高危, 理由)。
-pub fn risk_assess(task: &TaskRow) -> (bool, String) {
+pub fn risk_assess(task: &TaskRecord) -> (bool, String) {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     let mut reasons: Vec<String> = vec![];
     if modules.len() > 3 {

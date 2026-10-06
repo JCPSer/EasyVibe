@@ -326,6 +326,8 @@ pub(crate) async fn run() {
         harness.read().await.manifest.version,
         harness.read().await.user_entry_skills.len()
     );
+    // c-arch-7 R3：task-engine 端口 ↔ 具体仓储的适配器落组合根（依赖倒置；
+    // task_exec 切片因此零直连、零反向引用，依赖方向维持 server-api → task-engine）
     let executor = task_exec::TaskExecutor::new_with_sessions(
         task_repo.clone(),
         approval_repo.clone(),
@@ -333,10 +335,12 @@ pub(crate) async fn run() {
         session_manager.clone(),
         map_service.clone(),
         harness.clone(),
-        Arc::new(agent_command.clone()),
-        Arc::new(agent_args.clone()),
         std::env::var("EASYVIBE_MAX_PARALLEL").ok().and_then(|v| v.parse().ok()).unwrap_or(4),
-        settings_repo.clone(),
+        Arc::new(crate::db_ports::AgentSlotAdapter::new(
+            settings_repo.clone(),
+            Arc::new(agent_command.clone()),
+            Arc::new(agent_args.clone()),
+        )),
         Some(event_bus.clone()),
     );
     // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记

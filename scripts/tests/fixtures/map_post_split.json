@@ -127,17 +127,12 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 78,
+        "score": 82,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
         "decay_flags": [],
-        "concerns": [
-          {
-            "id": "c-persistence-1",
-            "severity": "high"
-          }
-        ]
+        "concerns": []
       }
     },
     {
@@ -226,17 +221,12 @@
         "event-bus"
       ],
       "health": {
-        "score": 74,
+        "score": 80,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
         "decay_flags": [],
-        "concerns": [
-          {
-            "id": "c-task-engine-1",
-            "severity": "high"
-          }
-        ]
+        "concerns": []
       }
     },
     {
@@ -259,7 +249,7 @@
         "easyvibe-pipeline"
       ],
       "health": {
-        "score": 68,
+        "score": 72,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
@@ -269,10 +259,6 @@
         "concerns": [
           {
             "id": "c-server-api-1",
-            "severity": "high"
-          },
-          {
-            "id": "c-server-api-2",
             "severity": "high"
           }
         ]
@@ -960,16 +946,11 @@
     }
   ],
   "health": {
-    "score": 84,
+    "score": 88,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
     "decay_flags": [],
-    "concerns": [
-      {
-        "id": "c-arch-7",
-        "severity": "high"
-      }
-    ]
+    "concerns": []
   }
 }

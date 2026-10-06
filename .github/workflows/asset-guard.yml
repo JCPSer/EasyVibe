@@ -119,3 +119,14 @@ jobs:
 
       - name: 宿主能力边界守卫自检（反例必红）
         run: python3 scripts/check_host_boundary.py --selfcheck
+
+      # c-arch-7 / R7 app 层 DB 边界守卫：本仓 CI 不跑 cargo（见文件头定位），故把
+      # crates/easyvibe-app/tests/arch_guard.rs 的同套判据落成纯 python3 载体——解析该守卫的
+      # 常量表（DB_BANNED / ALIAS_REEXPORT / TASK_ENGINE_PROD / TASK_ENGINE_TEST_EXEMPT /
+      # TASK_ENGINE_TEST_BUDGET / ROUTES_REPO_FIELDS）作为单一事实源，用**原始文本**（不去注释）
+      # 最严口径对 src/ 复判；任一路径常量解析失败即 fail-closed（绝不静默全绿）。
+      - name: app 层 DB 边界守卫（routes/** 与 task_exec 生产不得直连 easyvibe_db）
+        run: python3 scripts/check_app_db_boundary.py --check
+
+      - name: app 层 DB 边界守卫自检（负例必红，含解析失败 fail-closed）
+        run: python3 scripts/check_app_db_boundary.py --selfcheck

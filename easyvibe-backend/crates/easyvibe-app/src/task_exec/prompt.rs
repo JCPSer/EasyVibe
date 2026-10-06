@@ -73,7 +73,7 @@ pub(crate) fn blocks_phase_review(custom: &HarnessCustom) -> String {
 /// 阶段 1 prompt：只产出需求矩阵，禁改代码（rule_development 2.1）。
 /// 产出后由用户在 analysis 关评审——评审通过才进阶段 2。
 /// custom：自定义层补充（global + development 块，方案 v2 §4 注入点 #2）。
-pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
+pub(crate) fn assemble_phase1_prompt(task: &TaskRecord, user: &str, custom: &HarnessCustom) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是需求分析 agent（harness 规则正文 2.1 的执行者）。**只做需求分析，禁止修改任何代码文件。**
@@ -101,7 +101,7 @@ pub(crate) fn assemble_phase1_prompt(task: &TaskRow, user: &str, custom: &Harnes
 
 /// 阶段 2 prompt：只产出方案设计，禁改代码（rule_development 2.2）。
 /// 基于已评审通过的需求矩阵；产出后由用户在 solution 关评审——通过才进阶段 3 实施。
-pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom) -> String {
+pub(crate) fn assemble_phase2_prompt(task: &TaskRecord, user: &str, custom: &HarnessCustom) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是方案设计 agent（harness 规则正文 2.2 的执行者）。**只做方案设计，禁止修改任何代码文件。**
@@ -140,7 +140,7 @@ pub(crate) fn assemble_phase2_prompt(task: &TaskRow, user: &str, custom: &Harnes
 /// 审查自身失败/超时 → None（不阻断：diff 关照常，人机审查兜底）。
 /// 出厂规则正文直接内嵌（rules = (rule_development, rule_bugfix) 的内嵌副本——
 /// 17:58 裁定：agent 不再 cat 磁盘文件，磁盘出厂副本被改不影响审查）。
-pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &HarnessCustom, rules: (&str, &str)) -> String {
+pub(crate) fn assemble_review_prompt(task: &TaskRecord, user: &str, custom: &HarnessCustom, rules: (&str, &str)) -> String {
     let modules: Vec<String> = serde_json::from_str(&task.modules).unwrap_or_default();
     format!(
         r#"你是独立代码审查 agent（harness 2.3.2 的执行者），只做审查，不做实现。
@@ -184,7 +184,7 @@ pub(crate) fn assemble_review_prompt(task: &TaskRow, user: &str, custom: &Harnes
 
 /// 阶段初审 prompt：只审不改（禁止修改文件），按修改时间找最新产物文档通读，
 /// 对照任务书核质量，最后一行输出 [EASYVIBE-REVIEW] 结论。
-pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str, custom: &HarnessCustom) -> String {
+pub(crate) fn assemble_phase_review_prompt(task: &TaskRecord, phase: u8, user: &str, custom: &HarnessCustom) -> String {
     let (name, dir, focus) = if phase == 1 {
         (
             "需求矩阵",
@@ -230,7 +230,7 @@ pub(crate) fn assemble_phase_review_prompt(task: &TaskRow, phase: u8, user: &str
 /// 组装任务执行 prompt：harness 框架（路径适配）+ 自定义补充（global 块，方案 v2 §4
 /// 注入点 #1——framework 后、任务书前）+ 表单字段 + 事前注入上下文。
 /// 路由/拷问/豁免全交给 LLM 决断（§9 #3/#5）。
-pub fn assemble_task_prompt(harness: &Harness, task: &TaskRow) -> String {
+pub fn assemble_task_prompt(harness: &Harness, task: &TaskRecord) -> String {
     let modules = serde_json::from_str::<Vec<String>>(&task.modules).unwrap_or_default();
     format!(
         r#"{framework}{custom}

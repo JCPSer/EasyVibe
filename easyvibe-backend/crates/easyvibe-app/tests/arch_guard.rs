@@ -4,29 +4,63 @@
 //! `task-engine -> server-api` 边由 `task_exec.rs` 中的 `crate::BusEvent` 字面量触发；
 //! 本测试以源码事实守卫同一约束（权威口径，先于启发式）。
 //! 违反即失败：后续在 task_exec.rs 写回 `crate::BusEvent` 即让 server-api ↔ task-engine 环复发。
+//!
+//! c-arch-7（本文件新增断言组）——**app 层 DB 边界**：server-api（`src/routes/**`）与
+//! task-engine（`task_exec` 生产文件）不得直连 `easyvibe_db`：
+//!   · 命题原文：「把跨域写库收敛到各自 service，并在 app crate 的 arch_guard 禁用串里加
+//!     『task_exec/** 与 routes/** 不得直接 use easyvibe_db』，让这条隐式耦合变成可执行判据。」
+//!   · routes 侧：跨域写库下沉 `crate::service`；routes handler 亦不得再直取 `st.<repo>`。
+//!   · task_exec 侧：持久化经切片内端口（`task_exec::ports`），适配器落组合根 `crate::db_ports`。
+//!   · 测试夹具（`task_exec/{test_util,tests_*}.rs`）构造真实 SQLite 仓储验证原子关卡语义，
+//!     **显式冻结豁免**（双向全等 + 只降不升棘轮），不得用 glob——防漏报防多报。
+//!   · 反绕过（R5）：`src/**` 不得 `use easyvibe_db as <alias>` 再导出（堵 `crate::db::X` 逃逸）；
+//!     判据自身带负例自证（见 `db_boundary_guard_selfcheck`）。
+//!   · CI 镜像：`scripts/check_app_db_boundary.py`（本仓 CI 不跑 cargo，解析本文件常量为单一事实源）。
+//!
+//! 判据语义边界（显式承认）：子串/字面量层判据，不解析宏展开；Rust 层去注释取「真实代码」口径，
+//! python 载具取「原始文本」最严口径，两层互补。
 
 use std::path::PathBuf;
+
+fn app_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// 读取 src/ 下相对路径文件；缺失即失败（守卫不得因文件消失而静默放行）。
+fn read_src(rel: &str) -> String {
+    let p = app_root().join(rel);
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("读取 {rel} 失败: {e}"))
+}
+
+/// 列目录下的 `.rs` 文件名（升序，含 mod.rs）。
+fn rs_files(dir: &str) -> Vec<String> {
+    let d = app_root().join(dir);
+    let mut v: Vec<String> = std::fs::read_dir(&d)
+        .unwrap_or_else(|e| panic!("读取目录 {dir} 失败: {e}"))
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "rs").unwrap_or(false))
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    v.sort();
+    v
+}
 
 /// task-engine 模块文件集合（与 scan_easyvibe.py 的 MODS['task-engine'] 保持一致）：
 /// 主文件 + task_exec/ 子模块（拆分为 prompt/review/harness/changes/contract 后必须全覆盖，
 /// 否则子模块里的 crate:: 反向引用会被漏报）。
 fn task_engine_files() -> Vec<String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut v = vec!["src/task_exec.rs".to_string()];
-    let dir = root.join("src/task_exec");
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().map(|x| x == "rs").unwrap_or(false) {
-                v.push(format!("src/task_exec/{}", p.file_name().unwrap().to_string_lossy()));
-            }
-        }
+    for f in rs_files("src/task_exec") {
+        v.push(format!("src/task_exec/{f}"));
     }
     v.sort();
     v
 }
 
-/// 逆向引用禁止子串（server-api / 同 crate 应用层符号）
+/// 逆向引用禁止子串（server-api / 同 crate 应用层符号）。
+/// c-arch-7 R3 加固：端口适配器落组合根后，`crate::db_ports` 与新增三个 service 域
+/// 一并入表——task_exec 只能经切片内端口取能力，不得反向引用组合根/编排层。
 const FORBIDDEN: &[&str] = &[
     "crate::BusEvent",
     "crate::publish",
@@ -36,20 +70,301 @@ const FORBIDDEN: &[&str] = &[
     "crate::service::map::start_",
     "crate::service::map::analyze_submap_inner",
     "crate::session_queue",
+    "crate::db_ports",
+    "crate::service::sessions",
+    "crate::service::settings",
+    "crate::service::agent",
 ];
 
 #[test]
 fn task_engine_has_no_reverse_crate_refs() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for f in task_engine_files() {
         let f = f.as_str();
-        let path = root.join(f);
-        let txt = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读取 {f} 失败: {e}"));
+        let txt = read_src(f);
         for bad in FORBIDDEN {
             assert!(
                 !txt.contains(bad),
                 "{f} 出现逆向引用 `{bad}`——server-api ↔ task-engine 环复发（R8 守卫）"
             );
         }
+    }
+}
+
+// ============================================================================
+// c-arch-7：app 层 DB 边界（routes/** 与 task_exec 生产不得直连 easyvibe_db）
+// ============================================================================
+
+/// 禁用标识符（覆盖 `use easyvibe_db::…` 与内联 `easyvibe_db::X`）。
+const DB_BANNED: &str = "easyvibe_db";
+
+/// 反绕过（R5a）：`use easyvibe_db as <alias>` 再导出——堵 `crate::db::SqliteTaskRepository` 式逃逸。
+/// 归一化空白后子串匹配；不误伤 `use easyvibe_db::{TaskRepository as _};`（归一化后不含 `easyvibe_db as `）。
+const ALIAS_REEXPORT: &str = "use easyvibe_db as ";
+
+/// task_exec **生产**文件集（显式冻结，禁 glob——防漏防多）。
+const TASK_ENGINE_PROD: &[&str] = &[
+    "src/task_exec.rs",
+    "src/task_exec/ports.rs",
+    "src/task_exec/changes.rs",
+    "src/task_exec/contract.rs",
+    "src/task_exec/harness.rs",
+    "src/task_exec/prompt.rs",
+    "src/task_exec/review.rs",
+];
+
+/// task_exec **测试夹具**豁免集（显式冻结；磁盘 `src/task_exec/*.rs` 必须 == PROD ∪ EXEMPT）。
+/// 豁免理由：测试夹具构造真实 SQLite 仓储，以验证 `try_advance_gate` 的原子并发语义与
+/// 状态机流转（换内存 fake 会降级测试保真度）；这些构造非生产耦合。
+const TASK_ENGINE_TEST_EXEMPT: &[&str] = &[
+    "src/task_exec/test_util.rs",
+    "src/task_exec/tests_changes.rs",
+    "src/task_exec/tests_contract.rs",
+    "src/task_exec/tests_flow.rs",
+    "src/task_exec/tests_gates.rs",
+    "src/task_exec/tests_harness.rs",
+    "src/task_exec/tests_prompt.rs",
+];
+
+/// 豁免集 `easyvibe_db` 出现次数预算（棘轮：只降不升；值 = c-arch-7 实施后实测）。
+const TASK_ENGINE_TEST_BUDGET: usize = 37;
+
+/// routes handler 冻结规则（R1）：handler 只做 HTTP 边界，不得直取组合根仓储句柄。
+/// 命中即红——跨域读写必须经 `crate::service::<域>`。
+const ROUTES_REPO_FIELDS: &[&str] = &[
+    "st.task_repo",
+    "st.approval_repo",
+    "st.conversation_repo",
+    "st.event_repo",
+    "st.health_repo",
+    "st.settings_repo",
+    "st.agent_session_repo",
+    "st.session_output_repo",
+];
+
+/// 单遍状态机去注释（**禁止**逐行去 `//` 的简易实现——本仓曾因盲区致 30 处逃逸）。
+/// 状态：Code / Line / Block / Str / RawStr(hashes)；字符串内容**保留**（从严：字符串里
+/// 出现 `easyvibe_db` 亦可疑），仅剔除注释。
+fn strip_comments(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0usize;
+    #[derive(PartialEq)]
+    enum S {
+        Code,
+        Line,
+        Block,
+        Str,
+        Raw(usize),
+    }
+    let mut st = S::Code;
+    while i < b.len() {
+        let c = b[i];
+        let n = if i + 1 < b.len() { b[i + 1] } else { 0 };
+        match st {
+            S::Code => {
+                if c == b'/' && n == b'/' {
+                    st = S::Line;
+                    i += 2;
+                    continue;
+                }
+                if c == b'/' && n == b'*' {
+                    st = S::Block;
+                    i += 2;
+                    continue;
+                }
+                // r"…" / r#"…"# / br#"…"#：原样保留内容
+                if c == b'r' || (c == b'b' && n == b'r') {
+                    let base = if c == b'b' { i + 1 } else { i };
+                    if b.get(base + 1) == Some(&b'"') || b.get(base + 1) == Some(&b'#') {
+                        let mut j = base + 1;
+                        let mut hashes = 0usize;
+                        while b.get(j) == Some(&b'#') {
+                            hashes += 1;
+                            j += 1;
+                        }
+                        if b.get(j) == Some(&b'"') {
+                            for k in i..=j {
+                                out.push(b[k]);
+                            }
+                            i = j + 1;
+                            st = S::Raw(hashes);
+                            continue;
+                        }
+                    }
+                }
+                if c == b'"' {
+                    st = S::Str;
+                }
+                out.push(c);
+            }
+            S::Line => {
+                if c == b'\n' {
+                    st = S::Code;
+                    out.push(c);
+                }
+            }
+            S::Block => {
+                if c == b'*' && n == b'/' {
+                    st = S::Code;
+                    i += 2;
+                    continue;
+                }
+            }
+            S::Str => {
+                out.push(c);
+                if c == b'\\' && i + 1 < b.len() {
+                    out.push(n);
+                    i += 2;
+                    continue;
+                }
+                if c == b'"' {
+                    st = S::Code;
+                }
+            }
+            S::Raw(hashes) => {
+                out.push(c);
+                if c == b'"' {
+                    let mut ok = true;
+                    for k in 1..=hashes {
+                        if b.get(i + k) != Some(&b'#') {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        for k in 1..=hashes {
+                            out.push(b[i + k]);
+                        }
+                        i += hashes + 1;
+                        st = S::Code;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// 空白归一化（仅用于别名再导出判据，避免 `use easyvibe_db  as  db` 绕过）。
+fn norm_ws(code: &str) -> String {
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 判据本体（供断言与负例自证复用）：合成文本 → 是否命中禁用标识符 / 别名再导出。
+fn detect_db_literal(text: &str) -> bool {
+    strip_comments(text).contains(DB_BANNED)
+}
+
+fn detect_alias_reexport(text: &str) -> bool {
+    norm_ws(&strip_comments(text)).contains(ALIAS_REEXPORT)
+}
+
+/// R4-①：routes/** 与 task_exec 生产文件去注释后零 `easyvibe_db`；
+/// R4-②：routes handler 不得直取 `st.<repo>`；
+/// R4-③：task_exec 磁盘文件集 == 生产 ∪ 豁免（双向全等——新增 tests_x.rs 不登记即红）。
+#[test]
+fn db_direct_access_is_banned_in_routes_and_task_engine_prod() {
+    // ① routes/**（含 mod.rs；routes 无测试文件，故无豁免）
+    for f in rs_files("src/routes") {
+        let rel = format!("src/routes/{f}");
+        let code = strip_comments(&read_src(&rel));
+        assert!(
+            !code.contains(DB_BANNED),
+            "{rel} 直连 `{DB_BANNED}`——跨域写库须经 crate::service（c-arch-7 R1/R4 判据）"
+        );
+        for h in ROUTES_REPO_FIELDS {
+            assert!(
+                !code.contains(h),
+                "{rel} 直取组合根仓储句柄 `{h}`——handler 只做 HTTP 边界，编排须落 crate::service（R1 冻结规则）"
+            );
+        }
+    }
+    // ② task_exec 生产文件
+    for rel in TASK_ENGINE_PROD {
+        let code = strip_comments(&read_src(rel));
+        assert!(
+            !code.contains(DB_BANNED),
+            "{rel} 直连 `{DB_BANNED}`——task-engine 持久化须经切片内端口 task_exec::ports（c-arch-7 R2/R4 判据）"
+        );
+    }
+    // ③ 文件集双向全等
+    let mut disk: Vec<String> = vec!["src/task_exec.rs".to_string()];
+    disk.extend(rs_files("src/task_exec").into_iter().map(|f| format!("src/task_exec/{f}")));
+    let mut declared: Vec<String> =
+        TASK_ENGINE_PROD.iter().chain(TASK_ENGINE_TEST_EXEMPT.iter()).map(|s| s.to_string()).collect();
+    disk.sort();
+    declared.sort();
+    assert_eq!(
+        disk, declared,
+        "task_exec 文件集漂移——新增/删除/改名须同步 TASK_ENGINE_PROD / TASK_ENGINE_TEST_EXEMPT（豁免须显式登记）"
+    );
+}
+
+/// R4-④：豁免棘轮（只降不升）——实测值超预算即红，倒逼测试夹具改造或显式登记复核。
+#[test]
+fn task_engine_test_exempt_budget_only_shrinks() {
+    let mut used = 0usize;
+    for rel in TASK_ENGINE_TEST_EXEMPT {
+        used += strip_comments(&read_src(rel)).matches(DB_BANNED).count();
+    }
+    assert!(
+        used <= TASK_ENGINE_TEST_BUDGET,
+        "task_exec 测试夹具 `{DB_BANNED}` 出现 {used} 次 > 预算 {TASK_ENGINE_TEST_BUDGET}——棘轮只降不升（c-arch-7 R4）"
+    );
+}
+
+/// R5a：`src/**` 任何文件不得 `use easyvibe_db as <alias>` 再导出（堵别名绕过）。
+/// 逐目录递归扫描（组合根/边界层一视同仁；正当用法 `use easyvibe_db::{A, B};` 不受影响）。
+#[test]
+fn no_db_alias_reexport_anywhere_in_src() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&app_root().join("src"), &mut files);
+    files.sort();
+    for p in files {
+        let rel = p.strip_prefix(app_root()).unwrap().to_string_lossy().replace('\\', "/");
+        let txt = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            !detect_alias_reexport(&txt),
+            "{rel} 出现 `use easyvibe_db as <别名>` 再导出——禁 DB 边界判据可被 `crate::<别名>::X` 绕过（c-arch-7 R5a）"
+        );
+    }
+}
+
+/// R5b：判据负例自证（合成文本，不读仓库）——证明「注入必红、注释不误伤、别名可判、正当用法不误伤」。
+#[test]
+fn db_boundary_guard_selfcheck() {
+    let cases: &[(&str, bool, &str)] = &[
+        ("use easyvibe_db::TaskRepository;", true, "N1 use 行必红"),
+        ("let x = easyvibe_db::SqliteTaskRepository::new(pool);", true, "N1b 内联限定路径必红"),
+        ("// use easyvibe_db::TaskRepository;\n", false, "N2 行注释剥离后不误伤"),
+        ("/* easyvibe_db */ let x = 1;", false, "N2b 块注释剥离后不误伤"),
+        ("let s = \"easyvibe_db\";", true, "N3 字符串保留（从严）"),
+        ("let s = r#\"easyvibe_db\"#;", true, "N3b 原始字符串保留（从严）"),
+        ("pub(crate) fn f() {}\n", false, "N4 干净文本必绿"),
+    ];
+    for (text, expect, why) in cases {
+        assert_eq!(detect_db_literal(text), *expect, "自证失败（{why}）: {text:?}");
+    }
+    let alias_cases: &[(&str, bool, &str)] = &[
+        ("pub(crate) use easyvibe_db as db;", true, "A1 别名再导出必红"),
+        ("pub(crate) use easyvibe_db  as  db;", true, "A1b 空白变体必红"),
+        ("use easyvibe_db::{TaskRepository as _};", false, "A2 `as _` 非再导出，不得误伤"),
+        ("pub use easyvibe_db::{TaskRepository, TaskRow};", false, "A3 具名导入不得误伤"),
+        ("// use easyvibe_db as db;\n", false, "A4 注释里的别名不得误伤"),
+    ];
+    for (text, expect, why) in alias_cases {
+        assert_eq!(detect_alias_reexport(text), *expect, "别名自证失败（{why}）: {text:?}");
     }
 }

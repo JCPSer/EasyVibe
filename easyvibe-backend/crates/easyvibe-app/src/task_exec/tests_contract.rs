@@ -49,12 +49,12 @@ use super::test_util::*;
         let mut task = sample_task("running");
         task.id = "task-contract".into();
         task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        task_repo.create(&task).await.unwrap();
+        db_create(task_repo.as_ref(), &task).await;
 
         // 界内修改 + 越界未跟踪新文件
         std::fs::write(repo.join("allowed/base.txt"), "1\n2\n").unwrap();
         std::fs::write(repo.join("stray/out.txt"), "oops\n").unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract", &task_repo, &[]).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract", task_repo.as_ref(), &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let viol = v["contractViolations"].as_array().expect("必须有越界列表");
         assert_eq!(viol.len(), 1, "allowed/base.txt 界内、stray/out.txt 越界: {viol:?}");
@@ -68,8 +68,8 @@ use super::test_util::*;
         let mut clean = sample_task("running");
         clean.id = "task-contract-clean".into();
         clean.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        task_repo.create(&clean).await.unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", &task_repo, &[]).await.expect("有 diff 即应采集");
+        db_create(task_repo.as_ref(), &clean).await;
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", task_repo.as_ref(), &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["contractViolations"].as_array().unwrap().is_empty(), "界内改动零误报: {v}");
         let _ = std::fs::remove_dir_all(&repo);
@@ -106,10 +106,10 @@ use super::test_util::*;
         let mut task = sample_task("running");
         task.id = "task-baseline".into();
         task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        task_repo.create(&task).await.unwrap();
+        db_create(task_repo.as_ref(), &task).await;
         // 基线 = 启动时脏文件（legacy/old.txt）——spawn 路径由 dirty_files 提供，测试直接给等价快照
         let baseline = vec!["legacy/old.txt".to_string()];
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-baseline", &task_repo, &baseline).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-baseline", task_repo.as_ref(), &baseline).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let viol = v["contractViolations"].as_array().unwrap();
         assert_eq!(viol.len(), 1, "启动前的脏文件 legacy/old.txt 不得算越界: {viol:?}");
@@ -135,7 +135,7 @@ use super::test_util::*;
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
         std::fs::write(repo.join("x.txt"), "1\n2\n").unwrap();
-        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn", &task_repo, &[]).await.expect("有 diff 即应采集");
+        let json = collect_task_result(&sessions, "no-such-session", &repo, "task-warn", task_repo.as_ref(), &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["result"].is_null());
         assert!(

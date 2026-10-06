@@ -59,7 +59,7 @@ fn god_files_stay_below_size_limits() {
     assert!(loc("main.rs") <= 900, "main.rs 超 900 行（god file 复发）: {}", loc("main.rs"));
     assert!(loc("task_exec.rs") <= 900, "task_exec.rs 超 900 行: {}", loc("task_exec.rs"));
     // 装配层其余文件（c-arch-1：git/freshness/reinduce/pipeline/map_concerns 已迁出本 crate）
-    for f in ["state.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "session_queue_routes.rs"] {
+    for f in ["state.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "session_queue_routes.rs", "db_ports.rs"] {
         assert!(loc(f) <= 700, "{f} 超 700 行: {}", loc(f));
     }
     // 服务编排层（方案 R1：service/{mod,chat,task,map}.rs）
@@ -133,6 +133,11 @@ const TASK_ENGINE_FORBIDDEN: &[&str] = &[
     "crate::service::map::start_",
     "crate::service::map::analyze_submap_inner",
     "crate::session_queue",
+    // c-arch-7 R3：端口适配器落组合根后，切片不得反向引用组合根/新增 service 域
+    "crate::db_ports",
+    "crate::service::sessions",
+    "crate::service::settings",
+    "crate::service::agent",
 ];
 
 #[test]
@@ -431,7 +436,8 @@ fn router_assembly_registers_only_ws() {
 /// 数据库 / agent / 编排助手 / spawn 必须落 `crate::service`。
 /// 同时扫 `use` 行与函数体内限定路径：裸用 `easyvibe_db::…` 与 `use easyvibe_db::…` 都被子串命中。
 const ROUTES_FORBIDDEN_ORCH: &[&str] = &[
-    "easyvibe_db::",
+    // c-arch-7：`easyvibe_db::` 判据已移交 tests/arch_guard.rs（权威落点，含去注释与反绕过），
+    // 本表不再重复（避免双轨：一处绿一处红）。
     "easyvibe_ai_agent::",
     "crate::task_exec",
     "crate::reinduce",
@@ -460,13 +466,9 @@ const ROUTES_FORBIDDEN_ORCH: &[&str] = &[
 /// 键集必须与实际违规集**全等**：文件清干净后须摘牌，不得新增/改名蒙混。
 /// 值 = 冻结的违规串出现次数（只降不升）。
 const ROUTES_LEGACY_BUDGET: &[(&str, usize)] = &[
-    ("agent.rs", 3),
-    ("chat.rs", 2),
-    ("dev_docs.rs", 1),
-    // c-arch-1：repo.rs 摘牌（git/pipeline/wipe 编排全部下沉 crate::service，违规数归 0）
-    ("sessions.rs", 5),
-    ("settings.rs", 6),
-    ("task.rs", 9),
+    // c-arch-7 R1 后实测：仅 settings.rs 残留（harness 自定义槽端点，纯 FS + harness 装载），
+    // 其余六域全部摘牌（编排/仓储调用已下沉 crate::service）。棘轮只降不升，键集与实际集全等。
+    ("settings.rs", 4),
 ];
 
 /// routes/*.rs 文件集归属快照（照 componentGuard 归属快照范式，方案 R8④）。
@@ -476,7 +478,7 @@ const ROUTES_FROZEN_FILES: &[&str] = &[
 
 /// service/ 文件集归属快照（方案 R1 拆分为 {mod,chat,task,map}.rs；
 /// c-arch-1 增 {git,repo,reinduce}.rs —— routes 只经 crate::service 取能力的落点）。
-const SERVICE_FROZEN_FILES: &[&str] = &["chat.rs", "git.rs", "map.rs", "mod.rs", "reinduce.rs", "repo.rs", "task.rs"];
+const SERVICE_FROZEN_FILES: &[&str] = &["agent.rs", "chat.rs", "git.rs", "map.rs", "mod.rs", "reinduce.rs", "repo.rs", "sessions.rs", "settings.rs", "task.rs"];
 
 fn rs_files(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
@@ -567,12 +569,14 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::CompositionRoot, "router.rs", "命题点名：域自注册 merge 与 /ws 装配"),
     (SrcClass::CompositionRoot, "state.rs", "命题点名：共享状态与助手；组合根本就要装配依赖"),
     (SrcClass::CompositionRoot, "bootstrap.rs", "命题点名：启动装配；管线挂载已收口 service/repo.rs"),
+    (SrcClass::CompositionRoot, "db_ports.rs", "c-arch-7 组合根：task-engine 端口 ↔ 具体仓储适配器唯一落点（依赖倒置）"),
     // —— HTTP/WS 边界 ——
     (SrcClass::HttpBoundary, "ws.rs", "命题点名：WS 面（事件名契约由 contract_guard 冻结）"),
     (SrcClass::HttpBoundary, "assets.rs", "命题未点名：受管资产解析（编译期 include 清单 + 启动期读取），零业务规则"),
     (SrcClass::HttpBoundary, "session_queue_routes.rs", "命题未点名：会话队列请求/响应面；含 1 处 map-domain 纯校验调用（入棘轮）"),
     // —— task-engine 切片（命题未点名，另有 arch_guard 独立约束）——
     (SrcClass::TaskEngineSlice, "task_exec.rs", "task-engine 切片根：装配与阶段状态机，由 arch_guard.rs 约束反向引用"),
+    (SrcClass::TaskEngineSlice, "task_exec/ports.rs", "c-arch-7 切片内持久化端口与本地 DTO（去具体仓储类型）"),
     (SrcClass::TaskEngineSlice, "task_exec/changes.rs", "切片内按职责拆分（变更集）"),
     (SrcClass::TaskEngineSlice, "task_exec/contract.rs", "切片内按职责拆分（契约门）"),
     (SrcClass::TaskEngineSlice, "task_exec/harness.rs", "切片内按职责拆分（harness 装载）"),
@@ -848,11 +852,8 @@ fn strip_comments(txt: &str) -> String {
 /// 内联 serde 解析棘轮（G2）：routes 只做入参解析与响应映射，不得在此解码业务 JSON。
 /// 现存命中均为「DB 列 JSON / 透传字段」的错误兜底——逐文件显式登记，只降不升。
 const ROUTES_JSON_PARSE_RATCHET: &[(&str, usize)] = &[
-    ("agent.rs", 5),
-    ("chat.rs", 2),
-    ("sessions.rs", 1),
-    ("settings.rs", 1),
-    ("task.rs", 3),
+    // c-arch-7 R1 后 routes 侧零内联业务 JSON 解析（全部随编排下沉 crate::service）——
+    // 空表即「不得再出现」：新增解析即未登记必红。
 ];
 const ROUTES_FORBIDDEN_PARSE: &[&str] = &["serde_json::from_str", "serde_json::from_value", "serde_json::to_value"];
 
@@ -886,13 +887,13 @@ fn routes_have_no_undeclared_json_decoding() {
 /// 默认每文件 ≤1 个 service 域；全局恰允许 1 个 len==2 的登记项
 /// （`repo.rs` = 主域 `repo` + 子资源域 `git`，由 `/repos/{id}/git/*` 路径前缀证明其非跨域编排）。
 const ROUTE_SERVICE_MAP: &[(&str, &[&str], &str)] = &[
-    ("agent.rs", &[], ""),
+    ("agent.rs", &["agent"], "agent"),
     ("chat.rs", &["chat"], "chat"),
-    ("dev_docs.rs", &[], ""),
+    ("dev_docs.rs", &["task"], "task"),
     ("map.rs", &["map"], "map"),
     ("repo.rs", &["repo", "git"], "repo"),
-    ("sessions.rs", &[], ""),
-    ("settings.rs", &[], ""),
+    ("sessions.rs", &["sessions"], "sessions"),
+    ("settings.rs", &["settings"], "settings"),
     ("task.rs", &["task"], "task"),
 ];
 const FANOUT_EXCEPTION_MAX: usize = 1;

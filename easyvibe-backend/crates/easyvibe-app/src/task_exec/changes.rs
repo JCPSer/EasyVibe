@@ -159,8 +159,7 @@ pub async fn git_full_diff(repo_root: &std::path::Path, base: Option<&str>) -> O
 }
 
 /// 变更归因：读任务行拿 base_head（spawn 时已落库）；读不到（竞态/旧库）回退 None=HEAD 口径
-pub(crate) async fn base_head_from_task(task_repo: &easyvibe_db::SqliteTaskRepository, task_id: &str) -> Option<String> {
-    use easyvibe_db::TaskRepository as _;
+pub(crate) async fn base_head_from_task(task_repo: &dyn TaskStore, task_id: &str) -> Option<String> {
     task_repo.get(task_id).await.ok().flatten().and_then(|t| t.base_head)
 }
 
@@ -172,7 +171,7 @@ pub async fn collect_task_result(
     session_id: &str,
     repo_root: &std::path::Path,
     task_id: &str,
-    task_repo: &easyvibe_db::SqliteTaskRepository,
+    task_repo: &dyn TaskStore,
     baseline: &[String],
 ) -> Option<String> {
     let output = session_manager.take_output(session_id).await.unwrap_or_default();

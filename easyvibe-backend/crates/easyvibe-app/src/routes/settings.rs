@@ -9,9 +9,7 @@ use axum::{
 };
 use easyvibe_common::ApiError;
 use tracing::info;
-use crate::VERSION;
 use crate::task_exec;
-use easyvibe_db::{SettingRow, SettingsRepository as _};
 
 /// 本域路由（R1 自注册）：设置/密钥/harness 管理与诊断导出。
 pub(crate) fn router() -> Router<AppState> {
@@ -28,32 +26,9 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/diagnostics", get(export_diagnostics))
 }
 
-/// 敏感 key 规则：以 .apiKey / apiKey 结尾自动加密 at rest
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
-    key.ends_with(".apiKey") || key.ends_with("apiKey")
-}
-
 pub(crate) async fn list_settings(State(st): State<AppState>, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Result<Response, AppError> {
     let scope = q.get("scope").cloned().unwrap_or_else(|| "global".into());
-    let rows = st.settings_repo.list(&scope).await?;
-    let items: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|r| {
-            let value = if r.encrypted {
-                // 本地单机：解密返回供 UI 编辑（网络传输仅限 127.0.0.1）
-                st.cipher.decrypt(&r.value).unwrap_or_default()
-            } else {
-                r.value
-            };
-            serde_json::json!({
-                "key": r.key,
-                "value": serde_json::from_str::<serde_json::Value>(&value).unwrap_or(serde_json::Value::String(value)),
-                "encrypted": r.encrypted,
-                "updatedAt": r.updated_at,
-            })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({ "success": true, "data": items })).into_response())
+    Ok(Json(crate::service::settings::list_settings(&st, &scope).await?).into_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -64,62 +39,19 @@ pub(crate) struct PutSettingRequest {
 }
 
 pub(crate) async fn put_setting(State(st): State<AppState>, Json(body): Json<PutSettingRequest>) -> Result<Response, AppError> {
-    if body.scope.is_empty() || body.key.is_empty() || body.key.contains('/') || body.key.contains("..") {
-        return Err(AppError(ApiError::BadRequest("非法 scope/key".into())));
-    }
-    let sensitive = is_sensitive_key(&body.key);
-    let raw = serde_json::to_string(&body.value).map_err(|e| AppError(ApiError::Internal(e.to_string())))?;
-    let (value, encrypted) = if sensitive {
-        (st.cipher.encrypt(&raw)?, true)
-    } else {
-        (raw, false)
-    };
-    st.settings_repo
-        .set(&SettingRow {
-            scope: body.scope,
-            key: body.key,
-            value,
-            encrypted,
-            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
-        })
-        .await?;
+    crate::service::settings::put_setting(&st, &body.scope, &body.key, body.value).await?;
     Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
 
 pub(crate) async fn delete_setting(State(st): State<AppState>, Path((scope, key)): Path<(String, String)>) -> Result<Response, AppError> {
-    st.settings_repo.delete(&scope, &key).await?;
+    crate::service::settings::delete_setting(&st, &scope, &key).await?;
     Ok(Json(serde_json::json!({ "success": true })).into_response())
 }
 
 /// Y3：一键诊断导出——把"用户报障口头描述"变成"导出一个文件"
 /// 最近 200 行日志 + 后端版本 + 各表计数（settings 的加密值剔除）
 pub(crate) async fn export_diagnostics(State(st): State<AppState>) -> Result<Response, AppError> {
-    let dir = data_dir().to_string_lossy().into_owned();
-    let log_path = format!("{dir}/logs/easyvibe.log");
-    let logs = std::fs::read_to_string(&log_path)
-        .map(|t| t.lines().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
-        .unwrap_or_else(|_| "（日志文件不可读）".into());
-    use easyvibe_db::{HealthRepository as _, TaskRepository as _};
-    let tasks = st.task_repo.list(st.map_service.repos().await.first().map(|r| r.id.as_str()).unwrap_or(""), 100).await.unwrap_or_default();
-    let runs = st.health_repo.list_runs(st.map_service.repos().await.first().map(|r| r.id.as_str()).unwrap_or(""), 20).await.unwrap_or_default();
-    let aps = tasks.iter().take(10).map(|t| t.id.clone()).collect::<Vec<_>>();
-    let body = serde_json::json!({
-        "version": VERSION,
-        "llm_mode": format!("{:?}", *st.llm_mode),
-        "repos": st.map_service.repos().await.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
-        "task_counts": {
-            "by_status": tasks.iter().fold(serde_json::json!({}), |mut acc, t| {
-                let k = t.status.clone();
-                let o = acc.as_object_mut().unwrap();
-                *o.entry(k).or_insert(serde_json::json!(0)) = serde_json::json!(o.get(&t.status).and_then(|v| v.as_i64()).unwrap_or(0) + 1);
-                acc
-            }),
-        },
-        "recent_runs": runs.iter().take(5).map(|r| serde_json::json!({"id": r.id, "status": r.status, "archScore": r.arch_score})).collect::<Vec<_>>(),
-        "recent_logs": logs,
-    });
-    let _ = aps;
-    Ok(Json(serde_json::json!({ "success": true, "data": body })).into_response())
+    Ok(Json(crate::service::settings::export_diagnostics(&st).await?).into_response())
 }
 
 /// S1-3：harness 状态——两栏改造（方案 v2 §5）后只暴露版本状态（about 页数据面），

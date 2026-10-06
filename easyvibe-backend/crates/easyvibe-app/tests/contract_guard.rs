@@ -140,17 +140,20 @@ fn rest_dto_single_source_exists() {
 /// 新增响应须走命名 DTO（api-types）；本表是「契约面收敛」趋势的可验证度量——
 /// 清干净后须下调，新增文件不得蒙混（未登记即失败）。
 const JSON_RATCHET: &[(&str, usize)] = &[
-    ("routes/agent.rs", 8),
-    ("routes/chat.rs", 16),
-    ("routes/dev_docs.rs", 6),
+    ("routes/chat.rs", 5),
+    ("routes/dev_docs.rs", 2),
     ("routes/map.rs", 3),
-    ("routes/repo.rs", 2),
-    ("routes/sessions.rs", 9),
-    ("routes/settings.rs", 19),
-    ("routes/task.rs", 8),
-    ("service/chat.rs", 3),
+    // c-arch-7 R1：route 内联响应映射大部下移至 crate::service（settings/task/agent/sessions）；
+    // 路由侧预算随之下降，service 侧按迁移后实测登记——**聚合只降不升**（迁移前 83 → 迁移后 81）。
+    ("routes/sessions.rs", 1),
+    ("routes/settings.rs", 11),
+    ("routes/task.rs", 1),
+    ("service/agent.rs", 7),
+    ("service/chat.rs", 14),
     ("service/map.rs", 7),
-    ("service/task.rs", 2),
+    ("service/sessions.rs", 9),
+    ("service/settings.rs", 8),
+    ("service/task.rs", 13),
 ];
 
 fn rs_files(dir: &Path) -> Vec<String> {
