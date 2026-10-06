@@ -71,3 +71,12 @@ jobs:
 
       - name: 组件归属收口守卫自检（负例必红）
         run: python3 scripts/verify_components_ownership.py --selfcheck
+
+      # c-arch-1 R10③b 地图域守卫：easyvibe-map 的 module_size_guard 是本地权威（cargo test），
+      # 本仓 CI 不跑 cargo（见本文件头部定位），故把同一套判据落成纯 python3 载体——
+      # 解析 Rust 守卫的常量表（单一事实源）后对 src/ 复判；解析失败即 fail-closed。
+      - name: 地图域守卫（easyvibe-map 文件集/LOC/依赖面/符号）
+        run: python3 scripts/check_map_domain_guard.py --check
+
+      - name: 地图域守卫自检（负例必红，含解析失败 fail-closed）
+        run: python3 scripts/check_map_domain_guard.py --selfcheck

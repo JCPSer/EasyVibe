@@ -282,7 +282,7 @@
         "complexity": "medium",
         "churn": "medium",
         "decay_flags": [],
-        "review_note": "“不出残图”原则贯彻得较彻底：校验失败走 map.invalid 上报、合法缓存继续服务。c-arch-1 本轮把三个边界层里的地图域规则收进本模块：freshness.rs（保鲜分级，零 axum/零 AppState）、induction.rs（增量归纳七道门判定与 prompt 预渲染，纯函数）、concerns.rs（巡检新旧对照与 id 兜底注入，纯函数）——三者均自带守卫（≤600 行 + 禁 axum/AppState），且都不新增出边（仍只依赖 common-foundation）。风险点：synthesis.rs 仍同时承担归属引擎、patch 解析、合成、校验与原子落盘五项职责。",
+        "review_note": "“不出残图”原则贯彻得较彻底：校验失败走 map.invalid 上报、合法缓存继续服务。c-arch-1 本轮把三个边界层里的地图域规则收进本模块：freshness.rs（保鲜分级，零 axum/零 AppState）、induction.rs（增量归纳七道门判定与 prompt 预渲染，纯函数）、concerns.rs（巡检新旧对照与 id 兜底注入，纯函数）——三者已随 c-arch-1 R10③ 新增 crates/easyvibe-map/tests/module_size_guard.rs，具备可失败断言（文件集双向全等 + 单文件 ≤600 行 + 禁 axum/AppState/持久层/agent 层 + 导出符号冻结），并由 scripts/check_map_domain_guard.py 在 CI 侧解析同一常量表复核，且都不新增出边（仍只依赖 common-foundation）。风险点：synthesis.rs 仍同时承担归属引擎、patch 解析、合成、校验与原子落盘五项职责。",
         "concerns": [
           {
             "id": "c-map-domain-1",
@@ -522,7 +522,7 @@
         "decay_flags": [
           "coupling_high"
         ],
-        "review_note": "c-arch-1 本轮闭环：五个领域实现（git 工作树 694 / 增量归纳判定 605 / 保鲜分级 179 / watcher 管线 85 / concerns 对照 175）全部离开本 crate——git 落新 crate easyvibe-git，freshness/induction/concerns 落 easyvibe-map 子模块，watcher 管线落新 crate easyvibe-pipeline，归纳终态收尾落 service/reinduce.rs。本模块现只保留 main/router/state/bootstrap/ws 与 HTTP 边界（routes/* 只做入参解析与响应映射，业务编排一律经 crate::service::{git,repo,reinduce,...}）。god_module 消退：出边由 7 增至 9（新增 easyvibe-git / easyvibe-pipeline 两条正向边），但「边界层不得含业务规则」已从注释纪律升级为可失败断言组（文件集冻结 + 五文件禁止存在 + routes 禁串 + 归属映射扇出 G3′ + LOC），并由 easyvibe-map 的三个子模块守卫与两个新 crate 的 module_size_guard 覆盖外提面。剩余：仍是全库出边最多的枢纽（9 条），coupling_high 保留。",
+        "review_note": "c-arch-1 本轮闭环：五个领域实现（git 工作树 694 / 增量归纳判定 605 / 保鲜分级 179 / watcher 管线 85 / concerns 对照 175）全部离开本 crate——git 落新 crate easyvibe-git，freshness/induction/concerns 落 easyvibe-map 子模块，watcher 管线落新 crate easyvibe-pipeline，归纳终态收尾落 service/reinduce.rs。本模块现只保留 main/router/state/bootstrap/ws 与 HTTP 边界（routes/* 只做入参解析与响应映射，业务编排一律经 crate::service::{git,repo,reinduce,...}）。god_module 消退：出边由 7 增至 9（新增 easyvibe-git / easyvibe-pipeline 两条正向边），但「边界层不得含业务规则」已从注释纪律升级为可失败断言组（文件集冻结 + 五文件禁止存在 + routes 禁串 + 归属映射扇出 G3′ + LOC），并由 easyvibe-map 的 tests/module_size_guard.rs（4 组断言，CI 侧由 scripts/check_map_domain_guard.py 复核同一判据）与两个新 crate 的 module_size_guard 覆盖外提面。剩余：仍是全库出边最多的枢纽（9 条），coupling_high 保留。",
         "concerns": []
       },
       "last_analyzed_at": "2026-10-06T14:10:00+08:00",

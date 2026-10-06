@@ -536,23 +536,88 @@ fn service_file_set_is_frozen() {
 }
 
 // ============================================================================
-// R6（c-arch-1）：app crate 源码文件集冻结 + 五领域文件禁止存在
+// R6 + R9（c-arch-1）：app crate 源码文件集冻结 + 归属分类 + 五领域文件禁止存在
 // ============================================================================
 
-/// 顶层文件归属快照（生产 + 测试夹具；少一个=误删，多一个=未登记的新归属）。
-const APP_TOP_FILES: &[&str] = &[
-    "assets.rs", "bootstrap.rs", "main.rs", "router.rs", "session_queue_routes.rs", "state.rs", "ws.rs",
-    "test_support.rs", "tests_a.rs", "tests_b.rs", "tests_c.rs", "tests_d.rs",
+/// 文件归属类别（**封闭**：无第五类，且每类必须非空——见 `app_files_have_declared_ownership`）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SrcClass {
+    /// 组合根：装配与共享状态（命题点名的 main / router / state / bootstrap）
+    CompositionRoot,
+    /// HTTP/WS 边界：请求 / 响应面
+    HttpBoundary,
+    /// task-engine 切片（共享同一 crate；由 `arch_guard.rs` 约束反向引用）
+    TaskEngineSlice,
+    /// 测试夹具（只进 test target）
+    TestFixture,
+}
+
+/// 顶层归属快照（**单一事实源**：文件 + 类别 + 理由）。
+/// `app_top_files()` / `app_task_engine_files()` 均由本表**派生**（键集不再双轨维护）。
+///
+/// R9 命题对照：「app crate 只留 main/router/state/bootstrap/ws 与 HTTP 边界」是散文，
+/// 实测白名单 12 项 ≠ 命题 5 项。差异**逐项给出理由**（下表第 3 列），使「只留 X」与代码事实一致：
+///   - 命题点名的 5 项：main / router / state / bootstrap / ws —— 见 CompositionRoot + HttpBoundary(ws)；
+///   - 命题未点名但正当的 3 项：assets（受管资产解析，零业务规则）、
+///     session_queue_routes（会话队列请求/响应面）、task_exec 切片（task-engine，另有 arch_guard 约束）；
+///   - 命题未提及的 5 项：test_support / tests_a~d —— 只为测试而存在，不进生产二进制。
+const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
+    // —— 组合根（命题点名）——
+    (SrcClass::CompositionRoot, "main.rs", "命题点名：进程入口与 mod 声明"),
+    (SrcClass::CompositionRoot, "router.rs", "命题点名：域自注册 merge 与 /ws 装配"),
+    (SrcClass::CompositionRoot, "state.rs", "命题点名：共享状态与助手；组合根本就要装配依赖"),
+    (SrcClass::CompositionRoot, "bootstrap.rs", "命题点名：启动装配；管线挂载已收口 service/repo.rs"),
+    // —— HTTP/WS 边界 ——
+    (SrcClass::HttpBoundary, "ws.rs", "命题点名：WS 面（事件名契约由 contract_guard 冻结）"),
+    (SrcClass::HttpBoundary, "assets.rs", "命题未点名：受管资产解析（编译期 include 清单 + 启动期读取），零业务规则"),
+    (SrcClass::HttpBoundary, "session_queue_routes.rs", "命题未点名：会话队列请求/响应面；含 1 处 map-domain 纯校验调用（入棘轮）"),
+    // —— task-engine 切片（命题未点名，另有 arch_guard 独立约束）——
+    (SrcClass::TaskEngineSlice, "task_exec.rs", "task-engine 切片根：装配与阶段状态机，由 arch_guard.rs 约束反向引用"),
+    (SrcClass::TaskEngineSlice, "task_exec/changes.rs", "切片内按职责拆分（变更集）"),
+    (SrcClass::TaskEngineSlice, "task_exec/contract.rs", "切片内按职责拆分（契约门）"),
+    (SrcClass::TaskEngineSlice, "task_exec/harness.rs", "切片内按职责拆分（harness 装载）"),
+    (SrcClass::TaskEngineSlice, "task_exec/prompt.rs", "切片内按职责拆分（提示词渲染）"),
+    (SrcClass::TaskEngineSlice, "task_exec/review.rs", "切片内按职责拆分（审查门）"),
+    (SrcClass::TaskEngineSlice, "task_exec/test_util.rs", "切片内测试夹具（写状态机，仅 test target）"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_changes.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_contract.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_flow.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_gates.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_harness.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_prompt.rs", "切片内按域拆分的集成级夹具"),
+    // —— 测试夹具 ——
+    (SrcClass::TestFixture, "test_support.rs", "命题未提及：跨文件共享测试夹具，仅 test target 编译"),
+    (SrcClass::TestFixture, "tests_a.rs", "命题未提及：按域拆分的集成级夹具"),
+    (SrcClass::TestFixture, "tests_b.rs", "命题未提及：按域拆分的集成级夹具"),
+    (SrcClass::TestFixture, "tests_c.rs", "命题未提及：按域拆分的集成级夹具"),
+    (SrcClass::TestFixture, "tests_d.rs", "命题未提及：按域拆分的集成级夹具"),
 ];
 
-/// task_exec 切片（task-engine 归属，共享同一 crate；由 arch_guard.rs 约束反向引用）。
-const APP_TASK_ENGINE_FILES: &[&str] = &[
-    "task_exec.rs",
-    "task_exec/changes.rs", "task_exec/contract.rs", "task_exec/harness.rs", "task_exec/prompt.rs",
-    "task_exec/review.rs", "task_exec/test_util.rs", "task_exec/tests_changes.rs",
-    "task_exec/tests_contract.rs", "task_exec/tests_flow.rs", "task_exec/tests_gates.rs",
-    "task_exec/tests_harness.rs", "task_exec/tests_prompt.rs",
+/// 封闭类别全集（键集必须与此**全等**：既无第五类，也不得某类为空）。
+const APP_SRC_CLASSES: &[SrcClass] = &[
+    SrcClass::CompositionRoot,
+    SrcClass::HttpBoundary,
+    SrcClass::TaskEngineSlice,
+    SrcClass::TestFixture,
 ];
+
+/// 顶层文件集（由归属表派生：非 task-engine 切片项）。
+fn app_top_files() -> Vec<String> {
+    APP_SRC_OWNERSHIP
+        .iter()
+        .filter(|(c, _, _)| *c != SrcClass::TaskEngineSlice)
+        .map(|(_, f, _)| f.to_string())
+        .collect()
+}
+
+/// task_exec 切片文件集（由归属表派生：task-engine 切片项）。
+fn app_task_engine_files() -> Vec<String> {
+    APP_SRC_OWNERSHIP
+        .iter()
+        .filter(|(c, _, _)| *c == SrcClass::TaskEngineSlice)
+        .map(|(_, f, _)| f.to_string())
+        .collect()
+}
 
 /// 五个领域文件必须已外提：app crate 只留 HTTP 边界与装配。
 const EXTRACTED_DOMAIN_FILES: &[&str] = &["git.rs", "freshness.rs", "reinduce.rs", "pipeline.rs", "map_concerns.rs"];
@@ -579,10 +644,10 @@ fn app_src_tree() -> Vec<String> {
 
 #[test]
 fn app_src_tree_is_frozen() {
-    let mut expected: Vec<String> = APP_TOP_FILES.iter().map(|s| s.to_string()).collect();
+    let mut expected: Vec<String> = app_top_files();
     expected.extend(rs_files(&app_src().join("routes")).into_iter().map(|f| format!("routes/{f}")));
     expected.extend(rs_files(&app_src().join("service")).into_iter().map(|f| format!("service/{f}")));
-    expected.extend(APP_TASK_ENGINE_FILES.iter().map(|s| s.to_string()));
+    expected.extend(app_task_engine_files());
     expected.sort();
 
     let actual = app_src_tree();
@@ -594,6 +659,114 @@ fn app_src_tree_is_frozen() {
         !expected.iter().any(|f| f.starts_with("routes/") && !f.ends_with(".rs")),
         "routes 归属项必须是 .rs 文件"
     );
+}
+
+/// R9-①：顶层归属表键集 ↔ 磁盘顶层 .rs **双向全等**（与 app_src_tree_is_frozen 同义，
+/// 但键来源是派生自归属表——防「表与派生两处漂移」）。
+/// routes/ 与 service/ 仍**由磁盘扫描派生**（不得硬编码，否则新增路由文件会被漏掉）。
+#[test]
+fn app_top_files_keys_match_disk() {
+    let mut expected: Vec<String> = APP_SRC_OWNERSHIP
+        .iter()
+        .map(|(_, f, _)| f.to_string())
+        .filter(|f| !f.contains('/'))
+        .collect();
+    expected.sort();
+    let actual: Vec<String> = app_src_tree().into_iter().filter(|p| !p.contains('/')).collect();
+    assert_eq!(
+        actual, expected,
+        "顶层文件集与 APP_SRC_OWNERSHIP 不一致——新增/删除顶层文件须同步归属表（R9）"
+    );
+    // 归属表内部一致性：无重复键
+    let mut keys: Vec<&str> = APP_SRC_OWNERSHIP.iter().map(|(_, f, _)| *f).collect();
+    keys.sort();
+    let n = keys.len();
+    keys.dedup();
+    assert_eq!(keys.len(), n, "APP_SRC_OWNERSHIP 存在重复文件键——单点权威被破坏（R9）");
+}
+
+/// R9-②：归属分类可判定——类别全集封闭（无第五类）、每类非空、每条理由非占位、
+/// 且与五领域外提清单互斥。
+#[test]
+fn app_files_have_declared_ownership() {
+    let mut declared: Vec<SrcClass> = APP_SRC_OWNERSHIP.iter().map(|(c, _, _)| *c).collect();
+    declared.sort_by_key(|c| format!("{c:?}"));
+    declared.dedup();
+    let mut expected: Vec<SrcClass> = APP_SRC_CLASSES.to_vec();
+    expected.sort_by_key(|c| format!("{c:?}"));
+    assert_eq!(
+        declared, expected,
+        "归属类别集合与 APP_SRC_CLASSES 不一致——每类必须非空且无第五类（R9）"
+    );
+
+    for class in APP_SRC_CLASSES {
+        let n = APP_SRC_OWNERSHIP.iter().filter(|(c, _, _)| c == class).count();
+        assert!(n > 0, "归属类别 {class:?} 为空——分类退化为摆设（R9）");
+    }
+
+    for (class, f, reason) in APP_SRC_OWNERSHIP {
+        assert!(
+            reason.chars().count() >= 8,
+            "{f} 的归属理由 `{reason}` 过短（{class:?}）——须逐项给出「为什么不外提」（R9）"
+        );
+        assert!(
+            !EXTRACTED_DOMAIN_FILES.contains(f),
+            "{f} 同时出现在归属表与五领域外提清单——语义互斥（R9）"
+        );
+    }
+}
+
+/// 边界类文件（HttpBoundary）的纵向编排禁止串（组合根豁免：它就是要装配依赖）。
+const APP_BOUNDARY_FORBIDDEN: &[&str] = &[
+    "easyvibe_db::",
+    "easyvibe_ai_agent::",
+    "crate::task_exec",
+    "crate::reinduce",
+    "crate::freshness",
+    "crate::map_concerns",
+    "crate::git",
+    "crate::pipeline",
+    "easyvibe_git::",
+    "easyvibe_pipeline::",
+    "easyvibe_map::",
+    "tokio::spawn",
+];
+
+/// 边界类棘轮（键集必须与实际边界文件集全等；数值只降不升）。
+/// 实测依据：`session_queue_routes.rs` 现有一处 `easyvibe_map::is_valid_id(mid)`——纯 id 校验
+/// （无 IO、无状态），属正当边界校验而非业务规则。逐条禁止会立刻自红，故登记为预算 1 只降不升。
+const APP_BOUNDARY_BUDGET: &[(&str, usize)] =
+    &[("assets.rs", 0), ("session_queue_routes.rs", 1), ("ws.rs", 0)];
+
+/// R9-③：**行为面**判据——边界类文件不得含纵向编排（DB/agent/领域规则/spawn）。
+/// 与 R7 G1（routes/）互补：G1 管 routes/，本条管其余 HTTP/WS 边界面。
+#[test]
+fn boundary_files_have_no_vertical_orchestration() {
+    let boundary: Vec<String> =
+        APP_SRC_OWNERSHIP.iter().filter(|(c, _, _)| *c == SrcClass::HttpBoundary).map(|(_, f, _)| f.to_string()).collect();
+
+    let mut declared: Vec<String> = APP_BOUNDARY_BUDGET.iter().map(|(f, _)| f.to_string()).collect();
+    declared.sort();
+    let mut actual_keys = boundary.clone();
+    actual_keys.sort();
+    assert_eq!(
+        actual_keys, declared,
+        "边界类棘轮键集漂移——边界文件集与 APP_BOUNDARY_BUDGET 不一致（清干净须摘牌，R9）"
+    );
+
+    for f in &boundary {
+        let txt = read(f);
+        let count: usize = APP_BOUNDARY_FORBIDDEN.iter().map(|p| txt.matches(p).count()).sum();
+        let budget = APP_BOUNDARY_BUDGET
+            .iter()
+            .find(|(n, _)| n == f)
+            .map(|(_, b)| *b)
+            .unwrap_or_else(|| panic!("{f} 未登记边界预算"));
+        assert!(
+            count <= budget,
+            "边界文件 {f} 纵向编排从 {budget} 增至 {count}——业务规则须落 crate::service（R9/R7 G1 同源）"
+        );
+    }
 }
 
 #[test]
