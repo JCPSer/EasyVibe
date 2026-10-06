@@ -2,12 +2,14 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-06T18:28:44+08:00",
+    "generated_at": "2026-10-06T19:59:14+08:00",
     "stats": {
-      "files_total": 359,
-      "files_covered": 359,
+      "files_total": 362,
+      "files_covered": 362,
       "coverage_ratio": 1.0,
-      "edges_derived": 52
+      "edges_derived": 53,
+      "edges_inferred": 0,
+      "retried_modules": 0
     }
   },
   "layers": [
@@ -301,9 +303,7 @@
       "files": [
         "easyvibe-renderer/src/runtime/**"
       ],
-      "dependencies": [
-        "desktop-shell"
-      ],
+      "dependencies": [],
       "health": {
         "score": 80,
         "coupling": "medium",
@@ -357,6 +357,27 @@
       }
     },
     {
+      "id": "host-adapter",
+      "name": "宿主能力适配与引导",
+      "layer": "app-entry",
+      "files": [
+        "easyvibe-renderer/src/host-adapter/**",
+        "easyvibe-renderer/index.html"
+      ],
+      "dependencies": [
+        "console-ui",
+        "renderer-runtime"
+      ],
+      "health": {
+        "score": 84,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
       "id": "console-ui",
       "name": "应用壳与页面装配",
       "layer": "presentation",
@@ -367,7 +388,6 @@
         "easyvibe-renderer/src/hooks/**",
         "easyvibe-renderer/src/lib/**",
         "easyvibe-renderer/src/__tests__/**",
-        "easyvibe-renderer/index.html",
         "easyvibe-renderer/vite.config.ts",
         "easyvibe-renderer/vitest.config.ts",
         "easyvibe-renderer/eslint.config.js",
@@ -709,22 +729,21 @@
     },
     {
       "id": "e21",
-      "from": "renderer-runtime",
-      "to": "desktop-shell",
-      "type": "call",
-      "strength": "weak",
-      "direction_violation": true
-    },
-    {
-      "id": "e22",
       "from": "renderer-api",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
+      "id": "e22",
+      "from": "host-adapter",
+      "to": "console-ui",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
       "id": "e23",
-      "from": "console-ui",
+      "from": "host-adapter",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
@@ -732,181 +751,181 @@
     {
       "id": "e24",
       "from": "console-ui",
-      "to": "renderer-api",
+      "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e25",
       "from": "console-ui",
-      "to": "renderer-shared",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e26",
       "from": "console-ui",
-      "to": "ui-kit",
+      "to": "renderer-shared",
       "type": "import",
-      "strength": "normal"
+      "strength": "strong"
     },
     {
       "id": "e27",
       "from": "console-ui",
-      "to": "map-canvas",
+      "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e28",
       "from": "console-ui",
-      "to": "chat-ui",
+      "to": "map-canvas",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e29",
       "from": "console-ui",
-      "to": "task-ui",
+      "to": "chat-ui",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e30",
       "from": "console-ui",
-      "to": "settings-ui",
+      "to": "task-ui",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e32",
-      "from": "settings-ui",
-      "to": "renderer-runtime",
+      "from": "console-ui",
+      "to": "settings-ui",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e33",
       "from": "settings-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e34",
+      "from": "settings-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e34",
+      "id": "e35",
       "from": "settings-ui",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e35",
-      "from": "chat-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
       "id": "e36",
       "from": "chat-ui",
-      "to": "renderer-api",
+      "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e37",
       "from": "chat-ui",
-      "to": "renderer-shared",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e38",
       "from": "chat-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e39",
+      "from": "chat-ui",
       "to": "task-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e39",
-      "from": "task-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
       "id": "e40",
       "from": "task-ui",
-      "to": "renderer-api",
+      "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e41",
       "from": "task-ui",
-      "to": "renderer-shared",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e42",
-      "from": "map-canvas",
-      "to": "renderer-runtime",
+      "from": "task-ui",
+      "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e43",
       "from": "map-canvas",
-      "to": "renderer-api",
+      "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e44",
       "from": "map-canvas",
-      "to": "renderer-shared",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e45",
       "from": "map-canvas",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e46",
+      "from": "map-canvas",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e46",
+      "id": "e47",
       "from": "map-canvas",
       "to": "chat-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e47",
+      "id": "e48",
       "from": "desktop-shell",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e48",
+      "id": "e49",
       "from": "desktop-shell",
       "to": "map-toolchain",
       "type": "config",
       "strength": "weak"
     },
     {
-      "id": "e49",
-      "from": "easyvibe-git",
-      "to": "contract-foundation",
-      "type": "import",
-      "strength": "weak"
-    },
-    {
       "id": "e50",
-      "from": "easyvibe-pipeline",
+      "from": "easyvibe-git",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
@@ -914,19 +933,26 @@
     {
       "id": "e51",
       "from": "easyvibe-pipeline",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e52",
+      "from": "easyvibe-pipeline",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e52",
+      "id": "e53",
       "from": "easyvibe-pipeline",
       "to": "agent-runtime",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e53",
+      "id": "e54",
       "from": "easyvibe-pipeline",
       "to": "event-bus",
       "type": "import",
@@ -934,18 +960,12 @@
     }
   ],
   "health": {
-    "score": 77,
+    "score": 84,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
-    "decay_flags": [
-      "layer_violation"
-    ],
+    "decay_flags": [],
     "concerns": [
-      {
-        "id": "c-arch-5",
-        "severity": "high"
-      },
       {
         "id": "c-arch-7",
         "severity": "high"

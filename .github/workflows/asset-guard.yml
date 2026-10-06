@@ -42,10 +42,11 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，20 模块 / 52 边）；
-      # 旧快照 map_post_migration.json（14 模块 / 31 边）仅由 --selfcheck 的 H0/H1 负例自证使用。
+      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，21 模块 / 53 边，c-arch-5 后 DV=0）；
+      # 旧快照 map_post_migration.json（14 模块 / 31 边，含受控 DV=1）仅由 --selfcheck 的 H2 负例自证使用；
+      # 绿例（H1）改用与 EXPECT_EDGES 同代的 map_post_split.json（DV=0，DV_MAX 归零后的合法全绿样本）。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 52
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 53
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
@@ -108,3 +109,13 @@ jobs:
 
       - name: console 粒度守卫自检（反例必红）
         run: python3 scripts/check_console_granularity.py --selfcheck
+
+      # c-arch-5 全新守卫：宿主能力边界（端口 + app-entry 适配模块 + 同层引导入口）。
+      # 命题「全库唯一 direction_violation 被结构性消除」的 CI 可见本体——B1 唯一落点 /
+      # B2 无逆边（order1/2 不得指向 app-entry）+ DV==0 / B3 加载链无竞态且无反向 import /
+      # B4 归属（index.html 归 host-adapter）。本仓 CI 不跑 vitest（见文件头），故用纯 python3 载体。
+      - name: 宿主能力边界守卫（c-arch-5，端口化 + DV=0）
+        run: python3 scripts/check_host_boundary.py --check --map scripts/tests/fixtures/map_post_split.json
+
+      - name: 宿主能力边界守卫自检（反例必红）
+        run: python3 scripts/check_host_boundary.py --selfcheck

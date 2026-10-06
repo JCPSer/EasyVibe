@@ -31,8 +31,9 @@ SCAN_DIRS = ["easyvibe-desktop/src-tauri/src"]
 FORBIDDEN = [
     "console-ui", "chat-ui", "task-ui", "map-canvas", "renderer-core",
     "renderer-runtime", "renderer-api", "renderer-shared", "ui-kit", "settings-ui",
+    "host-adapter",
     "easyvibe-renderer", "easyvibe_renderer",
-    "@/components", "@/runtime", "@/api", "@/shared",
+    "@/components", "@/runtime", "@/api", "@/shared", "@/host-adapter",
 ]
 WHITELIST = ["resources/dist"]
 
@@ -160,6 +161,11 @@ def selfcheck(real_root):
             fh.write(base + 'let _ = "settings-ui";\n')
         h7 = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
         results.append(("S7 注入 settings-ui → 必红", len(h7) > 0, "; ".join(x[2] for x in h7[:2])))
+        # S8 注入 host-adapter（c-arch-5 新增 app-entry 适配模块）→ 必红
+        with open(lib, "w", encoding="utf-8") as fh:
+            fh.write(base + 'let _ = "host-adapter";\n')
+        h8 = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
+        results.append(("S8 注入 host-adapter → 必红", len(h8) > 0, "; ".join(x[2] for x in h8[:2])))
         with open(lib, "w", encoding="utf-8") as fh:
             fh.write(base)
         # S4 真仓库 → 必绿（仅白名单路径）

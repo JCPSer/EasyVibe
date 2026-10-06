@@ -23,6 +23,9 @@
   N5（--selfcheck 反回归负例）把 easyvibe-renderer/src/api/** 回并 renderer-runtime → 必红（G1）。
   G2 反聚合哨兵（god_module 判据）：任一模块 files 同时命中
      easyvibe-renderer/src/runtime/host.ts 与 easyvibe-renderer/src/components/ui/button.tsx → 红。
+  G2b 反吞探针（c-arch-5）：src/host-adapter/register.ts 是 app-entry 层适配模块的探针，
+     不得被四格任何 glob 命中（尤其 renderer-runtime）——否则宿主实现被 renderer 层吞并、逆边复活。
+     探针不在磁盘 → fail-closed。
   G3 粒度上限：四格 files glob 数量上限（runtime ≤4 / api ≤2 / shared ≤4 / ui-kit ≤5），超限即红。
   G4 归位顺序：若 .easyvibe/map/emit_order.json 在册且含 ui-kit，
      断言 emit_order.modules 中 ui-kit 下标 < console-ui 下标（防 console-ui 的 lib/**、hooks/**
@@ -66,6 +69,10 @@ PROBES = (
 )
 # 工具链探针：应命中 map-toolchain，且不被四格命中
 TOOLCHAIN_PROBES = ("easyvibe-renderer/scripts/gen-types.mjs",)
+
+# G2b 反吞探针（c-arch-5）：app-entry 层宿主能力适配器，不得被渲染器四格任何 glob 命中
+# （尤其 renderer-runtime）——否则宿主实现被 renderer 层吞并、DV 逆边复活。
+ANTI_ENGULF_PROBES = ("easyvibe-renderer/src/host-adapter/register.ts",)
 
 
 # ------------------------------------------------------------------ glob
@@ -185,6 +192,20 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
     else:
         checks["G2"] = "PASS"
 
+    # ---- G2b 反吞探针（c-arch-5）：宿主适配器不得被四格（尤其 renderer-runtime）吞并
+    missing_engulf = [p for p in ANTI_ENGULF_PROBES if not os.path.isfile(os.path.join(root, p))]
+    if missing_engulf:
+        problems.append("G2b 反吞探针不在磁盘（fail-closed）: %s" % missing_engulf)
+        checks["G2b"] = "FAIL"
+    else:
+        engulfed = [(p, g, gl) for p in ANTI_ENGULF_PROBES for g in GRIDS
+                    for gl in by_id.get(g, []) if glob_match(p, gl)]
+        if engulfed:
+            problems.append("G2b 宿主适配器探针被渲染器格吞并（逆边复活风险）: %s" % engulfed)
+            checks["G2b"] = "FAIL"
+        else:
+            checks["G2b"] = "PASS"
+
     # ---- G3 粒度上限（四格 glob 数量）
     g3_fail = False
     for gid, cap in sorted(CAPS.items()):
@@ -297,6 +318,12 @@ def cmd_selfcheck():
         if mm["id"] == "renderer-runtime":
             mm["files"] = mm["files"] + ["easyvibe-renderer/src/api/**"]
     add("N5 api 回并 renderer-runtime → G1 必红", m4, True, "G1")
+
+    m6 = _green_map()
+    for mm in m6["modules"]:
+        if mm["id"] == "renderer-runtime":
+            mm["files"] = mm["files"] + ["easyvibe-renderer/src/host-adapter/**"]
+    add("N6 renderer-runtime 吞并 host-adapter → G2b 必红", m6, True, "G2b")
 
     failed = 0
     for name, map_obj, expect_red, want_check in cases:

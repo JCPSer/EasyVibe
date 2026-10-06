@@ -421,32 +421,44 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
   })
 })
 
-// ---------------- 断言组 6：宿主能力单向门（c-arch-3，R5/R6） ----------------
+// ---------------- 断言组 6：宿主能力单向门（c-arch-5 端口化后） ----------------
 //
-// 命题：「宿主能力收敛为 renderer-runtime 的一个门面，业务文件只经门面调用；archGuard 扩到 @tauri-apps/*」。
-//  ① 唯一白名单：@tauri-apps/* 说明符全库只许出现在门面 src/runtime/host.ts；
-//  ② 扫描面 walk('src') 全量（含 api/hooks/lib/各域），排除 __tests__（守卫文件自身含包名字面量）与门面；
-//  ③ 去注释后扫描（注释里的包名不误报）；静态 `from` 与动态 `import()` 双收（复用 SPEC_RE）；
-//  ④ 门面导出面快照：新增宿主能力必须同步改 FACADE_EXPORTS（双向全等，照 RUNTIME_FILES 范式）。
-// 注：FACADE_EXPORTS 同时是 R9「类型不外泄」的间接哨兵——业务文件若为类型再 import @tauri-apps/*，①直接拦下。
-const HOST_FACADE = 'src/runtime/host.ts'
+// 命题：宿主能力收敛为 renderer-runtime 的**端口**（契约 + 注册表 + 默认 no-op），真实现由
+//  app-entry 层唯一适配模块 src/host-adapter/** 在引导期注入；依赖方向恒为下行（无逆边）。
+//  ① 唯一落点：@tauri-apps/* 说明符只许出现在 src/host-adapter/**（walk('src') 全量扫描，
+//     排除 __tests__ 与适配模块自身）；
+//  ② 反绕过自证：动态 import() / 静态 from / import type 三形态都被识别；
+//  ③ 端口导出面快照：PORT_EXPORTS 双向全等（转发器一律 export function，见 ΔS5）；
+//  ④ 反回归：src/runtime/** 必须零 @tauri-apps（适配器不得被搬回 runtime 层，否则逆边复活）。
+// 注：PORT_EXPORTS 同时是类型不外泄的间接哨兵——业务文件若为类型再 import @tauri-apps/*，①直接拦下。
+const PORT_FILE = 'src/runtime/host.ts'
+const ADAPTER_PREFIX = 'src/host-adapter/'
 const isHostSpec = (s: string) => /^@tauri-apps\//.test(s)
 const isGuardFile = (f: string) => /__tests__\//.test(f)
+const isAdapterFile = (f: string) => f.startsWith(ADAPTER_PREFIX)
 /** 指定源码文本中所有 import/export-from 说明符（复用 SPEC_RE，动态 import() 与静态 from 双收）。 */
 const specsOf = (src: string): string[] => [...src.matchAll(SPEC_RE)].map((m) => m[2])
-const FACADE_EXPORTS = [
-  'checkAndInstallUpdate', 'isTauriRuntime', 'notify', 'onBackendRecovered',
-  'pickDirectory', 'relaunchApp', 'startWindowDrag', 'toggleWindowMaximize',
+const PORT_EXPORTS = [
+  'checkAndInstallUpdate', 'getHostCapabilities', 'isTauriRuntime', 'notify',
+  'onBackendRecovered', 'pickDirectory', 'relaunchApp', 'setHostCapabilities',
+  'startWindowDrag', 'toggleWindowMaximize',
 ]
 
-describe('archGuard · 断言组 6：宿主能力单向门（@tauri-apps/* 只许出现在 runtime/host.ts）', () => {
-  it('① src/** 全量（排除 __tests__ 与门面）不得出现 @tauri-apps/* 说明符', () => {
+describe('archGuard · 断言组 6：宿主能力单向门（@tauri-apps/* 只许出现在 host-adapter）', () => {
+  it('① src/** 全量（排除 __tests__ 与 host-adapter/**）不得出现 @tauri-apps/* 说明符', () => {
     for (const f of walk('src')) {
-      if (f === HOST_FACADE || isGuardFile(f)) continue
+      if (isAdapterFile(f) || isGuardFile(f)) continue
       for (const s of specsOf(stripComments(read(f)))) {
-        expect(isHostSpec(s), `${f} → ${s}（宿主能力必须走 @/runtime/host 门面）`).toBe(false)
+        expect(isHostSpec(s), `${f} → ${s}（宿主能力必须走 @/runtime/host 端口，真实现只许落 src/host-adapter）`).toBe(false)
       }
     }
+  })
+  it('①′ 正向：适配模块确实承载 @tauri-apps/*（唯一落点例外不是空洞的）', () => {
+    const hostSpecs = walk('src')
+      .filter(isAdapterFile)
+      .flatMap((f) => specsOf(stripComments(read(f))))
+      .filter(isHostSpec)
+    expect(hostSpecs.length).toBeGreaterThan(0)
   })
   it('② 反绕过自证：动态 import() / 静态 from / import type 三形态都被识别为宿主说明符', () => {
     expect(specsOf(stripComments(`import('@tauri-apps/plugin-dialog')`)).some(isHostSpec)).toBe(true)
@@ -455,13 +467,20 @@ describe('archGuard · 断言组 6：宿主能力单向门（@tauri-apps/* 只�
     // 注释形态不误报（去注释后消失）
     expect(specsOf(stripComments(`// import('@tauri-apps/plugin-process')`)).some(isHostSpec)).toBe(false)
   })
-  it('③ 门面导出面 == FACADE_EXPORTS（能力清单双向全等；新增能力须同步改表）', () => {
-    const src = read(HOST_FACADE)
+  it('③ 端口导出面 == PORT_EXPORTS（能力清单双向全等；转发器必须用 export function）', () => {
+    const src = read(PORT_FILE)
     const fnExports = [...src.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)].map((m) => m[1])
     const namedExports: string[] = [...src.matchAll(/export\s*\{([^}]*)\}/g)]
       .flatMap((m: RegExpMatchArray) => m[1].split(',').map((x: string) => x.trim().split(/\s+as\s+/).pop()!.trim()))
       .filter((name: string) => name.length > 0)
-    expect(sorted([...new Set([...fnExports, ...namedExports])])).toEqual(sorted(FACADE_EXPORTS))
+    expect(sorted([...new Set([...fnExports, ...namedExports])])).toEqual(sorted(PORT_EXPORTS))
+  })
+  it('④ 反回归：src/runtime/** 零 @tauri-apps（适配器不得搬回 runtime，否则逆边复活）', () => {
+    for (const f of walk('src/runtime')) {
+      for (const s of specsOf(stripComments(read(f)))) {
+        expect(isHostSpec(s), `${f} → ${s}（runtime 层不得接触宿主实现，宿主实现只许在 host-adapter）`).toBe(false)
+      }
+    }
   })
 })
 

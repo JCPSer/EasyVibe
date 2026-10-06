@@ -26,8 +26,9 @@ SCHEMA = os.environ.get('SCHEMA_PATH', os.path.join(REPO, 'easyvibe-map-schema-v
 sys.path.insert(0, os.path.join(REPO, 'scripts'))
 import map_policy  # noqa: E402
 
-# R4 关口 C：direction_violation 棘轮基线（只降不升）
-DV_BASELINE = 1
+# R4 关口 C：direction_violation 棘轮基线（只降不升）。c-arch-5 结构性消除后归零：
+# 宿主能力端口化使「order1/2 → app-entry」逆边在结构上不再需要，故生成期即拒绝任何 DV。
+DV_BASELINE = 0
 
 MODULE_KEYS = {'id', 'last_analyzed_at', 'name', 'layer', 'responsibility', 'files',
                'key_entries', 'dependencies', 'health', 'notes'}

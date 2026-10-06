@@ -13,7 +13,7 @@
   I3 server-api 归属 LOC 严格小于基线，且下降 >= 1000 行
   I4 架构 concerns 无 c-arch-1；server-api 模块 decay_flags 无 god_module
   I5 外提模块在册（easyvibe-git / easyvibe-pipeline 出现在图内；live 模式另查 emit_order.json）
-  I6 跨层 SCC == 0 且 direction_violation <= 1（复用 scripts/map_policy.py，与 finalize 同实现）
+  I6 跨层 SCC == 0 且 direction_violation == 0（c-arch-5 闭环后棘轮归零；复用 map_policy.py，与 finalize 同实现）
   I7 趋势双口径输出（地图自评分 + 巡检分来源说明）
 
 本文件不得出现任何受管契约名 / env 名（由 scripts/verify_assets.py --forbid-literals 自守卫）。
@@ -137,8 +137,8 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None):
     for g in crossed_scc_edges(m):
         problems.append("I6 跨层 SCC: %s" % g)
     dv = sum(1 for e in m.get("edges", []) if e.get("direction_violation"))
-    if dv > 1:
-        problems.append("I6 direction_violation %d > 1" % dv)
+    if dv > 0:
+        problems.append("I6 direction_violation %d > 0" % dv)
 
     report = {
         "server_api_files": len(files), "server_api_files_baseline": baseline["server_api_files"],

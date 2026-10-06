@@ -3,7 +3,7 @@
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
                          CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
-                         与 EXPECT_EDGES 同代：settings 域析出后的 20 模块 / 52 边快照）。
+                         与 EXPECT_EDGES 同代：c-arch-5 宿主能力端口化后的 21 模块 / 53 边快照）。
                          fixture 是**结构投影**：只保留本文件与 verify_arch_split 断言的字段
                          （模块 id/name/layer/files/dependencies/health 与 concern 的 id+severity、
                          边的 id/from/to/type/strength/DV），prose（review_note / concern 正文 /
@@ -18,7 +18,7 @@
   C. desktop-shell.dependencies == ["server-api","map-toolchain"]
   D. INV-1：所有模块 dependencies == 其出边目标集
   E. SCC(>1) == 0（Tarjan，同前端口径）
-  F. direction_violation 计数 <= 1（棘轮不增）
+  F. direction_violation 计数 == 0（c-arch-5 闭环后棘轮归零，任何新增逆边即红）
   G. 边数 == 期望（live 图默认 52；`--map <fixture>` 时**默认不绑定**——fixture 是历史
      快照，需断言时显式传 `--expect-edges <n>`）
   H. health.concerns 不含 c-arch-2（环已闭环）
@@ -33,8 +33,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 52
-DV_MAX = 1
+EXPECT_EDGES = 53
+DV_MAX = 0
 EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
 RETIRED_CONCERN = "c-arch-2"
 FIXTURE_DIR = os.path.join("scripts", "tests", "fixtures")
@@ -114,15 +114,20 @@ def run_check(root, path, expect_edges=EXPECT_EDGES, quiet=False):
 def selfcheck(root):
     results = []
     pre = json.load(open(os.path.join(root, FIXTURE_DIR, "map_pre_migration.json"), encoding="utf-8"))
-    post_path = os.path.join(root, FIXTURE_DIR, "map_post_migration.json")
-    post = json.load(open(post_path, encoding="utf-8"))
+    # H2 负例载体：c-arch-2 期的「删后态」快照（仍含受控 DV=1 的环结构），用来复现注入退役边
+    # 即红（策略 A + 跨层 SCC E）——它的 DV 不参与 H1 的绿例判定。
+    post = json.load(open(os.path.join(root, FIXTURE_DIR, "map_post_migration.json"), encoding="utf-8"))
+    # H1 绿例载体：**当前代**删后态快照（c-arch-5 后 DV=0）。DV_MAX 归零后，旧 c-arch-2 快照
+    # 自身携带 DV=1，已不再是合法的「全绿」样本，故绿例改用与 EXPECT_EDGES 同代的 map_post_split。
+    post_cur_path = os.path.join(root, FIXTURE_DIR, "map_post_split.json")
+    post_cur = json.load(open(post_cur_path, encoding="utf-8"))
 
     # fixture 自证不绑定 live 边数（EXPECT_EDGES 随地图生长而变，fixture 是历史快照）
     s0 = summarize(pre, check_map(pre, root, None, None))
     results.append(("H0 删前态 fixture → 必红", not s0["ok"], "; ".join(s0["problems"][:2])))
 
-    s1 = summarize(post, check_map(post, root, post_path, None))
-    results.append(("H1 删后态 fixture → 必绿", s1["ok"], "; ".join(s1["problems"][:2])))
+    s1 = summarize(post_cur, check_map(post_cur, root, post_cur_path, None))
+    results.append(("H1 当前代删后态 fixture（DV=0）→ 必绿", s1["ok"], "; ".join(s1["problems"][:2])))
 
     inj = json.loads(json.dumps(post))
     inj["edges"].append({"id": "e31", "from": "desktop-shell", "to": "console-ui",
