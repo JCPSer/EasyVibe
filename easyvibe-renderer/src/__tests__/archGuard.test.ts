@@ -55,7 +55,7 @@ const resolveRel = (fileRel: string, spec: string): string | null => {
 // ---------------- 文件集定义（与磁盘实况双向全等，见断言组 4） ----------------
 const RUNTIME_FILES = [
   'runtime/__tests__/terminalBuffer.test.ts',
-  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/motion.ts',
+  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/host.ts', 'runtime/motion.ts',
   'runtime/notify.ts', 'runtime/sessionQueue.ts', 'runtime/terminalBuffer.ts', 'runtime/toast.tsx',
   'runtime/useRepoActivity.ts', 'runtime/ws.ts',
 ]
@@ -301,6 +301,50 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
     expect(hits).toBe(3)
     // 注释中的 /api/ 与 fetch 不误报
     expect(directRestHits('src/api/core.ts')).toBeGreaterThan(0) // 唯一出口自身持有 fetch（在 src/api 内合法）
+  })
+})
+
+// ---------------- 断言组 6：宿主能力单向门（c-arch-3，R5/R6） ----------------
+//
+// 命题：「宿主能力收敛为 renderer-runtime 的一个门面，业务文件只经门面调用；archGuard 扩到 @tauri-apps/*」。
+//  ① 唯一白名单：@tauri-apps/* 说明符全库只许出现在门面 src/runtime/host.ts；
+//  ② 扫描面 walk('src') 全量（含 api/hooks/lib/各域），排除 __tests__（守卫文件自身含包名字面量）与门面；
+//  ③ 去注释后扫描（注释里的包名不误报）；静态 `from` 与动态 `import()` 双收（复用 SPEC_RE）；
+//  ④ 门面导出面快照：新增宿主能力必须同步改 FACADE_EXPORTS（双向全等，照 RUNTIME_FILES 范式）。
+// 注：FACADE_EXPORTS 同时是 R9「类型不外泄」的间接哨兵——业务文件若为类型再 import @tauri-apps/*，①直接拦下。
+const HOST_FACADE = 'src/runtime/host.ts'
+const isHostSpec = (s: string) => /^@tauri-apps\//.test(s)
+const isGuardFile = (f: string) => /__tests__\//.test(f)
+/** 指定源码文本中所有 import/export-from 说明符（复用 SPEC_RE，动态 import() 与静态 from 双收）。 */
+const specsOf = (src: string): string[] => [...src.matchAll(SPEC_RE)].map((m) => m[2])
+const FACADE_EXPORTS = [
+  'checkAndInstallUpdate', 'isTauriRuntime', 'notify', 'onBackendRecovered',
+  'pickDirectory', 'relaunchApp', 'startWindowDrag', 'toggleWindowMaximize',
+]
+
+describe('archGuard · 断言组 6：宿主能力单向门（@tauri-apps/* 只许出现在 runtime/host.ts）', () => {
+  it('① src/** 全量（排除 __tests__ 与门面）不得出现 @tauri-apps/* 说明符', () => {
+    for (const f of walk('src')) {
+      if (f === HOST_FACADE || isGuardFile(f)) continue
+      for (const s of specsOf(stripComments(read(f)))) {
+        expect(isHostSpec(s), `${f} → ${s}（宿主能力必须走 @/runtime/host 门面）`).toBe(false)
+      }
+    }
+  })
+  it('② 反绕过自证：动态 import() / 静态 from / import type 三形态都被识别为宿主说明符', () => {
+    expect(specsOf(stripComments(`import('@tauri-apps/plugin-dialog')`)).some(isHostSpec)).toBe(true)
+    expect(specsOf(`import { x } from '@tauri-apps/api/window'`).some(isHostSpec)).toBe(true)
+    expect(specsOf(`import type { X } from '@tauri-apps/api/event'`).some(isHostSpec)).toBe(true)
+    // 注释形态不误报（去注释后消失）
+    expect(specsOf(stripComments(`// import('@tauri-apps/plugin-process')`)).some(isHostSpec)).toBe(false)
+  })
+  it('③ 门面导出面 == FACADE_EXPORTS（能力清单双向全等；新增能力须同步改表）', () => {
+    const src = read(HOST_FACADE)
+    const fnExports = [...src.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)].map((m) => m[1])
+    const namedExports: string[] = [...src.matchAll(/export\s*\{([^}]*)\}/g)]
+      .flatMap((m: RegExpMatchArray) => m[1].split(',').map((x: string) => x.trim().split(/\s+as\s+/).pop()!.trim()))
+      .filter((name: string) => name.length > 0)
+    expect(sorted([...new Set([...fnExports, ...namedExports])])).toEqual(sorted(FACADE_EXPORTS))
   })
 })
 

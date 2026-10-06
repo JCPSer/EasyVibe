@@ -3,23 +3,12 @@
 //   · 会话失败（归纳/巡检/任务执行挂了，用户可能正盯着别的窗口）
 //   · 排队任务轮到执行（用户离开等排队时最需要）
 // 权限：首次调用请求一次；浏览器/插件缺失时静默降级为无操作。
+//
+// 实现已收敛进宿主门面 @/runtime/host（唯一接触 tauri 包处）；本文件保留 sysNotify 语义入口，
+// 调用方（runtime/ws.ts、hooks/useSystemNotifications.ts）零改动。
 
-import { isTauriRuntime } from '@/runtime/env'
-
-let asked = false
+import { notify } from '@/runtime/host'
 
 export async function sysNotify(title: string, body: string) {
-  if (!isTauriRuntime()) return
-  try {
-    const m = await import('@tauri-apps/plugin-notification')
-    if (!asked) {
-      asked = true
-      if (!(await m.isPermissionGranted())) await m.requestPermission()
-    }
-    if (await m.isPermissionGranted()) {
-      await m.sendNotification({ title, body })
-    }
-  } catch {
-    // 插件缺失/权限拒绝——系统通知不可用时静默（界面内 toast 仍是底线）
-  }
+  return notify(title, body)
 }

@@ -4,6 +4,7 @@ import { toast } from '@/runtime/toast'
 import { listRepos, addRepo as addRepoApi, removeRepo as removeRepoApi, repoMap } from '@/api/repos'
 import { health } from '@/api/system'
 import { fetchStatic } from '@/api/core'
+import { isTauriRuntime, pickDirectory } from '@/runtime/host'
 
 export type Repo = { id: string; name: string }
 
@@ -96,10 +97,8 @@ export function useBackendConnection() {
   const addRepo = useCallback(async (): Promise<boolean> => {
     let path: string | null = null
     try {
-      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-        const { open } = await import('@tauri-apps/plugin-dialog')
-        const sel = await open({ directory: true, title: '选择本地仓库目录' })
-        path = typeof sel === 'string' ? sel : null
+      if (isTauriRuntime()) {
+        path = await pickDirectory({ title: '选择本地仓库目录' })
       } else {
         path = window.prompt('输入本地仓库目录的绝对路径')
       }

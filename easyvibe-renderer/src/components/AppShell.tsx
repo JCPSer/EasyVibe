@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { TrafficLightsSpacer, FakeTrafficLights } from '@/components/WindowControls'
-import { isTauriRuntime } from '@/runtime/env'
+import { startWindowDrag, toggleWindowMaximize } from '@/runtime/host'
 import {
   GitBranch,
   Map as MapIcon,
@@ -109,13 +109,11 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, top
         onMouseDown={(e) => {
           if (e.button !== 0) return
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
-          if (!isTauriRuntime()) return
-          import('@tauri-apps/api/window').then((m) => m.getCurrentWindow().startDragging()).catch(() => {})
+          startWindowDrag()
         }}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [data-no-drag]')) return
-          if (!isTauriRuntime()) return
-          import('@tauri-apps/api/window').then((m) => m.getCurrentWindow().toggleMaximize()).catch(() => {})
+          toggleWindowMaximize()
         }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">

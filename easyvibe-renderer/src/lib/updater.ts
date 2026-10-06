@@ -3,6 +3,7 @@
 // 检查节奏：启动 5s 后首检 + 每小时轮询；并发检查 single-flight 合并（防重）。
 // 插件模块动态 import——浏览器构建不会触碰 Tauri 专属代码。
 import { toast } from '@/runtime/toast'
+import { checkAndInstallUpdate, isTauriRuntime, relaunchApp } from '@/runtime/host'
 
 let inFlight: Promise<void> | null = null
 let started = false
@@ -10,7 +11,7 @@ let started = false
 export function initUpdater(): void {
   if (started) return
   started = true
-  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return
+  if (!isTauriRuntime()) return
   setTimeout(() => void checkOnce(), 5000)
   setInterval(() => void checkOnce(), 3_600_000)
 }
@@ -25,18 +26,11 @@ function checkOnce(): Promise<void> {
 
 async function doCheck(): Promise<void> {
   try {
-    const { check } = await import('@tauri-apps/plugin-updater')
-    const update = await check()
-    if (!update) return
-    await update.downloadAndInstall()
-    toast(`新版本 ${update.version} 已就绪`, 'info', {
+    const ready = await checkAndInstallUpdate()
+    if (!ready) return
+    toast(`新版本 ${ready.version} 已就绪`, 'info', {
       label: '重启更新',
-      onClick: () => {
-        void (async () => {
-          const { relaunch } = await import('@tauri-apps/plugin-process')
-          await relaunch()
-        })()
-      },
+      onClick: () => void relaunchApp(),
     })
   } catch {
     // 更新检查失败（离线/ manifest 未发布）不打断使用——下次轮询再试

@@ -16,7 +16,7 @@ import { SuggestDrawer } from '@/components/overlays/SuggestDrawer'
 import { WelcomeOverlay } from '@/components/overlays/WelcomeOverlay'
 import { TaskDraftOverlay } from '@/components/overlays/TaskDraftOverlay'
 import type { TaskDraft } from '@/shared/logic/taskContext'
-import { isTauriRuntime } from '@/runtime/env'
+import { onBackendRecovered } from '@/runtime/host'
 import { downloadHealthReport } from '@/lib/healthReport'
 import { initUpdater } from '@/lib/updater'
 import { connectWs } from '@/runtime/ws'
@@ -98,17 +98,14 @@ export default function App() {
 
   // 2026-10-05 白屏自愈：后端运行期死亡时壳会自重启并广播 backend-recovered——
   // 届时 webview 已空白，唯一能做的就是整页重载（React 状态丢失可接受，数据都在后端）
+  // 宿主能力经 @/runtime/host 门面订阅；非 Tauri 环境门面内建 no-op（无需再判环境）。
   useEffect(() => {
-    if (!isTauriRuntime()) return
     let unlisten: (() => void) | undefined
     let cancelled = false
-    import('@tauri-apps/api/event')
-      .then((m) => m.listen('backend-recovered', () => window.location.reload()))
-      .then((fn) => {
-        if (cancelled) fn()
-        else unlisten = fn
-      })
-      .catch(() => {})
+    onBackendRecovered(() => window.location.reload()).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
     return () => {
       cancelled = true
       unlisten?.()
