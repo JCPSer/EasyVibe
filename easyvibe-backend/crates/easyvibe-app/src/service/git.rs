@@ -41,6 +41,22 @@ async fn find_repo(st: &AppState, id: &str) -> Result<Repo, ApiError> {
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))
 }
 
+/// git 写操作（提交/pull 改本地历史）后重估保鲜并推送 freshness.changed——
+/// 否则头部"落后提示"要等 30 分钟定时器才刷新（2026-10-06 实弹：软件内提交后
+/// 主页无提示，漂移洞察自己刷新所以看得见——两个视图不同步）。
+/// 与归纳/巡检终态的即时重估同一口径（service/map.rs）。
+async fn refresh_freshness(st: &AppState, repo: &Repo) {
+    if let Ok(snap) = st.map_service.load_map(repo).await {
+        let f = easyvibe_map::freshness::assess(&repo.root, &snap.json);
+        easyvibe_event_bus::publish(&st.event_bus, easyvibe_event_bus::BusEvent::Freshness {
+            repo: repo.id.clone(),
+            status: f.status.as_str().to_string(),
+            latest_commit_at: f.latest_commit_at,
+            commits_since_map: f.commits_since_map,
+        });
+    }
+}
+
 pub(crate) async fn git_status(st: &AppState, id: &str) -> Result<Value, ApiError> {
     let repo = find_repo(st, id).await?;
     to_value(easyvibe_git::status(&repo.root).await?)
@@ -58,12 +74,16 @@ pub(crate) async fn git_commit_detail(st: &AppState, id: &str, hash: &str) -> Re
 
 pub(crate) async fn git_commit(st: &AppState, id: &str, message: &str) -> Result<CommitResult, ApiError> {
     let repo = find_repo(st, id).await?;
-    Ok(CommitResult { short_hash: easyvibe_git::commit_all(&repo.root, message).await? })
+    let short_hash = easyvibe_git::commit_all(&repo.root, message).await?;
+    refresh_freshness(st, &repo).await;
+    Ok(CommitResult { short_hash })
 }
 
 pub(crate) async fn git_pull(st: &AppState, id: &str) -> Result<(), ApiError> {
     let repo = find_repo(st, id).await?;
-    easyvibe_git::pull(&repo.root).await
+    easyvibe_git::pull(&repo.root).await?;
+    refresh_freshness(st, &repo).await;
+    Ok(())
 }
 
 pub(crate) async fn git_push(st: &AppState, id: &str) -> Result<(), ApiError> {
