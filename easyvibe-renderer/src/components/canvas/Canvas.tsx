@@ -5,9 +5,9 @@ import { AlertTriangle, Focus, GitBranch, PanelRightOpen, RefreshCw, WifiOff } f
 
 import type { CodeMap, SubMap } from '@/types/map'
 import { healthColor } from '@/shared/logic/layout'
-import { DetailPanel } from '@/components/DetailPanel'
+import { DetailPanel } from './DetailPanel'
 import type { Selection } from '@/shared/contract/selection'
-import { TaskFormPanel } from '@/components/TaskFormPanel'
+import { TaskFormPanel } from './TaskFormPanel'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import { onFreshnessEvent, onSessionEvent } from '@/runtime/growthBus'
 import { nodeTypes } from './nodeTypes'

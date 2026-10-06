@@ -8,7 +8,10 @@
 //! 搬迁自 `routes/map.rs`，**零语义改动**。`crate::service::<fn>` 对外路径经 re-export 保持全等。
 
 pub(crate) mod chat;
+pub(crate) mod git;
 pub(crate) mod map;
+pub(crate) mod reinduce;
+pub(crate) mod repo;
 pub(crate) mod task;
 
 // chat/task 编排的既有 `crate::service::<fn>` 调用路径经 re-export 保持全等；

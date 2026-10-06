@@ -435,7 +435,9 @@ dependencies = [
  "easyvibe-common",
  "easyvibe-db",
  "easyvibe-event-bus",
+ "easyvibe-git",
  "easyvibe-map",
+ "easyvibe-pipeline",
  "easyvibe-session",
  "getrandom 0.2.17",
  "include_dir",
@@ -487,6 +489,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "easyvibe-git"
+version = "0.1.0"
+dependencies = [
+ "easyvibe-common",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "easyvibe-map"
 version = "0.1.0"
 dependencies = [
@@ -494,6 +506,18 @@ dependencies = [
  "easyvibe-common",
  "serde",
  "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "easyvibe-pipeline"
+version = "0.1.0"
+dependencies = [
+ "easyvibe-api-types",
+ "easyvibe-event-bus",
+ "easyvibe-map",
+ "easyvibe-session",
  "tokio",
  "tracing",
 ]

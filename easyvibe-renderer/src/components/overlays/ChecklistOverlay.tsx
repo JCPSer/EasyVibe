@@ -1,4 +1,4 @@
-import { OnboardingChecklist } from '@/components/OnboardingChecklist'
+import { OnboardingChecklist } from './OnboardingChecklist'
 import type { loadOnboarding } from '@/lib/onboarding'
 
 type OnboardingState = ReturnType<typeof loadOnboarding>

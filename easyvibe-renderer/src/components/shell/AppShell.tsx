@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { TrafficLightsSpacer, FakeTrafficLights } from '@/components/WindowControls'
+import { TrafficLightsSpacer, FakeTrafficLights } from './WindowControls'
 import { startWindowDrag, toggleWindowMaximize } from '@/runtime/host'
 import {
   GitBranch,

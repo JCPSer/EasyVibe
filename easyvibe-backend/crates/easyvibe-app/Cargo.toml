@@ -20,6 +20,9 @@ easyvibe-db.workspace = true
 easyvibe-ai-agent.workspace = true
 # 解环：事件出口与运行会话队列状态机（server-api 与 task-engine 各自单向依赖）
 easyvibe-event-bus.workspace = true
+# c-arch-1：外提的领域模块（git 工作树 / watcher 管线）
+easyvibe-git.workspace = true
+easyvibe-pipeline.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 tokio.workspace = true

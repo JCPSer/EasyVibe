@@ -1,0 +1,12 @@
+[package]
+name = "easyvibe-pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+easyvibe-api-types.workspace = true
+easyvibe-event-bus.workspace = true
+easyvibe-map.workspace = true
+easyvibe-session.workspace = true
+tokio.workspace = true
+tracing.workspace = true

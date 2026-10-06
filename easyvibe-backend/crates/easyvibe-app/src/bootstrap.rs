@@ -4,9 +4,9 @@ use crate::assets::{self, embedded_ui_available, resolve_text_asset};
 use crate::router::build_router;
 use crate::routes::map::start_patrol;
 use crate::state::{data_dir, read_desktop_repos, resolve_agent_command, session_kind_from_label, AppState, LlmMode};
-use crate::pipeline::spawn_repo_pipeline;
+use crate::task_exec;
 use easyvibe_db::{SettingsRepository as _, TaskRepository as _};
-use crate::{freshness, task_exec};
+use easyvibe_map::freshness;
 use easyvibe_api_types::SessionStatusChanged;
 use easyvibe_event_bus::queue::QueueState;
 use easyvibe_event_bus::{publish, BusEvent};
@@ -103,8 +103,7 @@ pub(crate) async fn run() {
     // 每个仓库一个地图 watcher，变更翻译为总线事件
     // D5：抽成 spawn_repo_pipeline——启动挂载与 POST /api/repos 动态注册共用同一条管线
     for r in repos {
-        tokio::spawn(spawn_repo_pipeline(
-            r,
+        crate::service::repo::spawn_pipeline(
             map_service.clone(),
             event_bus.clone(),
             session_manager.clone(),
@@ -112,7 +111,9 @@ pub(crate) async fn run() {
             agent_command.clone(),
             agent_args.clone(),
             harness.clone(),
-        ));
+            r,
+        )
+        .await;
     }
 
     // M2-4：域 2 SQLite + 巡检槽位

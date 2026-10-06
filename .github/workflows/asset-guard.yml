@@ -41,9 +41,33 @@ jobs:
       - name: 壳边界守卫自检（反例必红自证）
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
-      # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture
+      # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
+      # fixture 必须与 EXPECT_EDGES 同代（c-arch-1 拆分后的当前快照 = map_post_split.json，16 模块 / 38 边）；
+      # 旧快照 map_post_migration.json（14 模块 / 31 边）仅由 --selfcheck 的 H0/H1 负例自证使用。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_migration.json
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
+
+      # c-arch-1 边界/领域分离验收：同样不依赖被 gitignore 的 live map
+      - name: 边界/领域分离验收（对受版本控制 fixture + 源码文件集）
+        run: python3 scripts/verify_arch_split.py --map scripts/tests/fixtures/map_post_split.json
+
+      - name: 边界/领域分离守卫自检（负例必红）
+        run: python3 scripts/verify_arch_split.py --selfcheck
+
+      # c-arch-3 组件归属守卫：本仓 CI 不跑 vitest（见本文件头部定位），故归属规则另落一条
+      # 纯 python3 判据（FS 层），与本地 archGuard 断言组 7 同源，把「约定」升级为 CI 可见「测试」。
+      - name: 组件归属守卫（components 根目录无 *.tsx + 四落点到位）
+        run: python3 scripts/check_components_ownership.py --check
+
+      - name: 组件归属守卫自检（反例必红）
+        run: python3 scripts/check_components_ownership.py --selfcheck
+
+      # c-arch-3 收口验收：同样不依赖被 gitignore 的 live map（对受版本控制 fixture）
+      - name: 组件归属收口验收（对受版本控制 fixture）
+        run: python3 scripts/verify_components_ownership.py --map scripts/tests/fixtures/map_post_ownership.json
+
+      - name: 组件归属收口守卫自检（负例必红）
+        run: python3 scripts/verify_components_ownership.py --selfcheck

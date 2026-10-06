@@ -1,0 +1,24 @@
+{
+  "_comment": "c-arch-1 拆分前基线（脚本口径：app crate 产品文件 − tests/ − task_exec*；用于 verify_arch_split.py 的趋势断言）",
+  "server_api_files": 33,
+  "server_api_loc": 7467,
+  "modules": 14,
+  "edges": 31,
+  "coverage_ratio": 1.0,
+  "arch_concerns": [
+    "c-arch-1",
+    "c-arch-3"
+  ],
+  "server_api_decay_flags": [
+    "god_module",
+    "coupling_high"
+  ],
+  "domain_files_present": [
+    "git.rs",
+    "freshness.rs",
+    "reinduce.rs",
+    "pipeline.rs",
+    "map_concerns.rs"
+  ],
+  "extracted_modules": []
+}

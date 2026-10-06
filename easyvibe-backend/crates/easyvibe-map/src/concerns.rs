@@ -7,15 +7,15 @@
 
 /// 问题项快照条目（巡检新旧对照的旧侧）
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OldConcern {
-    pub(crate) scope: &'static str, // "arch" | "module"
-    pub(crate) module: Option<String>,
-    pub(crate) id: Option<String>,
-    pub(crate) finding: String,
+pub struct OldConcern {
+    pub scope: &'static str, // "arch" | "module"
+    pub module: Option<String>,
+    pub id: Option<String>,
+    pub finding: String,
 }
 
 /// 从地图 JSON 提取全部 concerns（架构级 + 各模块级）——巡检开始前快照用。
-pub(crate) fn extract_concerns(map: &serde_json::Value) -> Vec<OldConcern> {
+pub fn extract_concerns(map: &serde_json::Value) -> Vec<OldConcern> {
     let mut out = Vec::new();
     let mut push = |scope: &'static str, module: Option<String>, c: &serde_json::Value| {
         out.push(OldConcern {
@@ -78,7 +78,7 @@ fn match_concerns(old: &[OldConcern], new: &[OldConcern]) -> (Vec<bool>, Vec<boo
 /// 巡检新旧对照（纯函数；测试全覆盖）：fixed = 旧有今无 / new = 旧无今有 /
 /// persisted = 两边都有。仍孤立的旧项计 fixed——但其模块已从新图消失的计
 /// moduleGone（评审#S3：模块没了 ≠ 修好了）。
-pub(crate) fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> serde_json::Value {
+pub fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> serde_json::Value {
     let new = extract_concerns(new_map);
     let (used_old, used_new) = match_concerns(old, &new);
 
@@ -114,7 +114,7 @@ pub(crate) fn diff_concerns(old: &[OldConcern], new_map: &serde_json::Value) -> 
 /// id 兜底注入：巡检成功后由后端不靠 LLM 保证 id 稳定——已有 id 不动；
 /// 缺 id 的（持续项或新增项）在该 scope 顺延最大编号分配。
 /// 返回变动数（>0 时调用方应把 map 原子写回）——当轮注入后下轮对照即可信。
-pub(crate) fn assign_concern_ids(old: &[OldConcern], map: &mut serde_json::Value) -> usize {
+pub fn assign_concern_ids(old: &[OldConcern], map: &mut serde_json::Value) -> usize {
     // 与 extract_concerns 完全同序提取新侧，并记录可写位置（JSON pointer 段）
     enum Slot {
         Arch(usize),

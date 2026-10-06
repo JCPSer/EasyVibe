@@ -99,13 +99,21 @@ const DOMAIN_ABS: Record<string, string[]> = {
 const RUNTIME_ABS = RUNTIME_FILES.map((f) => `src/${f}`)
 const SHARED_ABS = SHARED_FILES.map((f) => `src/${f}`)
 
-// map-canvas 文件集（方案 §3.3）：canvas/** + 7 个顶层（节点 4 + DetailPanel/IssuesList/TaskFormPanel）
-const MAP_CANVAS_FILES = [
-  ...walk('src/components/canvas'),
-  'src/components/ModuleNode.tsx', 'src/components/BandNode.tsx', 'src/components/SubmoduleNode.tsx',
-  'src/components/ExpandedModuleNode.tsx', 'src/components/DetailPanel.tsx',
-  'src/components/IssuesList.tsx', 'src/components/TaskFormPanel.tsx',
-]
+// map-canvas 文件集（c-arch-3 组件归属规则化后）：全部落 `components/canvas/**`，
+// 原 7 条顶层内联路径（4 节点 + DetailPanel/IssuesList/TaskFormPanel）已迁入，由 walk 自动收录。
+const MAP_CANVAS_FILES = walk('src/components/canvas')
+
+// 装配点集合（console-ui）：pages/**（含 routes.tsx）+ App.tsx 之外的业务文件须单向依赖。
+const PAGES_ABS = walk('src/pages')
+
+// map-canvas → chat-ui 白名单判定（c-arch-3 搬迁后抽为纯函数 + 反绕过自证，见断言组 2 ④）。
+// DetailPanel 迁址 `components/DetailPanel.tsx` → `components/canvas/DetailPanel.tsx` 后，
+// 旧字面量判定会静默失效（放行非法边或误报），故以路径后缀 + 相对形态双判。
+const isAllowedCanvasToChatEdge = (file: string, spec: string): boolean => {
+  const isDetailPanel = file.endsWith('components/canvas/DetailPanel.tsx')
+  const toPanelChat = spec === '@/components/chat/PanelChat' || /(?:\.\.\/)+chat\/PanelChat$/.test(spec)
+  return isDetailPanel && toPanelChat
+}
 
 describe('archGuard · 断言组 1：leaf（runtime / shared 不得依赖业务层）', () => {
   it('src/runtime/** 只许 types/react/外部库（禁 components/pages/hooks/shared/lib/App）', () => {
@@ -129,8 +137,10 @@ describe('archGuard · 断言组 1：leaf（runtime / shared 不得依赖业务�
 })
 
 describe('archGuard · 断言组 2：环回归（打回意见 c-arch-1）', () => {
-  it('chat-ui ⊥ map-canvas：chat/** 不得 import map-canvas（DetailPanel/IssuesList/canvas/节点）', () => {
-    const re = /^(?:@\/components\/(?:DetailPanel|IssuesList|canvas\/|ModuleNode|BandNode|SubmoduleNode|ExpandedModuleNode)|easyvibe-renderer\/src\/components\/(?:DetailPanel|IssuesList|canvas\/|ModuleNode|BandNode|SubmoduleNode|ExpandedModuleNode))/
+  it('chat-ui ⊥ map-canvas：chat/** 不得 import map-canvas（canvas/ 全域）', () => {
+    // 搬迁后 map-canvas 件全部落 `@/components/canvas/**` / `easyvibe-renderer/src/components/canvas/**`，
+    // 旧正则里的裸文件名分支（DetailPanel|ModuleNode…)已失效，收窄为唯一真实落点（ΔS3）。
+    const re = /^(?:@\/components\/canvas\/|easyvibe-renderer\/src\/components\/canvas\/)/
     for (const f of DOMAIN_ABS.chat) {
       for (const s of specs(f)) {
         const r = resolveRel(f, s) ?? s
@@ -162,17 +172,26 @@ describe('archGuard · 断言组 2：环回归（打回意见 c-arch-1）', () =
       for (const s of specs(f)) {
         const r = resolveRel(f, s) ?? s
         if (!re.test(s) && !re.test(r)) continue
-        const allowed = f === 'src/components/DetailPanel.tsx' && s === '@/components/chat/PanelChat'
-        expect(allowed, `${f} → ${s}（非白名单的 map-canvas→chat 边）`).toBe(true)
+        expect(isAllowedCanvasToChatEdge(f, s), `${f} → ${s}（非白名单的 map-canvas→chat 边）`).toBe(true)
       }
     }
+  })
+  it('④′ 反绕过自证：白名单判定随迁（canvas/DetailPanel→PanelChat 放行，画布其他件仍拦截）', () => {
+    expect(isAllowedCanvasToChatEdge('src/components/canvas/DetailPanel.tsx', '@/components/chat/PanelChat')).toBe(true)
+    expect(isAllowedCanvasToChatEdge('src/components/canvas/DetailPanel.tsx', '../chat/PanelChat')).toBe(true)
+    expect(isAllowedCanvasToChatEdge('src/components/canvas/Canvas.tsx', '@/components/chat/PanelChat')).toBe(false)
+    expect(isAllowedCanvasToChatEdge('src/pages/GitPage.tsx', '@/components/chat/PanelChat')).toBe(false)
   })
 })
 
 describe('archGuard · 断言组 3：装配方向（域 → 装配点 禁止，装配点 → 域 放行）', () => {
   it('域文件不得反向 import App / pages/routes', () => {
     const re = /^(?:@\/(?:App|pages\/routes)|easyvibe-renderer\/src\/(?:App|pages\/routes))(?:$|\.|')/
-    const all = [...RUNTIME_ABS, ...SHARED_ABS, ...Object.values(DOMAIN_ABS).flat(), ...MAP_CANVAS_FILES]
+    // + PAGES_ABS：整页落 `src/pages/**` 后同样不得反向 import App / routes（c-arch-3 R5-B）。
+    const all = [
+      ...RUNTIME_ABS, ...SHARED_ABS, ...Object.values(DOMAIN_ABS).flat(),
+      ...MAP_CANVAS_FILES, ...PAGES_ABS,
+    ]
     for (const f of all) {
       for (const s of specs(f)) {
         const r = resolveRel(f, s) ?? s
@@ -357,5 +376,35 @@ describe('⑤ 产物副本一致性守卫（源↔副本 sha256 + 名录字面�
     // execFileSync 在非零退出时抛错，即测试失败（fail-closed）
     const out = execFileSync('python3', [script, '--check'], { encoding: 'utf-8' })
     expect(out).toContain('全部通过')
+  })
+})
+
+// ---------------- 断言组 7：组件归属锚点（c-arch-3） ----------------
+//
+// 组件归属规则（可判定，按序首个命中即定；与 scripts/check_components_ownership.py 同源）：
+//   ① 路由可达整页（PageId 装配表引用）      → src/pages/
+//   ② 消费图数据 / ReactFlow 的画布件         → src/components/canvas/
+//   ③ 浮层内容、全局浮标（无路由）            → src/components/overlays/
+//   ④ 装配壳 chrome（页头/窗控/主题/装配壳）  → src/components/shell/
+//   ⑤ 其余可复用业务组件                      → src/components/<既有域>/
+//   ⑥ 禁止：src/components/ 根目录存在任何 *.tsx（及任何文件）——本断言组固化
+//
+// 变更流程：新增组件若不满足 ①–⑤ 任一条 → 先提规则修订（改守卫 + 改规则），再落文件。
+const collectRootTsx = (entries: string[]): string[] => entries.filter((f) => f.endsWith('.tsx'))
+const rootEntries = (): Array<{ name: string; isFile: () => boolean }> =>
+  readdirSync(resolve(cwd, 'src/components'), { withFileTypes: true })
+
+describe('archGuard · 断言组 7：组件归属锚点（components/ 根目录不得存在 *.tsx）', () => {
+  it('7.1 src/components/ 根目录 *.tsx 集合为空（归属规则从约定升级为测试）', () => {
+    const tsx = rootEntries().filter((e) => e.isFile() && e.name.endsWith('.tsx')).map((e) => e.name)
+    expect(sorted(tsx)).toEqual([])
+  })
+  it('7.2 更强形态：根目录不得存在任何文件（只允许目录，防 .ts/.css/.json 换皮逃逸）', () => {
+    const files = rootEntries().filter((e) => e.isFile()).map((e) => e.name)
+    expect(sorted(files)).toEqual([])
+  })
+  it('7.3 反绕过自证：扫描器能识别根级组件（含大小写/扩展名变体），断言非空洞', () => {
+    expect(collectRootTsx(['Foo.tsx', 'Bar.ts', 'Baz.tsx.bak', 'canvas'])).toEqual(['Foo.tsx'])
+    expect(collectRootTsx([])).toEqual([])
   })
 })

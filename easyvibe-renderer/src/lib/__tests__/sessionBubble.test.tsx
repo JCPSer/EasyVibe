@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { SessionBubble } from '@/components/SessionBubble'
+import { SessionBubble } from '@/components/overlays/SessionBubble'
 import { formatElapsed, isEmptyState, kindFromLabel } from '@/runtime/sessionQueue'
 
 // SessionBubble 纯逻辑：时长计算 / 图标类型推断 / 空态渲染

@@ -1,0 +1,812 @@
+{
+  "version": "1.0",
+  "meta": {
+    "repo": "EasyVibe",
+    "generated_at": "2026-10-06T13:21:49+08:00",
+    "stats": {
+      "files_total": 351,
+      "files_covered": 351,
+      "coverage_ratio": 1.0,
+      "edges_derived": 38
+    }
+  },
+  "layers": [
+    {
+      "id": "app-entry",
+      "name": "应用装配层",
+      "order": 0,
+      "description": "桌面壳进程装配：托管后端 sidecar 与静态界面，管理窗口、单实例与自更新生命周期"
+    },
+    {
+      "id": "presentation",
+      "name": "交互呈现层",
+      "order": 1,
+      "description": "React 地图界面：画布可视化、对话与任务工作台、装配壳与设置分区"
+    },
+    {
+      "id": "presentation-support",
+      "name": "呈现支撑层",
+      "order": 2,
+      "description": "渲染进程地基：宿主能力门面、WS/事件总线、REST 传输层、设计基元与跨域纯逻辑"
+    },
+    {
+      "id": "application",
+      "name": "应用服务层",
+      "order": 3,
+      "description": "axum REST/WS 边界、应用服务编排、启动装配与任务阶段状态机，对外提供产品能力"
+    },
+    {
+      "id": "application-support",
+      "name": "应用支撑层",
+      "order": 4,
+      "description": "application 层共享的事件出口与会话队列状态机，结构性切断服务层与任务引擎的环"
+    },
+    {
+      "id": "domain",
+      "name": "领域能力层",
+      "order": 5,
+      "description": "地图归纳/保鲜/增量合成与 agent 会话运行时两大领域能力"
+    },
+    {
+      "id": "data",
+      "name": "数据持久层",
+      "order": 6,
+      "description": "SQLite 迁移与按聚合域拆分的仓储，为地图/任务/会话/审批/设置提供状态持久化"
+    },
+    {
+      "id": "foundation",
+      "name": "基础契约层",
+      "order": 7,
+      "description": "零内部依赖的基础件：错误与密钥原语、事件名常量、REST/WS 契约类型"
+    },
+    {
+      "id": "tooling",
+      "name": "工具链层",
+      "order": 8,
+      "description": "地图归纳 CLI 参考实现与受管资产生成/校验脚本，只服务开发与打包，不进产品运行时"
+    }
+  ],
+  "modules": [
+    {
+      "id": "map-toolchain",
+      "name": "地图工具链",
+      "layer": "tooling",
+      "files": [
+        "run/**",
+        "scripts/**"
+      ],
+      "dependencies": [],
+      "health": {
+        "score": 78,
+        "coupling": "low",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
+      "id": "contract-foundation",
+      "name": "基础契约",
+      "layer": "foundation",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-common/**",
+        "easyvibe-backend/crates/easyvibe-api-types/**"
+      ],
+      "dependencies": [],
+      "health": {
+        "score": 90,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
+      "id": "persistence",
+      "name": "数据持久层",
+      "layer": "data",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-db/**"
+      ],
+      "dependencies": [
+        "contract-foundation"
+      ],
+      "health": {
+        "score": 83,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-persistence-1",
+            "severity": "high",
+            "finding": "migrations 目录 16 个 SQL 脚本只增不改，没有任何 down 迁移或迁移后表结构快照断言，开发期手改 schema 与迁移漂移不会被测试发现",
+            "suggestion": "补一条“空库 → 全量迁移 → 断言表结构快照”的测试，并让迁移文件在校验脚本里做 sha 记账，防止已发布迁移被就地修改"
+          }
+        ]
+      }
+    },
+    {
+      "id": "map-domain",
+      "name": "地图领域",
+      "layer": "domain",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-map/**"
+      ],
+      "dependencies": [
+        "contract-foundation"
+      ],
+      "health": {
+        "score": 85,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-map-domain-1",
+            "severity": "high",
+            "finding": "synthesis.rs 557 行同时承担 files glob 归属引擎、增量 patch 解析、地图合成、确定性校验与 candidate 原子落盘五项职责，且被 server-api 与 task-engine 两侧消费",
+            "suggestion": "把 patch 解析与 candidate 落盘拆成独立文件，合成只保留纯变换函数，使“归属/解析/合成/落盘”每一环都能各自单测"
+          }
+        ]
+      }
+    },
+    {
+      "id": "agent-runtime",
+      "name": "Agent 运行时",
+      "layer": "domain",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-ai-agent/**",
+        "easyvibe-backend/crates/easyvibe-session/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain"
+      ],
+      "health": {
+        "score": 79,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-agent-runtime-1",
+            "severity": "high",
+            "finding": "pty.rs 的 select 竞速（超时 / kill / 进程退出 / stdout 排空）是并发缺陷高发区，280 行里没有可注入时钟，长稳与超时路径只能靠集成测试碰运气，近 3 个月该目录 46 次改动",
+            "suggestion": "把超时与 kill 决策抽成可注入时钟的纯状态机（输入：已过时长/事件，输出：动作），pty.rs 只保留 IO 编排，超时竞速即可穷举测试"
+          }
+        ]
+      }
+    },
+    {
+      "id": "event-bus",
+      "name": "事件总线与会话队列",
+      "layer": "application-support",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-event-bus/**"
+      ],
+      "dependencies": [
+        "contract-foundation"
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
+      "id": "task-engine",
+      "name": "任务引擎",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ],
+      "health": {
+        "score": 75,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [
+          "coupling_high"
+        ],
+        "concerns": [
+          {
+            "id": "c-task-engine-1",
+            "severity": "high",
+            "finding": "decide/remediate/rewind 三个状态迁移方法都直接写在 async 上下文里读库写库，迁移合法性只能靠集成测试间接覆盖，非法迁移（如 failed 上重开）没有编译期或单元级约束",
+            "suggestion": "把阶段迁移抽成不依赖 IO 的纯函数 `transition(status, gate, action) -> Result<NextState>`，async 外壳只负责落库与发事件，迁移表即可穷举断言"
+          }
+        ]
+      }
+    },
+    {
+      "id": "server-api",
+      "name": "应用服务层",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/Cargo.toml",
+        "easyvibe-backend/crates/easyvibe-app/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus",
+        "task-engine",
+        "map-toolchain",
+        "easyvibe-git",
+        "easyvibe-pipeline"
+      ],
+      "health": {
+        "score": 82,
+        "coupling": "high",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [
+          "coupling_high"
+        ],
+        "concerns": []
+      }
+    },
+    {
+      "id": "renderer-core",
+      "name": "渲染进程地基",
+      "layer": "presentation-support",
+      "files": [
+        "easyvibe-renderer/src/runtime/**",
+        "easyvibe-renderer/src/api/**",
+        "easyvibe-renderer/src/shared/**",
+        "easyvibe-renderer/src/types/**",
+        "easyvibe-renderer/src/components/ui/**",
+        "easyvibe-renderer/src/lib/utils.ts",
+        "easyvibe-renderer/src/hooks/use-mobile.ts",
+        "easyvibe-renderer/scripts/**"
+      ],
+      "dependencies": [
+        "server-api",
+        "desktop-shell"
+      ],
+      "health": {
+        "score": 76,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "medium",
+        "decay_flags": [
+          "god_module"
+        ],
+        "concerns": [
+          {
+            "id": "c-renderer-core-1",
+            "severity": "high",
+            "finding": "模块把 53 个 shadcn 生成式设计基元与自有的运行时/传输/纯逻辑混在一条 files glob 里，文件集快照测试（archGuard 断言组 4）也随之变成一个 89 文件的巨型快照",
+            "suggestion": "把 components/ui/** 与 lib/utils.ts 划回独立的 ui-kit 模块，本模块只留 runtime/api/shared/types，两模块的内部演进速率差异极大（基元随生成器整体替换，逻辑按业务迭代）"
+          }
+        ]
+      }
+    },
+    {
+      "id": "console-ui",
+      "name": "前端装配壳",
+      "layer": "presentation",
+      "files": [
+        "easyvibe-renderer/src/App.tsx",
+        "easyvibe-renderer/src/main.tsx",
+        "easyvibe-renderer/src/pages/**",
+        "easyvibe-renderer/src/components/shell/**",
+        "easyvibe-renderer/src/components/gate/**",
+        "easyvibe-renderer/src/components/overlays/**",
+        "easyvibe-renderer/src/components/settings/**",
+        "easyvibe-renderer/src/hooks/**",
+        "easyvibe-renderer/src/lib/**",
+        "easyvibe-renderer/src/__tests__/**",
+        "easyvibe-renderer/src/components/__tests__/**",
+        "easyvibe-renderer/src/components/AppShell.tsx",
+        "easyvibe-renderer/src/components/ChangesPage.tsx",
+        "easyvibe-renderer/src/components/DepsPage.tsx",
+        "easyvibe-renderer/src/components/DriftPage.tsx",
+        "easyvibe-renderer/src/components/GitPage.tsx",
+        "easyvibe-renderer/src/components/HealthPage.tsx",
+        "easyvibe-renderer/src/components/ModulesPage.tsx",
+        "easyvibe-renderer/src/components/OnboardingChecklist.tsx",
+        "easyvibe-renderer/src/components/PlaceholderPage.tsx",
+        "easyvibe-renderer/src/components/RunsPage.tsx",
+        "easyvibe-renderer/src/components/SessionBubble.tsx",
+        "easyvibe-renderer/src/components/ThemeToggle.tsx",
+        "easyvibe-renderer/src/components/UsagePage.tsx",
+        "easyvibe-renderer/src/components/ViewsPanel.tsx",
+        "easyvibe-renderer/src/components/WelcomePage.tsx",
+        "easyvibe-renderer/src/components/WindowControls.tsx",
+        "easyvibe-renderer/index.html",
+        "easyvibe-renderer/vite.config.ts",
+        "easyvibe-renderer/vitest.config.ts",
+        "easyvibe-renderer/eslint.config.js",
+        "easyvibe-renderer/tailwind.config.js",
+        "easyvibe-renderer/postcss.config.js"
+      ],
+      "dependencies": [
+        "renderer-core",
+        "map-canvas",
+        "chat-ui",
+        "task-ui"
+      ],
+      "health": {
+        "score": 72,
+        "coupling": "high",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [
+          "god_module",
+          "responsibility_overlap"
+        ],
+        "concerns": [
+          {
+            "id": "c-console-ui-1",
+            "severity": "high",
+            "finding": "components/ 根目录 16 个页面级组件与 src/pages/** 并存，两处都放“整页”，新页面归属靠习惯而非规则",
+            "suggestion": "把根目录页面级组件全部迁入 src/pages/**，components/ 只保留可复用组件，并在 archGuard 里断言 components/ 根目录无 *.tsx"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chat-ui",
+      "name": "对话工作台",
+      "layer": "presentation",
+      "files": [
+        "easyvibe-renderer/src/components/chat/**"
+      ],
+      "dependencies": [
+        "renderer-core",
+        "task-ui"
+      ],
+      "health": {
+        "score": 78,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-chat-ui-1",
+            "severity": "high",
+            "finding": "ChatPanel(426 行) 与 QuickAsk(500 行) 是同一数据契约的两套壳，发送/停止/流式/审批出口各写一遍，历史上已出现两处渲染漂移",
+            "suggestion": "把“回合执行”收敛为一个 headless hook（提交、流式、审批、视图保存），两个壳只做布局，契约变更只改一处"
+          }
+        ]
+      }
+    },
+    {
+      "id": "task-ui",
+      "name": "任务工作台",
+      "layer": "presentation",
+      "files": [
+        "easyvibe-renderer/src/components/taskworkflow/**"
+      ],
+      "dependencies": [
+        "renderer-core"
+      ],
+      "health": {
+        "score": 79,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-task-ui-1",
+            "severity": "high",
+            "finding": "taskStage.ts 注释自述“status 优先于 gate，failed 会残留旧 gate 值”，说明 status×gate 二元组的非法组合在类型上可表达，判定只能靠约定与测试兜",
+            "suggestion": "把 status×gate 穷举为一个 discriminated union 的纯判定函数，让非法组合在编译期不可表达，渲染层只消费判别结果"
+          }
+        ]
+      }
+    },
+    {
+      "id": "map-canvas",
+      "name": "地图画布",
+      "layer": "presentation",
+      "files": [
+        "easyvibe-renderer/src/components/canvas/**",
+        "easyvibe-renderer/src/components/BandNode.tsx",
+        "easyvibe-renderer/src/components/ModuleNode.tsx",
+        "easyvibe-renderer/src/components/SubmoduleNode.tsx",
+        "easyvibe-renderer/src/components/ExpandedModuleNode.tsx",
+        "easyvibe-renderer/src/components/DetailPanel.tsx",
+        "easyvibe-renderer/src/components/IssuesList.tsx",
+        "easyvibe-renderer/src/components/TaskFormPanel.tsx"
+      ],
+      "dependencies": [
+        "renderer-core",
+        "chat-ui"
+      ],
+      "health": {
+        "score": 80,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-map-canvas-1",
+            "severity": "high",
+            "finding": "四个地图节点组件（Band/Module/Submodule/Expanded，586 行）留在 components/ 根目录，与 canvas/ 下的画布代码分居两处，canvas 域不自洽",
+            "suggestion": "把节点组件整体迁入 components/canvas/，并在 archGuard 的文件集快照里把 canvas 域一次性登记全"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop-shell",
+      "name": "桌面壳",
+      "layer": "app-entry",
+      "files": [
+        "easyvibe-desktop/src-tauri/**"
+      ],
+      "dependencies": [
+        "server-api",
+        "map-toolchain"
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "medium",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-desktop-shell-1",
+            "severity": "high",
+            "finding": "sidecar 以固定端口 7151 启动并轮询就绪，启动失败或就绪超时只走 eprintln，用户侧表现为白屏且没有任何可操作提示",
+            "suggestion": "把 sidecar 启动失败/就绪超时映射为壳内可见的错误页（含日志路径与重试按钮），并把端口占用纳入失败分支的显式用例"
+          }
+        ]
+      }
+    },
+    {
+      "id": "easyvibe-git",
+      "name": "git 工作树领域",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-git/**"
+      ],
+      "dependencies": [
+        "contract-foundation"
+      ],
+      "health": {
+        "score": 84,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
+      "id": "easyvibe-pipeline",
+      "name": "仓库 watcher 管线",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-pipeline/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ],
+      "health": {
+        "score": 82,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "persistence",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e2",
+      "from": "map-domain",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e3",
+      "from": "agent-runtime",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e4",
+      "from": "agent-runtime",
+      "to": "persistence",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e5",
+      "from": "agent-runtime",
+      "to": "map-domain",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e6",
+      "from": "event-bus",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e7",
+      "from": "task-engine",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e8",
+      "from": "task-engine",
+      "to": "persistence",
+      "type": "db",
+      "strength": "strong"
+    },
+    {
+      "id": "e9",
+      "from": "task-engine",
+      "to": "map-domain",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e10",
+      "from": "task-engine",
+      "to": "agent-runtime",
+      "type": "call",
+      "strength": "normal"
+    },
+    {
+      "id": "e11",
+      "from": "task-engine",
+      "to": "event-bus",
+      "type": "event",
+      "strength": "strong"
+    },
+    {
+      "id": "e12",
+      "from": "server-api",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e13",
+      "from": "server-api",
+      "to": "persistence",
+      "type": "db",
+      "strength": "strong"
+    },
+    {
+      "id": "e14",
+      "from": "server-api",
+      "to": "map-domain",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e15",
+      "from": "server-api",
+      "to": "agent-runtime",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e16",
+      "from": "server-api",
+      "to": "event-bus",
+      "type": "event",
+      "strength": "strong"
+    },
+    {
+      "id": "e17",
+      "from": "server-api",
+      "to": "task-engine",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e18",
+      "from": "server-api",
+      "to": "map-toolchain",
+      "type": "config",
+      "strength": "normal"
+    },
+    {
+      "id": "e19",
+      "from": "server-api",
+      "to": "easyvibe-git",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e20",
+      "from": "server-api",
+      "to": "easyvibe-pipeline",
+      "type": "call",
+      "strength": "normal"
+    },
+    {
+      "id": "e21",
+      "from": "renderer-core",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
+    },
+    {
+      "id": "e22",
+      "from": "renderer-core",
+      "to": "desktop-shell",
+      "type": "call",
+      "strength": "weak",
+      "direction_violation": true
+    },
+    {
+      "id": "e23",
+      "from": "console-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e24",
+      "from": "console-ui",
+      "to": "map-canvas",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e25",
+      "from": "console-ui",
+      "to": "chat-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e26",
+      "from": "console-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e27",
+      "from": "chat-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e28",
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e29",
+      "from": "task-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e30",
+      "from": "map-canvas",
+      "to": "renderer-core",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e32",
+      "from": "map-canvas",
+      "to": "chat-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e33",
+      "from": "desktop-shell",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
+    },
+    {
+      "id": "e34",
+      "from": "desktop-shell",
+      "to": "map-toolchain",
+      "type": "config",
+      "strength": "weak"
+    },
+    {
+      "id": "e35",
+      "from": "easyvibe-git",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e36",
+      "from": "easyvibe-pipeline",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e37",
+      "from": "easyvibe-pipeline",
+      "to": "map-domain",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e38",
+      "from": "easyvibe-pipeline",
+      "to": "agent-runtime",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e39",
+      "from": "easyvibe-pipeline",
+      "to": "event-bus",
+      "type": "import",
+      "strength": "normal"
+    }
+  ],
+  "health": {
+    "score": 85,
+    "coupling": "medium",
+    "complexity": "high",
+    "churn": "high",
+    "decay_flags": [
+      "layer_violation",
+      "responsibility_overlap"
+    ],
+    "concerns": [
+      {
+        "severity": "high",
+        "id": "c-arch-3",
+        "finding": "前端组件归属无规则可循：components/ 根目录仍有 16 个页面级组件（ChangesPage/DepsPage/DriftPage/GitPage/HealthPage/ModulesPage/RunsPage/UsagePage 等）与 src/pages/** 并存，四个地图节点组件（Band/Module/Submodule/Expanded，586 行）又游离在 canvas/ 之外，跨模块归属只能靠习惯判断",
+        "suggestion": "页面级组件整体迁入 src/pages/**、节点组件整体迁入 components/canvas/**，并在 archGuard 里补一条“components/ 根目录不得存在 *.tsx”的断言，把归属规则从约定升级为测试"
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 import type { CodeMap } from '@/types/map'
 import type { TaskDraft } from '@/shared/logic/taskContext'
-import { TaskFormPanel } from '@/components/TaskFormPanel'
+import { TaskFormPanel } from '@/components/canvas/TaskFormPanel'
 
 /** 全局任务表单浮层（地图/建议/工作区页共用） */
 export function TaskDraftOverlay({

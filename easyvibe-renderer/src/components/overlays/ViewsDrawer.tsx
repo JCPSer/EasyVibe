@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
-import { ViewsPanel } from '@/components/ViewsPanel'
+import { ViewsPanel } from './ViewsPanel'
 
 /** 顶栏抽屉：我的视图（右栏三页签瘦身后的新居所） */
 export function ViewsDrawer({

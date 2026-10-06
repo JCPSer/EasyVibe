@@ -4,8 +4,8 @@
 //! HTTP 边界（入参解析 / ETag / 状态码 / 响应包装）留在 `routes/map.rs`。
 
 use crate::assets::{self, resolve_text_asset};
-use crate::freshness;
-use crate::map_concerns::{assign_concern_ids, diff_concerns, extract_concerns};
+use easyvibe_map::freshness;
+use easyvibe_map::concerns::{assign_concern_ids, diff_concerns, extract_concerns};
 use crate::state::*;
 use easyvibe_ai_agent::agent_conf;
 use easyvibe_api_types::SessionStatusChanged;
@@ -166,21 +166,21 @@ pub(crate) async fn start_reinduce(st: &AppState, id: &str, force_full: bool) ->
     // B 方案判定：drain 到执行时现判（不在入队时判——session_queue_routes 不改）。
     // 全部满足才增量：旧图合法 + 锚点合法 + ≤3 提交 + 变更 ≤20 文件/2000 行 + git 仓库 + 旧图 ≤512KB。
     let mode = if force_full {
-        crate::reinduce::ReinduceMode::Full
+        easyvibe_map::induction::ReinduceMode::Full
     } else {
-        crate::reinduce::decide(&repo.root, snap_before.as_ref().map(|s| &s.json))
+        easyvibe_map::induction::decide(&repo.root, snap_before.as_ref().map(|s| &s.json))
     };
     // 决策时 HEAD：增量时复用判定内读到的 HEAD（读一次、两用——diff 上界即成功后要写的锚点）；
     // 全量模式单独读一次，供终态锚点推进比对。非 git 为 None（不推进锚点）。
     let decision_head = match &mode {
-        crate::reinduce::ReinduceMode::Incremental(ctx) => Some(ctx.head.clone()),
-        crate::reinduce::ReinduceMode::Full => crate::reinduce::head_sha(&repo.root),
+        easyvibe_map::induction::ReinduceMode::Incremental(ctx) => Some(ctx.head.clone()),
+        easyvibe_map::induction::ReinduceMode::Full => easyvibe_map::induction::head_sha(&repo.root),
     };
     let resolved = agent_conf::resolve_agent(&st.settings_repo, None, &st.agent_command, &st.agent_args).await;
     // prompt：增量模式预渲染全部占位符（<REPO_ROOT> 留给会话层，仿 patrol 先例），
     // custom global 块拼在增量 prompt 尾部（白名单纪律段之后——custom 若要求全量扫描，以增量白名单为准）
     let prompt = match &mode {
-        crate::reinduce::ReinduceMode::Incremental(ctx) => {
+        easyvibe_map::induction::ReinduceMode::Incremental(ctx) => {
             // 每次 spawn 重读（与 submap 同一纪律：提示词迭代免重启）
             let inc_spec = assets::spec("incremental");
             let (template, _) =
@@ -189,10 +189,10 @@ pub(crate) async fn start_reinduce(st: &AppState, id: &str, force_full: bool) ->
                 .as_ref()
                 .and_then(|s| serde_json::to_string(&s.json).ok())
                 .unwrap_or_default();
-            let rendered = crate::reinduce::render_incremental_prompt(&template, ctx, &current_map, &st.schema_path);
+            let rendered = easyvibe_map::induction::render_incremental_prompt(&template, ctx, &current_map, &st.schema_path);
             format!("{rendered}{}", global_custom_block(&st.harness).await)
         }
-        crate::reinduce::ReinduceMode::Full => {
+        easyvibe_map::induction::ReinduceMode::Full => {
             // 注入点 #5：自定义 global 块追加到归纳 prompt 尾部
             format!("{}{}", st.prompt_template, global_custom_block(&st.harness).await)
         }
@@ -228,17 +228,17 @@ pub(crate) async fn start_reinduce(st: &AppState, id: &str, force_full: bool) ->
                     }
                     // 终态按 mode 执行收尾：增量 = 读 patch→合成→校验→落盘/回退入队；全量 = strict 终态校验
                     match &mode {
-                        crate::reinduce::ReinduceMode::Incremental(ctx) => {
-                            crate::reinduce::handle_incremental_terminal(&st2, &repo2, ctx, &decision_head).await;
+                        easyvibe_map::induction::ReinduceMode::Incremental(ctx) => {
+                            crate::service::reinduce::handle_incremental_terminal(&st2, &repo2, ctx, &decision_head).await;
                         }
-                        crate::reinduce::ReinduceMode::Full => {
-                            crate::reinduce::handle_full_terminal(&st2, &repo2, &snap_before, &decision_head).await;
+                        easyvibe_map::induction::ReinduceMode::Full => {
+                            crate::service::reinduce::handle_full_terminal(&st2, &repo2, &snap_before, &decision_head).await;
                         }
                     }
                     // 归纳终态：立即重估保鲜并推送 freshness.changed——否则头部"落后提示"要等
                     // 30 分钟定时器才刷新（2026-10-05 实弹：归纳完成后 chip 仍显示"已过时 1 个新提交"）
                     if let Ok(snap) = st2.map_service.load_map(&repo2).await {
-                        let f = crate::freshness::assess(&repo2.root, &snap.json);
+                        let f = easyvibe_map::freshness::assess(&repo2.root, &snap.json);
                         publish(&st2.event_bus, BusEvent::Freshness {
                             repo: repo2.id.clone(),
                             status: f.status.as_str().to_string(),
@@ -413,7 +413,7 @@ pub(crate) async fn start_patrol(st: &AppState, id: &str) -> Result<serde_json::
                     });
                     // 巡检也会写回地图：即时重估保鲜并推送（与归纳终态同一纪律——不等 30 分钟定时器）
                     if let Ok(snap) = st2.map_service.load_map(&repo2).await {
-                        let f = crate::freshness::assess(&repo2.root, &snap.json);
+                        let f = easyvibe_map::freshness::assess(&repo2.root, &snap.json);
                         publish(&st2.event_bus, BusEvent::Freshness {
                             repo: repo2.id.clone(),
                             status: f.status.as_str().to_string(),

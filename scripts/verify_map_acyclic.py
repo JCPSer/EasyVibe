@@ -2,7 +2,8 @@
 """地图无环验收（R6）：跨层环 / 构建期边 / 不变量，一键可判、可复跑、可趋势。
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
-                         CI 传 `--map scripts/tests/fixtures/map_post_migration.json`（受版本控制）
+                         CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
+                         与 EXPECT_EDGES 同代：c-arch-1 拆分后的 16 模块 / 38 边快照）
   --selfcheck            负例自证，**不依赖 live map**（CI 安全）
 
 断言：
@@ -12,7 +13,8 @@
   D. INV-1：所有模块 dependencies == 其出边目标集
   E. SCC(>1) == 0（Tarjan，同前端口径）
   F. direction_violation 计数 <= 1（棘轮不增）
-  G. 边数 == 期望（默认 31）
+  G. 边数 == 期望（live 图默认 38；`--map <fixture>` 时**默认不绑定**——fixture 是历史
+     快照，需断言时显式传 `--expect-edges <n>`）
   H. health.concerns 不含 c-arch-2（环已闭环）
 
 本文件不得出现任何受管契约名 / env 名（由 scripts/verify_assets.py --forbid-literals 自守卫）。
@@ -25,7 +27,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 31
+EXPECT_EDGES = 38
 DV_MAX = 1
 EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
 RETIRED_CONCERN = "c-arch-2"
@@ -109,10 +111,11 @@ def selfcheck(root):
     post_path = os.path.join(root, FIXTURE_DIR, "map_post_migration.json")
     post = json.load(open(post_path, encoding="utf-8"))
 
-    s0 = summarize(pre, check_map(pre, root, None, EXPECT_EDGES))
+    # fixture 自证不绑定 live 边数（EXPECT_EDGES 随地图生长而变，fixture 是历史快照）
+    s0 = summarize(pre, check_map(pre, root, None, None))
     results.append(("H0 删前态 fixture → 必红", not s0["ok"], "; ".join(s0["problems"][:2])))
 
-    s1 = summarize(post, check_map(post, root, post_path, EXPECT_EDGES))
+    s1 = summarize(post, check_map(post, root, post_path, None))
     results.append(("H1 删后态 fixture → 必绿", s1["ok"], "; ".join(s1["problems"][:2])))
 
     inj = json.loads(json.dumps(post))
@@ -148,18 +151,24 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--map", default=None)
-    ap.add_argument("--expect-edges", type=int, default=EXPECT_EDGES)
+    ap.add_argument("--expect-edges", type=int, default=None,
+                    help="显式期望边数（对 fixture 亦生效）；缺省时仅 live map 绑定 EXPECT_EDGES，"
+                         "fixture 是历史快照故不绑定（与 selfcheck 同口径）")
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     args = ap.parse_args()
     root = os.path.abspath(args.root)
     if args.selfcheck:
         print("▶ 无环验收自检 H0–H3")
         return 0 if selfcheck(root) else 1
+    live = args.map is None
     path = args.map or os.path.join(root, ".easyvibe", "map", "map.json")
     if not os.path.isfile(path):
         print(json.dumps({"ok": False, "problems": ["map not found: %s" % path]}, ensure_ascii=False))
         return 1
-    summary = run_check(root, path, args.expect_edges)
+    # 边数（G）是 live 图的棘轮：fixture 只做 A–F/H 结构判据，除非调用方显式传 --expect-edges。
+    # 否则 live 图生长一次就要改一个与该 fixture 无关的常量，CI 必假红（见审查 P0）。
+    expect_edges = args.expect_edges if args.expect_edges is not None else (EXPECT_EDGES if live else None)
+    summary = run_check(root, path, expect_edges)
     return 0 if summary["ok"] else 1
 
 

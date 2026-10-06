@@ -1,0 +1,1337 @@
+{
+  "version": "1.0",
+  "meta": {
+    "repo": "EasyVibe",
+    "generated_at": "2026-10-06T13:21:49+08:00",
+    "generator": "easyvibe-architect/claude-sonnet-4-6",
+    "description": "EasyVibe 单体仓库：Rust/axum 后端 + React 架构地图渲染器 + Tauri 桌面壳，把任意仓库归纳为可生长、可巡检的语义代码地图。",
+    "languages": [
+      "Rust",
+      "TypeScript",
+      "Python"
+    ],
+    "loc": 48064,
+    "map_freshness": "fresh",
+    "stats": {
+      "files_total": 351,
+      "files_covered": 351,
+      "coverage_ratio": 1.0,
+      "edges_derived": 38,
+      "edges_inferred": 0,
+      "retried_modules": 0
+    },
+    "ownership_snapshot": "c-arch-3 组件归属规则化后快照（离线夹具，非 live 归纳产物）"
+  },
+  "layers": [
+    {
+      "id": "app-entry",
+      "name": "应用装配层",
+      "order": 0,
+      "description": "桌面壳进程装配：托管后端 sidecar 与静态界面，管理窗口、单实例与自更新生命周期"
+    },
+    {
+      "id": "presentation",
+      "name": "交互呈现层",
+      "order": 1,
+      "description": "React 地图界面：画布可视化、对话与任务工作台、装配壳与设置分区"
+    },
+    {
+      "id": "presentation-support",
+      "name": "呈现支撑层",
+      "order": 2,
+      "description": "渲染进程地基：宿主能力门面、WS/事件总线、REST 传输层、设计基元与跨域纯逻辑"
+    },
+    {
+      "id": "application",
+      "name": "应用服务层",
+      "order": 3,
+      "description": "axum REST/WS 边界、应用服务编排、启动装配与任务阶段状态机，对外提供产品能力"
+    },
+    {
+      "id": "application-support",
+      "name": "应用支撑层",
+      "order": 4,
+      "description": "application 层共享的事件出口与会话队列状态机，结构性切断服务层与任务引擎的环"
+    },
+    {
+      "id": "domain",
+      "name": "领域能力层",
+      "order": 5,
+      "description": "地图归纳/保鲜/增量合成与 agent 会话运行时两大领域能力"
+    },
+    {
+      "id": "data",
+      "name": "数据持久层",
+      "order": 6,
+      "description": "SQLite 迁移与按聚合域拆分的仓储，为地图/任务/会话/审批/设置提供状态持久化"
+    },
+    {
+      "id": "foundation",
+      "name": "基础契约层",
+      "order": 7,
+      "description": "零内部依赖的基础件：错误与密钥原语、事件名常量、REST/WS 契约类型"
+    },
+    {
+      "id": "tooling",
+      "name": "工具链层",
+      "order": 8,
+      "description": "地图归纳 CLI 参考实现与受管资产生成/校验脚本，只服务开发与打包，不进产品运行时"
+    }
+  ],
+  "modules": [
+    {
+      "id": "map-toolchain",
+      "name": "地图工具链",
+      "layer": "tooling",
+      "responsibility": "地图归纳 CLI 参考实现与受管资产生成/校验、开发打包脚本",
+      "files": [
+        "run/**",
+        "scripts/**"
+      ],
+      "key_entries": [
+        {
+          "file": "run/easyvibe_map_cli.py",
+          "symbol": "cmd_finalize",
+          "kind": "cli"
+        },
+        {
+          "file": "run/easyvibe_map_cli.py",
+          "symbol": "validate",
+          "kind": "function"
+        },
+        {
+          "file": "run/scan_imports.py",
+          "symbol": "mod_of",
+          "kind": "function"
+        },
+        {
+          "file": "scripts/assets.json",
+          "symbol": "text_assets",
+          "kind": "config"
+        },
+        {
+          "file": "scripts/verify_assets.py",
+          "symbol": "main",
+          "kind": "cli"
+        },
+        {
+          "file": "scripts/dev.sh",
+          "symbol": "dev.sh",
+          "kind": "cli"
+        }
+      ],
+      "health": {
+        "score": 78,
+        "coupling": "low",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "review_note": "CLI 与脚本职责清晰、无内部耦合，是全库唯一的零依赖模块。主要风险在 verify_assets.py 与 assets.json 的名录一致性靠字面量断言维持，新增受管资产要同时改三处（assets.json / build.rs 派生 / .manifest）；建议把 GUI 打包脚本（build-desktop.sh、sync-desktop.sh、codesign-shim）与地图 CLI 分成两个子目录，脚本层现在混放了归纳工具链与桌面发布工具链。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": []
+    },
+    {
+      "id": "contract-foundation",
+      "name": "基础契约",
+      "layer": "foundation",
+      "responsibility": "零内部依赖的基础 crate：错误/响应/密钥原语与 REST/WS 类型契约",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-common/**",
+        "easyvibe-backend/crates/easyvibe-api-types/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-common/src/lib.rs",
+          "symbol": "ApiError",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-common/src/lib.rs",
+          "symbol": "ApiResponse",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-common/src/lib.rs",
+          "symbol": "SecretCipher",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-api-types/src/lib.rs",
+          "symbol": "WsMessage",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-api-types/src/lib.rs",
+          "symbol": "RepoInfo",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-api-types/src/lib.rs",
+          "symbol": "SessionStatus",
+          "kind": "interface"
+        }
+      ],
+      "health": {
+        "score": 90,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "review_note": "唯一的零出边模块，被后端 5 个模块单向依赖，边界干净、无环风险。唯一的隐患是 easyvibe-common 把错误类型、时间解析、密钥信封三种职责塞进一个 310 行文件，密钥实现（SecretCipher/FileKeyProvider）演化速率与错误原语明显不同；建议把 crypto 子域单拆一个文件，避免改动密钥逻辑时触及全后端共享的错误定义。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": []
+    },
+    {
+      "id": "persistence",
+      "name": "数据持久层",
+      "layer": "data",
+      "responsibility": "SQLite 迁移与按聚合域拆分的仓储，提供各域状态持久化",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-db/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-db/src/lib.rs",
+          "symbol": "Database",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-db/src/task.rs",
+          "symbol": "TaskRepository",
+          "kind": "interface"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-db/src/health.rs",
+          "symbol": "HealthRepository",
+          "kind": "interface"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-db/src/conversation.rs",
+          "symbol": "ConversationRepository",
+          "kind": "interface"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-db/src/core.rs",
+          "symbol": "register_repo",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 83,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "review_note": "已按聚合域（task/health/conversation/agent/settings/approval/event/session_output）拆到单文件一级，仓储 trait 隔离良好，业务层只依赖 trait。风险点：migrations 目录 16 个脚本只增不改，缺乏 down 迁移与版本回归测试；建议补一条“空库→迁移→断言表结构快照”的测试，防止开发期手改 schema 与迁移漂移。",
+        "concerns": [
+          {
+            "id": "c-persistence-1",
+            "severity": "high",
+            "finding": "migrations 目录 16 个 SQL 脚本只增不改，没有任何 down 迁移或迁移后表结构快照断言，开发期手改 schema 与迁移漂移不会被测试发现",
+            "suggestion": "补一条“空库 → 全量迁移 → 断言表结构快照”的测试，并让迁移文件在校验脚本里做 sha 记账，防止已发布迁移被就地修改"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "map-domain",
+      "name": "地图领域",
+      "layer": "domain",
+      "responsibility": "地图读取/严格校验/保鲜分级/增量归纳判定与 patch 合成",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-map/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-map/src/lib.rs",
+          "symbol": "MapService / validate_strict",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-map/src/synthesis.rs",
+          "symbol": "owners_of_file / apply_incremental",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-map/src/freshness.rs",
+          "symbol": "assess / FreshnessStatus（c-arch-1 外提）",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-map/src/induction.rs",
+          "symbol": "decide / render_incremental_prompt（c-arch-1 外提）",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-map/src/concerns.rs",
+          "symbol": "extract_concerns / diff_concerns / assign_concern_ids（c-arch-1 外提）",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 85,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "review_note": "“不出残图”原则贯彻得较彻底：校验失败走 map.invalid 上报、合法缓存继续服务。c-arch-1 本轮把三个边界层里的地图域规则收进本模块：freshness.rs（保鲜分级，零 axum/零 AppState）、induction.rs（增量归纳七道门判定与 prompt 预渲染，纯函数）、concerns.rs（巡检新旧对照与 id 兜底注入，纯函数）——三者均自带守卫（≤600 行 + 禁 axum/AppState），且都不新增出边（仍只依赖 common-foundation）。风险点：synthesis.rs 仍同时承担归属引擎、patch 解析、合成、校验与原子落盘五项职责。",
+        "concerns": [
+          {
+            "id": "c-map-domain-1",
+            "severity": "high",
+            "finding": "synthesis.rs 557 行同时承担 files glob 归属引擎、增量 patch 解析、地图合成、确定性校验与 candidate 原子落盘五项职责，且被 server-api 与 task-engine 两侧消费",
+            "suggestion": "把 patch 解析与 candidate 落盘拆成独立文件，合成只保留纯变换函数，使“归属/解析/合成/落盘”每一环都能各自单测"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "agent-runtime",
+      "name": "Agent 运行时",
+      "layer": "domain",
+      "responsibility": "运行外部 CLI agent 会话，并提供后端 LLM 槽位（巡检/问答/建议）",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-ai-agent/**",
+        "easyvibe-backend/crates/easyvibe-session/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-session/src/lib.rs",
+          "symbol": "SessionManager",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-session/src/pty.rs",
+          "symbol": "start_induction",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-session/src/lifecycle.rs",
+          "symbol": "SessionLifecycle",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-ai-agent/src/patrol.rs",
+          "symbol": "PatrolService",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-ai-agent/src/qa.rs",
+          "symbol": "QaClient",
+          "kind": "interface"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-ai-agent/src/agent_conf.rs",
+          "symbol": "resolve_agent",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 79,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [],
+        "review_note": "把“外部 CLI agent”与“后端直调 LLM”两条能力线合置在一个模块，是因为二者共用 agent/LLM 配置解析与探测链路（agent_conf 是共同入口），合并后仍能一句话说清职责。风险点：PTY 生命周期（pty/lifecycle/output 三文件 857 行）与子进程超时/收尸逻辑是最易出并发缺陷处，且近 3 个月 46 次改动；建议把进程生命周期与输出解析的竞速路径补成可注入时钟的状态机并加长稳测试。",
+        "concerns": [
+          {
+            "id": "c-agent-runtime-1",
+            "severity": "high",
+            "finding": "pty.rs 的 select 竞速（超时 / kill / 进程退出 / stdout 排空）是并发缺陷高发区，280 行里没有可注入时钟，长稳与超时路径只能靠集成测试碰运气，近 3 个月该目录 46 次改动",
+            "suggestion": "把超时与 kill 决策抽成可注入时钟的纯状态机（输入：已过时长/事件，输出：动作），pty.rs 只保留 IO 编排，超时竞速即可穷举测试"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain"
+      ]
+    },
+    {
+      "id": "event-bus",
+      "name": "事件总线与会话队列",
+      "layer": "application-support",
+      "responsibility": "应用层共享的事件出口与会话队列状态机",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-event-bus/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-event-bus/src/bus.rs",
+          "symbol": "BusEvent",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-event-bus/src/bus.rs",
+          "symbol": "publish",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-event-bus/src/queue.rs",
+          "symbol": "QueueState",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-event-bus/src/queue.rs",
+          "symbol": "enqueue_or_replace",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "review_note": "全库最小的结构性模块（327 行），存在的唯一目的是切断 server-api 与 task-engine 的环——两边各自单向依赖它，图上因此不存在后端双向边。这种“为解环而生的模块”是正向设计，但它的价值完全依赖纪律：任何人往这里塞业务逻辑都会让它退化成 god module。建议在模块文档里写明“只放纯数据与状态机、禁止依赖 axum/sqlx”，并用编译期 lint 固化。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "task-engine",
+      "name": "任务引擎",
+      "layer": "application",
+      "responsibility": "任务阶段状态机：执行、决策、返修、回看与人工复审",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+          "symbol": "TaskExecutor",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+          "symbol": "decide",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+          "symbol": "remediate",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec/harness.rs",
+          "symbol": "load_harness",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec/review.rs",
+          "symbol": "run_review_gate",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/task_exec/changes.rs",
+          "symbol": "collect_changes",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 75,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [
+          "coupling_high"
+        ],
+        "review_note": "反向依赖已被彻底切断：task_exec 全树不再出现 crate::BusEvent/AppState 等既突破口，tests/arch_guard.rs 以源码子串白名单守卫（R8），task-engine → server-api 边归零，后端最大的一个环被结构性消除。风险点：模块从 event-bus 拿事件、从 agent-runtime 起子进程、又把产物写回 persistence，出边 5 条且每条都是核心路径；建议把“阶段状态机”抽成不依赖任何 IO 的纯迁移函数（当前 decide/remediate/rewind 三个方法都在 async 上下文里直接读库写库），让状态迁移可穷举测试。",
+        "concerns": [
+          {
+            "id": "c-task-engine-1",
+            "severity": "high",
+            "finding": "decide/remediate/rewind 三个状态迁移方法都直接写在 async 上下文里读库写库，迁移合法性只能靠集成测试间接覆盖，非法迁移（如 failed 上重开）没有编译期或单元级约束",
+            "suggestion": "把阶段迁移抽成不依赖 IO 的纯函数 `transition(status, gate, action) -> Result<NextState>`，async 外壳只负责落库与发事件，迁移表即可穷举断言"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ]
+    },
+    {
+      "id": "server-api",
+      "name": "应用服务层",
+      "layer": "application",
+      "responsibility": "axum REST/WS 边界、应用服务编排与启动装配",
+      "files": [
+        "easyvibe-backend/Cargo.toml",
+        "easyvibe-backend/crates/easyvibe-app/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/main.rs",
+          "symbol": "main（装配层：只声明子模块并跑 bootstrap）",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/router.rs",
+          "symbol": "build_router（域自注册 merge + /ws）",
+          "kind": "route"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/bootstrap.rs",
+          "symbol": "bootstrap::run（启动装配）",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/routes/repo.rs",
+          "symbol": "仓库/git 边界（handler 只做入参解析与响应映射）",
+          "kind": "route"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/src/service/map.rs",
+          "symbol": "map 域编排（读取/巡检/归纳/子图）",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-app/tests/module_size_guard.rs",
+          "symbol": "边界纪律守卫（文件集/禁串/扇出/LOC）",
+          "kind": "config"
+        }
+      ],
+      "health": {
+        "score": 82,
+        "coupling": "high",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [
+          "coupling_high"
+        ],
+        "review_note": "c-arch-1 本轮闭环：五个领域实现（git 工作树 694 / 增量归纳判定 605 / 保鲜分级 179 / watcher 管线 85 / concerns 对照 175）全部离开本 crate——git 落新 crate easyvibe-git，freshness/induction/concerns 落 easyvibe-map 子模块，watcher 管线落新 crate easyvibe-pipeline，归纳终态收尾落 service/reinduce.rs。本模块现只保留 main/router/state/bootstrap/ws 与 HTTP 边界（routes/* 只做入参解析与响应映射，业务编排一律经 crate::service::{git,repo,reinduce,...}）。god_module 消退：出边由 7 增至 9（新增 easyvibe-git / easyvibe-pipeline 两条正向边），但「边界层不得含业务规则」已从注释纪律升级为可失败断言组（文件集冻结 + 五文件禁止存在 + routes 禁串 + 归属映射扇出 G3′ + LOC），并由 easyvibe-map 的三个子模块守卫与两个新 crate 的 module_size_guard 覆盖外提面。剩余：仍是全库出边最多的枢纽（9 条），coupling_high 保留。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T14:10:00+08:00",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus",
+        "task-engine",
+        "map-toolchain",
+        "easyvibe-git",
+        "easyvibe-pipeline"
+      ]
+    },
+    {
+      "id": "renderer-core",
+      "name": "渲染进程地基",
+      "layer": "presentation-support",
+      "responsibility": "宿主门面、WS/事件总线、REST 传输层、设计基元与跨域纯逻辑",
+      "files": [
+        "easyvibe-renderer/src/runtime/**",
+        "easyvibe-renderer/src/api/**",
+        "easyvibe-renderer/src/shared/**",
+        "easyvibe-renderer/src/types/**",
+        "easyvibe-renderer/src/components/ui/**",
+        "easyvibe-renderer/src/lib/utils.ts",
+        "easyvibe-renderer/src/hooks/use-mobile.ts",
+        "easyvibe-renderer/scripts/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-renderer/src/runtime/host.ts",
+          "symbol": "isTauriRuntime",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/runtime/ws.ts",
+          "symbol": "connect",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/runtime/growthBus.ts",
+          "symbol": "emitGrowthEvent",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/api/core.ts",
+          "symbol": "apiFetch",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/shared/logic/depsAnalysis.ts",
+          "symbol": "findCycles",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/shared/logic/layout.ts",
+          "symbol": "computeLayout",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/types/map.ts",
+          "symbol": "CodeMap",
+          "kind": "interface"
+        },
+        {
+          "file": "easyvibe-renderer/scripts/gen-types.mjs",
+          "symbol": "gen-types",
+          "kind": "cli"
+        }
+      ],
+      "health": {
+        "score": 76,
+        "coupling": "medium",
+        "complexity": "high",
+        "churn": "medium",
+        "decay_flags": [
+          "god_module"
+        ],
+        "review_note": "前端唯一的叶子地基：四类 UI 域与装配壳全部单向依赖它，而它自己不依赖任何业务代码（archGuard 断言组 1 用文件集快照双向全等固化）。宿主能力门面 host.ts 落地后，全库 @tauri-apps/* 收敛到单一文件，console-ui → desktop-shell 的越界边归零。风险点：合并了运行时、传输层、纯逻辑与 53 个 shadcn 设计基元后达 89 文件、近万行，复杂度高且内部再没有二级边界；建议把 components/ui（第三方设计基元，演化速率≈生成器）与 runtime/shared（自有逻辑）在 glob 上分回两个模块，恢复复杂度可见性。",
+        "concerns": [
+          {
+            "id": "c-renderer-core-1",
+            "severity": "high",
+            "finding": "模块把 53 个 shadcn 生成式设计基元与自有的运行时/传输/纯逻辑混在一条 files glob 里，文件集快照测试（archGuard 断言组 4）也随之变成一个 89 文件的巨型快照",
+            "suggestion": "把 components/ui/** 与 lib/utils.ts 划回独立的 ui-kit 模块，本模块只留 runtime/api/shared/types，两模块的内部演进速率差异极大（基元随生成器整体替换，逻辑按业务迭代）"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "server-api",
+        "desktop-shell"
+      ]
+    },
+    {
+      "id": "console-ui",
+      "name": "前端装配壳",
+      "layer": "presentation",
+      "responsibility": "App/路由装配、顶栏与门禁、抽屉浮层、通用页面与设置分区",
+      "files": [
+        "easyvibe-renderer/src/App.tsx",
+        "easyvibe-renderer/src/main.tsx",
+        "easyvibe-renderer/src/pages/**",
+        "easyvibe-renderer/src/hooks/**",
+        "easyvibe-renderer/src/lib/**",
+        "easyvibe-renderer/src/__tests__/**",
+        "easyvibe-renderer/index.html",
+        "easyvibe-renderer/vite.config.ts",
+        "easyvibe-renderer/vitest.config.ts",
+        "easyvibe-renderer/eslint.config.js",
+        "easyvibe-renderer/tailwind.config.js",
+        "easyvibe-renderer/postcss.config.js",
+        "easyvibe-renderer/src/components/shell/**",
+        "easyvibe-renderer/src/components/gate/**",
+        "easyvibe-renderer/src/components/overlays/**",
+        "easyvibe-renderer/src/components/settings/**",
+        "easyvibe-renderer/src/components/__tests__/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-renderer/src/App.tsx",
+          "symbol": "App",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/pages/routes.tsx",
+          "symbol": "buildRoutes",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/shell/AppShell.tsx",
+          "symbol": "AppShell",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/shell/TopBar.tsx",
+          "symbol": "TopBar",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/gate/MapGate.tsx",
+          "symbol": "MapGate",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/hooks/useBackendConnection.ts",
+          "symbol": "useBackendConnection",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/settings/SettingsPanel.tsx",
+          "symbol": "SettingsPanel",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/lib/onboarding.ts",
+          "symbol": "markCheck",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 72,
+        "coupling": "high",
+        "complexity": "high",
+        "churn": "high",
+        "decay_flags": [
+          "god_module"
+        ],
+        "review_note": "装配壳与设置面板合并后仍达 38 文件、5466 行，App.tsx 已从 998 行收敛到路由装配（S6），引导状态机与 agent 状态抽为 hooks/*（S5），方向正确。风险点：components/ 根目录仍散落 16 个页面级文件（ChangesPage/DepsPage/DriftPage/GitPage/HealthPage/ModulesPage/RunsPage/UsagePage/ViewsPanel…），既不属于 shell 也不属于任何交互域，与 pages/** 的职责重叠；建议把这批通用页面整体迁入 src/pages/** 并让 components/ 根目录清空，同时把设置分区（components/settings/**）按同样的理由外提成独立模块。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "renderer-core",
+        "map-canvas",
+        "chat-ui",
+        "task-ui"
+      ]
+    },
+    {
+      "id": "chat-ui",
+      "name": "对话工作台",
+      "layer": "presentation",
+      "responsibility": "对话面板与工作台：会话流、问答卡片与对话升级为任务",
+      "files": [
+        "easyvibe-renderer/src/components/chat/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-renderer/src/components/chat/ChatPanel.tsx",
+          "symbol": "ChatPanel",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/chat/QuickAsk.tsx",
+          "symbol": "QuickAsk",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/chat/WorkbenchPage.tsx",
+          "symbol": "WorkbenchPage",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/chat/MessageStream.tsx",
+          "symbol": "MessageStream",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/chat/useConversations.ts",
+          "symbol": "useConversations",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/chat/chatUpgrade.ts",
+          "symbol": "toTaskDraft",
+          "kind": "function"
+        }
+      ],
+      "health": {
+        "score": 78,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "review_note": "ChatPanel(426)/QuickAsk(500) 两个壳各自拆分出 Composer/Stream/Switcher/HeaderActions 与共享的 useConversations，膨胀已受控；对话升级为任务的纯逻辑 chatUpgrade.ts 单拆可测。风险点：ChatPanel 与 QuickAsk 是同一数据契约的两套壳（types.ts 是它们的镜像事实源），两侧的发送/停止/审批出口各写一遍，过去已出现过“两处渲染漂移”；建议把“回合执行”收敛为一个 headless hook（提交、流式、审批、视图保存），两个壳只做布局，否则每次契约变更都要改两遍。",
+        "concerns": [
+          {
+            "id": "c-chat-ui-1",
+            "severity": "high",
+            "finding": "ChatPanel(426 行) 与 QuickAsk(500 行) 是同一数据契约的两套壳，发送/停止/流式/审批出口各写一遍，历史上已出现两处渲染漂移",
+            "suggestion": "把“回合执行”收敛为一个 headless hook（提交、流式、审批、视图保存），两个壳只做布局，契约变更只改一处"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "renderer-core",
+        "task-ui"
+      ]
+    },
+    {
+      "id": "task-ui",
+      "name": "任务工作台",
+      "layer": "presentation",
+      "responsibility": "任务页面与阶段流水线：工作台/看板/治理页与阶段渲染",
+      "files": [
+        "easyvibe-renderer/src/components/taskworkflow/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/TaskWorkflowPage.tsx",
+          "symbol": "TaskWorkflowPage",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/TaskBoardPage.tsx",
+          "symbol": "TaskBoardPage",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/TaskGovernancePage.tsx",
+          "symbol": "TaskGovernancePage",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/taskStage.ts",
+          "symbol": "stageOf",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/StagePipeline.tsx",
+          "symbol": "StagePipeline",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/taskworkflow/stages/DiffStage.tsx",
+          "symbol": "DiffStage",
+          "kind": "class"
+        }
+      ],
+      "health": {
+        "score": 79,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "review_note": "五阶段映射的判定已收敛到 taskStage.ts 单一处、StagePipeline 只负责画（v4 brief §8 的漂移对策生效），stages/* 六个阶段视图各自独立；task-ui ⊥ chat-ui 由 archGuard 断言组 2 守卫（不得 import chat 组件）。风险点：TaskStage 判定注释明确写着“status 优先于 gate，failed 会残留旧 gate 值”，说明状态二元组本身是易错契约；建议把 status×gate 组合穷举为一个返回判别式联合类型（TS discriminated union）的纯函数，让非法组合在编译期不可表达。",
+        "concerns": [
+          {
+            "id": "c-task-ui-1",
+            "severity": "high",
+            "finding": "taskStage.ts 注释自述“status 优先于 gate，failed 会残留旧 gate 值”，说明 status×gate 二元组的非法组合在类型上可表达，判定只能靠约定与测试兜",
+            "suggestion": "把 status×gate 穷举为一个 discriminated union 的纯判定函数，让非法组合在编译期不可表达，渲染层只消费判别结果"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "renderer-core"
+      ]
+    },
+    {
+      "id": "map-canvas",
+      "name": "地图画布",
+      "layer": "presentation",
+      "responsibility": "渲染分层地图画布、生长回放、内嵌面板与依赖透镜",
+      "files": [
+        "easyvibe-renderer/src/components/canvas/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-renderer/src/components/canvas/Canvas.tsx",
+          "symbol": "Canvas",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/canvas/buildFlow.ts",
+          "symbol": "buildFlow",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/canvas/useGrowthPlayback.ts",
+          "symbol": "useGrowthPlayback",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/canvas/useSubmaps.ts",
+          "symbol": "useSubmaps",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/canvas/InductionOverlay.tsx",
+          "symbol": "InductionOverlay",
+          "kind": "class"
+        },
+        {
+          "file": "easyvibe-renderer/src/components/canvas/DetailPanel.tsx",
+          "symbol": "DetailPanel",
+          "kind": "class"
+        }
+      ],
+      "health": {
+        "score": 80,
+        "coupling": "medium",
+        "complexity": "medium",
+        "churn": "high",
+        "decay_flags": [],
+        "review_note": "产品的视觉中心，二次拆分后（useGrowthPlayback/useSubmaps/useCanvasPanelDrag）Canvas.tsx 仍 651 行但职责已收窄为渲染编排。canvas ↔ chat 的双向依赖已被切成单向（仅 DetailPanel → PanelChat，archGuard 断言组 2 白名单守卫），map-canvas → console-ui 的返回边归零。风险点：节点组件 （Band/Module/Submodule/Expanded）仍留在 components 根目录，与 canvas/ 下的画布代码分居两处；建议把这四个节点组件迁入 components/canvas/，让 canvas 域自洽。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "renderer-core",
+        "chat-ui"
+      ]
+    },
+    {
+      "id": "desktop-shell",
+      "name": "桌面壳",
+      "layer": "app-entry",
+      "responsibility": "托管后端 sidecar 与静态界面，管理窗口、单实例与自更新",
+      "files": [
+        "easyvibe-desktop/src-tauri/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-desktop/src-tauri/src/lib.rs",
+          "symbol": "run",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-desktop/src-tauri/src/main.rs",
+          "symbol": "main",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-desktop/src-tauri/tauri.conf.json",
+          "symbol": "tauri.conf",
+          "kind": "config"
+        },
+        {
+          "file": "easyvibe-desktop/src-tauri/build.rs",
+          "symbol": "build",
+          "kind": "job"
+        }
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "medium",
+        "decay_flags": [],
+        "review_note": "344 行完成 sidecar spawn、就绪轮询、静态托管与更新生命周期，是全库最小的装配层；编译期从 scripts/assets.json 派生 env 名册，避免了两处 sidecar spawn 的手写漂移。风险点：就绪探测是固定端口 7151 + 轮询，多实例/端口占用时靠单实例锁兜底，失败路径只能落日志（用户侧表现为白屏）；建议把 sidecar 启动失败与就绪超时映射成壳内可见的错误页，而不是仅 eprintln。",
+        "concerns": [
+          {
+            "id": "c-desktop-shell-1",
+            "severity": "high",
+            "finding": "sidecar 以固定端口 7151 启动并轮询就绪，启动失败或就绪超时只走 eprintln，用户侧表现为白屏且没有任何可操作提示",
+            "suggestion": "把 sidecar 启动失败/就绪超时映射为壳内可见的错误页（含日志路径与重试按钮），并把端口占用纳入失败分支的显式用例"
+          }
+        ]
+      },
+      "last_analyzed_at": "2026-10-06T11:20:00+08:00",
+      "dependencies": [
+        "server-api",
+        "map-toolchain"
+      ]
+    },
+    {
+      "id": "easyvibe-git",
+      "name": "git 工作树领域",
+      "layer": "application",
+      "responsibility": "git 状态/历史查询与写操作的领域规则：输出解析、命令封装与超时、路径安全防线（零 HTTP / 零应用状态）",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-git/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-git/src/parse.rs",
+          "symbol": "parse_porcelain / parse_numstat / parse_log",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-git/src/exec.rs",
+          "symbol": "git / GIT_TIMEOUT",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-git/src/ops.rs",
+          "symbol": "commit_all / discard / discard_all",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-git/tests/module_size_guard.rs",
+          "symbol": "领域边界与符号冻结守卫",
+          "kind": "config"
+        }
+      ],
+      "health": {
+        "score": 84,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "review_note": "c-arch-1 外提产物：694 行 git 工作树从 server-api（原 git.rs）整体迁出，零 axum、零 AppState、零 db、零 agent——只依赖 common-foundation，是「领域规则不内驻边界层」的第一个可验证落点。8 个 HTTP handler 留 routes/repo.rs 且只做入参解析与响应映射，编排落 service/git.rs。自带 module_size_guard：文件集快照、单文件 ≤300 行、禁用依赖面、导出符号冻结，防它再长回边界或反向依赖应用层。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T14:10:00+08:00",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "easyvibe-pipeline",
+      "name": "仓库 watcher 管线",
+      "layer": "application",
+      "responsibility": "单仓库 watcher 管线：无合法地图时自动归纳 + map/growth/progress 三 watcher → 事件总线（启动挂载与动态注册共用）",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-pipeline/**"
+      ],
+      "key_entries": [
+        {
+          "file": "easyvibe-backend/crates/easyvibe-pipeline/src/lib.rs",
+          "symbol": "spawn_repo_pipeline",
+          "kind": "function"
+        },
+        {
+          "file": "easyvibe-backend/crates/easyvibe-pipeline/tests/module_size_guard.rs",
+          "symbol": "方向守卫（禁反向依赖应用层/任务引擎）",
+          "kind": "config"
+        }
+      ],
+      "health": {
+        "score": 82,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "review_note": "c-arch-1 外提产物：85 行 watcher 管线从 server-api（原 pipeline.rs）迁出。关键裁定是把 harness 注入点由「吃 Arc<RwLock<Harness>>」改为**已解析的 auto_init_suffix: String**——由持有该状态的应用层（service/repo.rs）在 spawn 前读锁解析后传入，从而结构性切断 easyvibe-pipeline → task-engine 的反向依赖（守卫断言入口签名必须保留该字符串入参、且全文不得出现 Harness 类型）。出边 4 条全部向下（api-contract / map-domain / session-runtime / event-bus），无 direction_violation。",
+        "concerns": []
+      },
+      "last_analyzed_at": "2026-10-06T14:10:00+08:00",
+      "dependencies": [
+        "contract-foundation",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "persistence",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common|easyvibe_api_types",
+      "strength": "strong",
+      "id": "e1"
+    },
+    {
+      "from": "map-domain",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common",
+      "strength": "normal",
+      "id": "e2"
+    },
+    {
+      "from": "agent-runtime",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common|easyvibe_api_types",
+      "strength": "normal",
+      "id": "e3"
+    },
+    {
+      "from": "agent-runtime",
+      "to": "persistence",
+      "type": "import",
+      "label": "easyvibe_db（settings/agent 仓储）",
+      "strength": "normal",
+      "id": "e4"
+    },
+    {
+      "from": "agent-runtime",
+      "to": "map-domain",
+      "type": "import",
+      "label": "easyvibe_map（巡检校验/回写）",
+      "strength": "weak",
+      "id": "e5"
+    },
+    {
+      "from": "event-bus",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common|easyvibe_api_types",
+      "strength": "normal",
+      "id": "e6"
+    },
+    {
+      "from": "task-engine",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_api_types",
+      "strength": "normal",
+      "id": "e7"
+    },
+    {
+      "from": "task-engine",
+      "to": "persistence",
+      "type": "db",
+      "label": "TaskRow/审批/产物读写",
+      "strength": "strong",
+      "id": "e8"
+    },
+    {
+      "from": "task-engine",
+      "to": "map-domain",
+      "type": "import",
+      "label": "easyvibe_map（受影响模块/子图）",
+      "strength": "normal",
+      "id": "e9"
+    },
+    {
+      "from": "task-engine",
+      "to": "agent-runtime",
+      "type": "call",
+      "label": "SessionManager / ai-agent 槽位",
+      "strength": "normal",
+      "id": "e10"
+    },
+    {
+      "from": "task-engine",
+      "to": "event-bus",
+      "type": "event",
+      "label": "BusEvent::publish（任务状态推送）",
+      "strength": "strong",
+      "id": "e11"
+    },
+    {
+      "from": "server-api",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common|easyvibe_api_types",
+      "strength": "strong",
+      "id": "e12"
+    },
+    {
+      "from": "server-api",
+      "to": "persistence",
+      "type": "db",
+      "label": "全部聚合域仓储装配",
+      "strength": "strong",
+      "id": "e13"
+    },
+    {
+      "from": "server-api",
+      "to": "map-domain",
+      "type": "call",
+      "label": "MapService（读取/校验/watcher）",
+      "strength": "strong",
+      "id": "e14"
+    },
+    {
+      "from": "server-api",
+      "to": "agent-runtime",
+      "type": "call",
+      "label": "SessionManager / PatrolService / QaClient",
+      "strength": "strong",
+      "id": "e15"
+    },
+    {
+      "from": "server-api",
+      "to": "event-bus",
+      "type": "event",
+      "label": "BusEvent 发布 + QueueState 宿主桥",
+      "strength": "strong",
+      "id": "e16"
+    },
+    {
+      "from": "server-api",
+      "to": "task-engine",
+      "type": "call",
+      "label": "TaskExecutor（enqueue/decide/remediate/rewind）",
+      "strength": "strong",
+      "id": "e17"
+    },
+    {
+      "from": "server-api",
+      "to": "map-toolchain",
+      "type": "config",
+      "label": "build.rs 编译期读 scripts/assets.json 派生受管资产名录",
+      "strength": "normal",
+      "id": "e18"
+    },
+    {
+      "from": "server-api",
+      "to": "easyvibe-git",
+      "type": "import",
+      "label": "easyvibe_git（service/git.rs 调领域）",
+      "strength": "normal",
+      "id": "e19"
+    },
+    {
+      "from": "server-api",
+      "to": "easyvibe-pipeline",
+      "type": "call",
+      "label": "spawn_repo_pipeline（service/repo.rs 挂管线）",
+      "strength": "normal",
+      "id": "e20"
+    },
+    {
+      "from": "renderer-core",
+      "to": "server-api",
+      "type": "api",
+      "label": "REST /api/*（api/core.ts 唯一 fetch 出口）+ WS /ws",
+      "strength": "strong",
+      "id": "e21"
+    },
+    {
+      "from": "renderer-core",
+      "to": "desktop-shell",
+      "type": "call",
+      "label": "宿主能力门面 host.ts（@tauri-apps/* 唯一落点）",
+      "strength": "weak",
+      "direction_violation": true,
+      "id": "e22"
+    },
+    {
+      "from": "console-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "label": "@/runtime/*|@/api/*|@/shared/*|@/components/ui/*",
+      "strength": "strong",
+      "id": "e23"
+    },
+    {
+      "from": "console-ui",
+      "to": "map-canvas",
+      "type": "import",
+      "label": "@/components/canvas/CanvasBoundary|TaskFormPanel|IssuesList",
+      "strength": "normal",
+      "id": "e24"
+    },
+    {
+      "from": "console-ui",
+      "to": "chat-ui",
+      "type": "import",
+      "label": "@/components/chat/SuggestPanel|WorkbenchPage",
+      "strength": "normal",
+      "id": "e25"
+    },
+    {
+      "from": "console-ui",
+      "to": "task-ui",
+      "type": "import",
+      "label": "@/components/taskworkflow/TaskPage|taskStage",
+      "strength": "normal",
+      "id": "e26"
+    },
+    {
+      "from": "chat-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "label": "@/runtime/*|@/api/*|@/shared/*",
+      "strength": "strong",
+      "id": "e27"
+    },
+    {
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import",
+      "label": "@/components/taskworkflow/StagePipeline",
+      "strength": "weak",
+      "id": "e28"
+    },
+    {
+      "from": "task-ui",
+      "to": "renderer-core",
+      "type": "import",
+      "label": "@/runtime/*|@/api/*|@/shared/*",
+      "strength": "strong",
+      "id": "e29"
+    },
+    {
+      "from": "map-canvas",
+      "to": "renderer-core",
+      "type": "import",
+      "label": "@/shared/logic/layout|depsAnalysis|@/runtime/*|@/api/*|@/components/ui/*",
+      "strength": "strong",
+      "id": "e30"
+    },
+    {
+      "from": "map-canvas",
+      "to": "chat-ui",
+      "type": "import",
+      "label": "@/components/chat/PanelChat（白名单单向）",
+      "strength": "weak",
+      "id": "e32"
+    },
+    {
+      "from": "desktop-shell",
+      "to": "server-api",
+      "type": "api",
+      "label": "spawn sidecar 127.0.0.1:7151 + /health 就绪轮询",
+      "strength": "strong",
+      "id": "e33"
+    },
+    {
+      "from": "desktop-shell",
+      "to": "map-toolchain",
+      "type": "config",
+      "label": "build.rs 编译期读 scripts/assets.json 派生 sidecar env 名册",
+      "strength": "weak",
+      "id": "e34"
+    },
+    {
+      "from": "easyvibe-git",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_common (ApiError)",
+      "strength": "weak",
+      "id": "e35"
+    },
+    {
+      "from": "easyvibe-pipeline",
+      "to": "contract-foundation",
+      "type": "import",
+      "label": "easyvibe_api_types",
+      "strength": "weak",
+      "id": "e36"
+    },
+    {
+      "from": "easyvibe-pipeline",
+      "to": "map-domain",
+      "type": "import",
+      "label": "easyvibe_map",
+      "strength": "normal",
+      "id": "e37"
+    },
+    {
+      "from": "easyvibe-pipeline",
+      "to": "agent-runtime",
+      "type": "import",
+      "label": "easyvibe_session",
+      "strength": "weak",
+      "id": "e38"
+    },
+    {
+      "from": "easyvibe-pipeline",
+      "to": "event-bus",
+      "type": "import",
+      "label": "easyvibe_event_bus",
+      "strength": "normal",
+      "id": "e39"
+    }
+  ],
+  "health": {
+    "score": 85,
+    "coupling": "medium",
+    "complexity": "high",
+    "churn": "high",
+    "decay_flags": [
+      "layer_violation"
+    ],
+    "review_note": "本轮闭环 c-arch-1：server-api 不再「一个模块吃掉 app 全部文件」——git 工作树（694）、增量归纳判定（605）、保鲜分级（179）、watcher 管线（85）、concerns 对照（175）五个领域实现全部外提（新 crate easyvibe-git / easyvibe-pipeline + easyvibe-map 的 freshness/induction/concerns 子模块），routes/* 取业务能力一律经 crate::service，app crate 只留 main/router/state/bootstrap/ws 与 HTTP 边界。关键机制是把纪律变成会失败的断言：app src 文件集双向全等 + 五领域文件禁止存在（R6）；routes 禁串 G1、禁内联 JSON 解析 G2、service 归属映射扇出 G3′（默认 ≤1 + 全局唯一登记例外 repo.rs=repo+git，以 /repos/{id}/git/* 子资源前缀证明）、LOC ≤400 G4（R7）；并从 easyvibe-ai-agent/easyvibe-session 起为两个新 crate 与 easyvibe-map 子模块补 module_size_guard（文件集 + 依赖面 + LOC + 符号冻结）（R10）。复检口径：地图自评分（本文件）与巡检分（HealthPage 按测量时间新旧裁决）双口径分别登记。余下架构级问题仅 c-arch-3（前端组件归属无规则可循），由后续轮次处理。",
+    "concerns": []
+  }
+}

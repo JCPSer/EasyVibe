@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PageId } from '@/components/AppShell'
+import type { PageId } from '@/components/shell/AppShell'
 import { listTasks, taskApprovals } from '@/api/task'
 import { toast } from '@/runtime/toast'
 import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'

@@ -58,8 +58,8 @@ fn god_files_stay_below_size_limits() {
     // 主文件：装配与阶段状态机（≤900，见文件头 N4 豁免说明）
     assert!(loc("main.rs") <= 900, "main.rs 超 900 行（god file 复发）: {}", loc("main.rs"));
     assert!(loc("task_exec.rs") <= 900, "task_exec.rs 超 900 行: {}", loc("task_exec.rs"));
-    // 装配层其余文件
-    for f in ["state.rs", "map_concerns.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "pipeline.rs", "freshness.rs", "git.rs", "session_queue_routes.rs"] {
+    // 装配层其余文件（c-arch-1：git/freshness/reinduce/pipeline/map_concerns 已迁出本 crate）
+    for f in ["state.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "session_queue_routes.rs"] {
         assert!(loc(f) <= 700, "{f} 超 700 行: {}", loc(f));
     }
     // 服务编排层（方案 R1：service/{mod,chat,task,map}.rs）
@@ -437,6 +437,17 @@ const ROUTES_FORBIDDEN_ORCH: &[&str] = &[
     "crate::reinduce",
     "crate::freshness",
     "crate::map_concerns",
+    // c-arch-1：git / pipeline 均已外提——routes 取能力只经 crate::service
+    "crate::git",
+    "crate::pipeline",
+    "easyvibe_git::",
+    "easyvibe_pipeline::",
+    // c-arch-1 审查 P1：easyvibe-map 的领域子模块是同一批规则的新地址，
+    // service/map.rs 正是直接调 easyvibe_map::{freshness,induction,concerns}——
+    // 若不入表，routes/* 写 easyvibe_map::induction::decide(..) 即可绕过本守卫
+    "easyvibe_map::freshness::",
+    "easyvibe_map::induction::",
+    "easyvibe_map::concerns::",
     "crate::assets::resolve_text_asset",
     "easyvibe_map::atomic_write",
     "tokio::spawn",
@@ -452,7 +463,7 @@ const ROUTES_LEGACY_BUDGET: &[(&str, usize)] = &[
     ("agent.rs", 3),
     ("chat.rs", 2),
     ("dev_docs.rs", 1),
-    ("repo.rs", 3),
+    // c-arch-1：repo.rs 摘牌（git/pipeline/wipe 编排全部下沉 crate::service，违规数归 0）
     ("sessions.rs", 5),
     ("settings.rs", 6),
     ("task.rs", 9),
@@ -463,8 +474,9 @@ const ROUTES_FROZEN_FILES: &[&str] = &[
     "agent.rs", "chat.rs", "dev_docs.rs", "map.rs", "mod.rs", "repo.rs", "sessions.rs", "settings.rs", "task.rs",
 ];
 
-/// service/ 文件集归属快照（方案 R1 拆分为 {mod,chat,task,map}.rs）。
-const SERVICE_FROZEN_FILES: &[&str] = &["chat.rs", "map.rs", "mod.rs", "task.rs"];
+/// service/ 文件集归属快照（方案 R1 拆分为 {mod,chat,task,map}.rs；
+/// c-arch-1 增 {git,repo,reinduce}.rs —— routes 只经 crate::service 取能力的落点）。
+const SERVICE_FROZEN_FILES: &[&str] = &["chat.rs", "git.rs", "map.rs", "mod.rs", "reinduce.rs", "repo.rs", "task.rs"];
 
 fn rs_files(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
@@ -521,4 +533,249 @@ fn service_file_set_is_frozen() {
     let mut expected: Vec<String> = SERVICE_FROZEN_FILES.iter().map(|s| s.to_string()).collect();
     expected.sort();
     assert_eq!(actual, expected, "service/ 文件集漂移——须登记快照（R1/R8④）");
+}
+
+// ============================================================================
+// R6（c-arch-1）：app crate 源码文件集冻结 + 五领域文件禁止存在
+// ============================================================================
+
+/// 顶层文件归属快照（生产 + 测试夹具；少一个=误删，多一个=未登记的新归属）。
+const APP_TOP_FILES: &[&str] = &[
+    "assets.rs", "bootstrap.rs", "main.rs", "router.rs", "session_queue_routes.rs", "state.rs", "ws.rs",
+    "test_support.rs", "tests_a.rs", "tests_b.rs", "tests_c.rs", "tests_d.rs",
+];
+
+/// task_exec 切片（task-engine 归属，共享同一 crate；由 arch_guard.rs 约束反向引用）。
+const APP_TASK_ENGINE_FILES: &[&str] = &[
+    "task_exec.rs",
+    "task_exec/changes.rs", "task_exec/contract.rs", "task_exec/harness.rs", "task_exec/prompt.rs",
+    "task_exec/review.rs", "task_exec/test_util.rs", "task_exec/tests_changes.rs",
+    "task_exec/tests_contract.rs", "task_exec/tests_flow.rs", "task_exec/tests_gates.rs",
+    "task_exec/tests_harness.rs", "task_exec/tests_prompt.rs",
+];
+
+/// 五个领域文件必须已外提：app crate 只留 HTTP 边界与装配。
+const EXTRACTED_DOMAIN_FILES: &[&str] = &["git.rs", "freshness.rs", "reinduce.rs", "pipeline.rs", "map_concerns.rs"];
+
+/// 递归收集 src/**/*.rs（相对 src/ 的 `/` 分隔路径，升序）。
+fn app_src_tree() -> Vec<String> {
+    fn walk(dir: &std::path::Path, prefix: &str, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for p in entries {
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            if p.is_dir() {
+                walk(&p, &format!("{prefix}{name}/"), out);
+            } else if name.ends_with(".rs") {
+                out.push(format!("{prefix}{name}"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&app_src(), "", &mut out);
+    out.sort();
+    out
+}
+
+#[test]
+fn app_src_tree_is_frozen() {
+    let mut expected: Vec<String> = APP_TOP_FILES.iter().map(|s| s.to_string()).collect();
+    expected.extend(rs_files(&app_src().join("routes")).into_iter().map(|f| format!("routes/{f}")));
+    expected.extend(rs_files(&app_src().join("service")).into_iter().map(|f| format!("service/{f}")));
+    expected.extend(APP_TASK_ENGINE_FILES.iter().map(|s| s.to_string()));
+    expected.sort();
+
+    let actual = app_src_tree();
+    assert_eq!(
+        actual, expected,
+        "easyvibe-app/src 文件集漂移——多一个=边界层复活/未登记归属，少一个=误删（c-arch-1 R6 冻结）"
+    );
+    assert!(
+        !expected.iter().any(|f| f.starts_with("routes/") && !f.ends_with(".rs")),
+        "routes 归属项必须是 .rs 文件"
+    );
+}
+
+#[test]
+fn extracted_domain_files_are_gone() {
+    for f in EXTRACTED_DOMAIN_FILES {
+        assert!(
+            !app_src().join(f).exists(),
+            "easyvibe-app/src/{f} 仍存在——领域规则内驻边界层，c-arch-1 复发（R6）"
+        );
+        assert!(
+            !read("main.rs").contains(&format!("mod {};", f.trim_end_matches(".rs"))),
+            "main.rs 仍声明 `mod {};`——领域模块未真正外提（R6）",
+            f.trim_end_matches(".rs")
+        );
+    }
+}
+
+// ============================================================================
+// R7（c-arch-1）：边界层不得含业务规则 —— G1（禁串，见 ROUTES_FORBIDDEN_ORCH）
+//                              + G2 禁解析型业务 + G3′ 归属映射扇出
+// ============================================================================
+
+/// 去 `//` 行注释与 `/* */` 块注释（保留字符串字面量），用于按「真实代码」判定。
+fn strip_comments(txt: &str) -> String {
+    let bytes = txt.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    let mut state = 0u8; // 0=code 1=line 2=block 3=str
+    while i < bytes.len() {
+        let c = bytes[i];
+        let n = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+        match state {
+            0 => {
+                if c == b'/' && n == b'/' {
+                    state = 1;
+                    i += 2;
+                    continue;
+                }
+                if c == b'/' && n == b'*' {
+                    state = 2;
+                    i += 2;
+                    continue;
+                }
+                if c == b'"' {
+                    state = 3;
+                }
+                out.push(c);
+            }
+            1 => {
+                if c == b'\n' {
+                    state = 0;
+                    out.push(c);
+                }
+            }
+            2 => {
+                if c == b'*' && n == b'/' {
+                    state = 0;
+                    i += 2;
+                    continue;
+                }
+            }
+            _ => {
+                out.push(c);
+                if c == b'\\' && i + 1 < bytes.len() {
+                    out.push(n);
+                    i += 2;
+                    continue;
+                }
+                if c == b'"' {
+                    state = 0;
+                }
+            }
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// 内联 serde 解析棘轮（G2）：routes 只做入参解析与响应映射，不得在此解码业务 JSON。
+/// 现存命中均为「DB 列 JSON / 透传字段」的错误兜底——逐文件显式登记，只降不升。
+const ROUTES_JSON_PARSE_RATCHET: &[(&str, usize)] = &[
+    ("agent.rs", 5),
+    ("chat.rs", 2),
+    ("sessions.rs", 1),
+    ("settings.rs", 1),
+    ("task.rs", 3),
+];
+const ROUTES_FORBIDDEN_PARSE: &[&str] = &["serde_json::from_str", "serde_json::from_value", "serde_json::to_value"];
+
+#[test]
+fn routes_have_no_undeclared_json_decoding() {
+    let dir = app_src().join("routes");
+    let mut violating: Vec<String> = Vec::new();
+    for fname in rs_files(&dir) {
+        if fname == "mod.rs" { continue; }
+        let txt = read(&format!("routes/{fname}"));
+        let count: usize = ROUTES_FORBIDDEN_PARSE.iter().map(|p| txt.matches(p).count()).sum();
+        if count == 0 { continue; }
+        violating.push(fname.clone());
+        match ROUTES_JSON_PARSE_RATCHET.iter().find(|(f, _)| *f == fname) {
+            Some((_, budget)) => assert!(
+                count <= *budget,
+                "routes/{fname} 内联 JSON 解析从 {budget} 增至 {count}——解析型业务须落 crate::service（R7 G2）"
+            ),
+            None => panic!(
+                "routes/{fname} 出现 {count} 处内联 JSON 解析——新文件不得在边界层解码业务 JSON（R7 G2）"
+            ),
+        }
+    }
+    let mut declared: Vec<String> = ROUTES_JSON_PARSE_RATCHET.iter().map(|(f, _)| f.to_string()).collect();
+    declared.sort();
+    violating.sort();
+    assert_eq!(violating, declared, "R7 G2 棘轮漂移——实际 {violating:?} != 登记 {declared:?}");
+}
+
+/// G3′（v2 重写）：routes 文件的 service 域**归属映射 + 受限例外**。
+/// 默认每文件 ≤1 个 service 域；全局恰允许 1 个 len==2 的登记项
+/// （`repo.rs` = 主域 `repo` + 子资源域 `git`，由 `/repos/{id}/git/*` 路径前缀证明其非跨域编排）。
+const ROUTE_SERVICE_MAP: &[(&str, &[&str], &str)] = &[
+    ("agent.rs", &[], ""),
+    ("chat.rs", &["chat"], "chat"),
+    ("dev_docs.rs", &[], ""),
+    ("map.rs", &["map"], "map"),
+    ("repo.rs", &["repo", "git"], "repo"),
+    ("sessions.rs", &[], ""),
+    ("settings.rs", &[], ""),
+    ("task.rs", &["task"], "task"),
+];
+const FANOUT_EXCEPTION_MAX: usize = 1;
+
+#[test]
+fn routes_service_fanout_is_declared() {
+    // 键集联动：与 routes 磁盘文件集、域路由表键集**同源**（结构不可悄悄漂移）
+    let mut keys: Vec<String> = rs_files(&app_src().join("routes")).into_iter().filter(|f| f != "mod.rs").collect();
+    keys.sort();
+    let mut declared: Vec<String> = ROUTE_SERVICE_MAP.iter().map(|(f, _, _)| f.to_string()).collect();
+    declared.sort();
+    assert_eq!(keys, declared, "ROUTE_SERVICE_MAP 键集必须与 routes/ 磁盘文件集（除 mod.rs）全等");
+
+    let mut domain_keys: Vec<String> =
+        FROZEN_DOMAIN_ROUTES.iter().map(|(f, _)| f.to_string()).filter(|f| f != "router.rs").collect();
+    domain_keys.sort();
+    assert_eq!(domain_keys, declared, "ROUTE_SERVICE_MAP 键集必须与 FROZEN_DOMAIN_ROUTES（除 router.rs）全等");
+
+    let exception_count = ROUTE_SERVICE_MAP.iter().filter(|(_, d, _)| d.len() == 2).count();
+    assert!(
+        exception_count <= FANOUT_EXCEPTION_MAX,
+        "len==2 的扇出例外有 {exception_count} 个 > {FANOUT_EXCEPTION_MAX}——例外只降不升（R7 G3′）"
+    );
+
+    for (file, decl, primary) in ROUTE_SERVICE_MAP {
+        assert!(decl.len() <= 2, "routes/{file} 声明的 service 域 {} 个 > 2（R7 G3′）", decl.len());
+        let raw = read(&format!("routes/{file}"));
+        let txt = strip_comments(&raw);
+        // 去 `use X as _;` 别名绕过面
+        let txt: String = txt.lines().filter(|l| !(l.trim_start().starts_with("use ") && l.contains(" as _;"))).collect::<Vec<_>>().join("\n");
+        let mut actual: Vec<String> = Vec::new();
+        let mut rest = txt.as_str();
+        while let Some(pos) = rest.find("crate::service::") {
+            let after = &rest[pos + "crate::service::".len()..];
+            let id: String = after.chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_').collect();
+            if !id.is_empty() && !actual.contains(&id) { actual.push(id); }
+            rest = &after[..];
+            if rest.is_empty() { break; }
+        }
+        let uses_root = txt.contains("crate::service::{");
+        for d in &actual {
+            assert!(decl.contains(&d.as_str()), "routes/{file} 调用了未声明的 service 域 `{d}`（声明 {decl:?}）——R7 G3′");
+        }
+        if uses_root {
+            assert!(decl.contains(primary), "routes/{file} 经 crate::service::{{…}} 根 re-export，但主域 `{primary}` 未声明（R7 G3′）");
+        }
+        if decl.is_empty() {
+            assert!(!uses_root && actual.is_empty(), "routes/{file} 声明零 service 域却仍在编排（R7 G3′）");
+        }
+        // 子资源域证明：len==2 只能是「主域 + 其子资源路径前缀」，不是任意跨域编排
+        if decl.len() == 2 {
+            let sub = decl.iter().find(|d| **d != *primary).expect("非主域项");
+            let routes = FROZEN_DOMAIN_ROUTES.iter().find(|(f, _)| f == file).map(|(_, r)| *r).unwrap_or(&[]);
+            let sub_routes = routes.iter().filter(|r| r.contains(&format!("/{sub}/"))).count();
+            assert!(*file == "repo.rs" && *sub == "git" && sub_routes > 0,
+                "routes/{file} 的 2 项扇出未通过子资源前缀证明（唯一合法组合是 repo.rs = repo + git）——换组合须走评审改表");
+        }
+    }
 }

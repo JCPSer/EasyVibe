@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectIssues } from '@/components/IssuesList'
+import { collectIssues } from '@/components/canvas/IssuesList'
 import type { CodeMap } from '@/types/map'
 
 const mkModule = (id: string, score: number, flags: string[], deps: string[] = []) =>

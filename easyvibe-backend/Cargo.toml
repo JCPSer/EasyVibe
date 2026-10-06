@@ -9,6 +9,9 @@ members = [
     "crates/easyvibe-api-types",
     "crates/easyvibe-common",
     "crates/easyvibe-event-bus",
+    # c-arch-1：从 server-api 外提的领域模块（git 工作树 / watcher 管线）
+    "crates/easyvibe-git",
+    "crates/easyvibe-pipeline",
 ]
 
 [workspace.dependencies]
@@ -37,6 +40,8 @@ easyvibe-session = { path = "crates/easyvibe-session" }
 easyvibe-ai-agent = { path = "crates/easyvibe-ai-agent" }
 easyvibe-db = { path = "crates/easyvibe-db" }
 easyvibe-event-bus = { path = "crates/easyvibe-event-bus" }
+easyvibe-git = { path = "crates/easyvibe-git" }
+easyvibe-pipeline = { path = "crates/easyvibe-pipeline" }
 futures-util = "0.3"
 
 [profile.release]
