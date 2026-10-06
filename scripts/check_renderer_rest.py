@@ -34,8 +34,8 @@ RE_FETCH = re.compile(r"(?<![\w.])fetch\s*\(")
 RE_APIPATH = re.compile(r"['\"`]/api/")
 RE_WS = re.compile(r"new\s+WebSocket\b")
 
-# presentation 四模块（地图口径 A8a/A8b 的 from 白名单）
-PRESENTATION = {"console-ui", "chat-ui", "task-ui", "map-canvas"}
+# presentation 五模块（地图口径 A8a/A8b 的 from 白名单；settings-ui 于 c-console-ui-3 析出）
+PRESENTATION = {"console-ui", "settings-ui", "chat-ui", "task-ui", "map-canvas"}
 APPLICATION = {"server-api", "task-engine", "event-bus"}
 
 

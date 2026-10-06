@@ -2,12 +2,12 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-06T17:41:31+08:00",
+    "generated_at": "2026-10-06T18:28:44+08:00",
     "stats": {
-      "files_total": 358,
-      "files_covered": 358,
+      "files_total": 359,
+      "files_covered": 359,
       "coverage_ratio": 1.0,
-      "edges_derived": 48
+      "edges_derived": 52
     }
   },
   "layers": [
@@ -376,7 +376,6 @@
         "easyvibe-renderer/src/components/shell/**",
         "easyvibe-renderer/src/components/gate/**",
         "easyvibe-renderer/src/components/overlays/**",
-        "easyvibe-renderer/src/components/settings/**",
         "easyvibe-renderer/src/components/__tests__/**"
       ],
       "dependencies": [
@@ -386,7 +385,8 @@
         "ui-kit",
         "map-canvas",
         "chat-ui",
-        "task-ui"
+        "task-ui",
+        "settings-ui"
       ],
       "health": {
         "score": 76,
@@ -398,12 +398,29 @@
           {
             "id": "c-console-ui-2",
             "severity": "high"
-          },
-          {
-            "id": "c-console-ui-3",
-            "severity": "high"
           }
         ]
+      }
+    },
+    {
+      "id": "settings-ui",
+      "name": "设置面板与分区",
+      "layer": "presentation",
+      "files": [
+        "easyvibe-renderer/src/components/settings/**"
+      ],
+      "dependencies": [
+        "renderer-runtime",
+        "renderer-api",
+        "ui-kit"
+      ],
+      "health": {
+        "score": 85,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
       }
     },
     {
@@ -756,132 +773,160 @@
     },
     {
       "id": "e30",
-      "from": "chat-ui",
-      "to": "renderer-runtime",
+      "from": "console-ui",
+      "to": "settings-ui",
       "type": "import",
-      "strength": "strong"
+      "strength": "normal"
     },
     {
       "id": "e32",
-      "from": "chat-ui",
+      "from": "settings-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e33",
+      "from": "settings-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e33",
-      "from": "chat-ui",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
       "id": "e34",
-      "from": "chat-ui",
-      "to": "task-ui",
+      "from": "settings-ui",
+      "to": "ui-kit",
       "type": "import",
-      "strength": "weak"
+      "strength": "normal"
     },
     {
       "id": "e35",
-      "from": "task-ui",
+      "from": "chat-ui",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e36",
-      "from": "task-ui",
+      "from": "chat-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e37",
-      "from": "task-ui",
+      "from": "chat-ui",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e38",
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e39",
+      "from": "task-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e40",
+      "from": "task-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e41",
+      "from": "task-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e42",
       "from": "map-canvas",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e39",
+      "id": "e43",
       "from": "map-canvas",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e40",
+      "id": "e44",
       "from": "map-canvas",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e41",
+      "id": "e45",
       "from": "map-canvas",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e42",
+      "id": "e46",
       "from": "map-canvas",
       "to": "chat-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e43",
+      "id": "e47",
       "from": "desktop-shell",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e44",
+      "id": "e48",
       "from": "desktop-shell",
       "to": "map-toolchain",
       "type": "config",
       "strength": "weak"
     },
     {
-      "id": "e45",
+      "id": "e49",
       "from": "easyvibe-git",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e46",
+      "id": "e50",
       "from": "easyvibe-pipeline",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e47",
+      "id": "e51",
       "from": "easyvibe-pipeline",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e48",
+      "id": "e52",
       "from": "easyvibe-pipeline",
       "to": "agent-runtime",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e49",
+      "id": "e53",
       "from": "easyvibe-pipeline",
       "to": "event-bus",
       "type": "import",
@@ -894,14 +939,9 @@
     "complexity": "high",
     "churn": "high",
     "decay_flags": [
-      "layer_violation",
-      "responsibility_overlap"
+      "layer_violation"
     ],
     "concerns": [
-      {
-        "id": "c-arch-6",
-        "severity": "high"
-      },
       {
         "id": "c-arch-5",
         "severity": "high"

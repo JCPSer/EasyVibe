@@ -42,10 +42,10 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，19 模块 / 48 边）；
+      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，20 模块 / 52 边）；
       # 旧快照 map_post_migration.json（14 模块 / 31 边）仅由 --selfcheck 的 H0/H1 负例自证使用。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 48
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 52
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
@@ -99,3 +99,12 @@ jobs:
 
       - name: renderer 粒度守卫自检（反例必红）
         run: python3 scripts/check_renderer_granularity.py --selfcheck
+
+      # console 侧拆格粒度守卫（c-arch-6 并列子句 / c-console-ui-3）：防 settings 域回并 console-ui、
+      # 防新格 settings-ui 再吞装配壳。判据 C0–C3b + C5 窄依赖白名单，N4 真值双向断言。
+      # 不依赖 live map，对受版本控制 fixture；settings 回并即红。
+      - name: console 粒度守卫（防 settings 回并 / 防再吞壳组件）
+        run: python3 scripts/check_console_granularity.py --check --map scripts/tests/fixtures/map_post_split.json
+
+      - name: console 粒度守卫自检（反例必红）
+        run: python3 scripts/check_console_granularity.py --selfcheck
