@@ -278,7 +278,7 @@
               "db",
               "config"
             ],
-            "description": "call=函数调用；import=代码引用；api=HTTP/RPC；event=消息事件；db=共享数据库；config=配置依赖"
+            "description": "call=函数调用；import=代码引用；api=HTTP/RPC；event=消息事件；db=共享数据库；config=运行期配置依赖（不含构建期产物托管/内嵌——后者不连边，判据见 scripts/map_edge_policy.json）"
           },
           "label": {
             "type": "string",

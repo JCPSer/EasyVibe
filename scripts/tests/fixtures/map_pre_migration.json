@@ -1,0 +1,375 @@
+{
+  "_fixture": {
+    "note": "与 live map 同构最小化：仅保留无环验收所需字段（layers/modules/edges/health）",
+    "source": "EasyVibe .easyvibe/map/map.json"
+  },
+  "layers": [
+    {
+      "id": "app-entry",
+      "order": 0
+    },
+    {
+      "id": "presentation",
+      "order": 1
+    },
+    {
+      "id": "presentation-support",
+      "order": 2
+    },
+    {
+      "id": "application",
+      "order": 3
+    },
+    {
+      "id": "application-support",
+      "order": 4
+    },
+    {
+      "id": "domain",
+      "order": 5
+    },
+    {
+      "id": "data",
+      "order": 6
+    },
+    {
+      "id": "foundation",
+      "order": 7
+    },
+    {
+      "id": "tooling",
+      "order": 8
+    }
+  ],
+  "modules": [
+    {
+      "id": "map-toolchain",
+      "layer": "tooling",
+      "dependencies": []
+    },
+    {
+      "id": "contract-foundation",
+      "layer": "foundation",
+      "dependencies": []
+    },
+    {
+      "id": "persistence",
+      "layer": "data",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "map-domain",
+      "layer": "domain",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "agent-runtime",
+      "layer": "domain",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain"
+      ]
+    },
+    {
+      "id": "event-bus",
+      "layer": "application-support",
+      "dependencies": [
+        "contract-foundation"
+      ]
+    },
+    {
+      "id": "task-engine",
+      "layer": "application",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ]
+    },
+    {
+      "id": "server-api",
+      "layer": "application",
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus",
+        "task-engine",
+        "map-toolchain"
+      ]
+    },
+    {
+      "id": "renderer-core",
+      "layer": "presentation-support",
+      "dependencies": [
+        "server-api",
+        "desktop-shell"
+      ]
+    },
+    {
+      "id": "console-ui",
+      "layer": "presentation",
+      "dependencies": [
+        "renderer-core",
+        "map-canvas",
+        "chat-ui",
+        "task-ui"
+      ]
+    },
+    {
+      "id": "chat-ui",
+      "layer": "presentation",
+      "dependencies": [
+        "renderer-core",
+        "task-ui"
+      ]
+    },
+    {
+      "id": "task-ui",
+      "layer": "presentation",
+      "dependencies": [
+        "renderer-core"
+      ]
+    },
+    {
+      "id": "map-canvas",
+      "layer": "presentation",
+      "dependencies": [
+        "renderer-core",
+        "chat-ui"
+      ]
+    },
+    {
+      "id": "desktop-shell",
+      "layer": "app-entry",
+      "dependencies": [
+        "server-api",
+        "console-ui",
+        "map-toolchain"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "persistence",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e2",
+      "from": "map-domain",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e3",
+      "from": "agent-runtime",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e4",
+      "from": "agent-runtime",
+      "to": "persistence",
+      "type": "import"
+    },
+    {
+      "id": "e5",
+      "from": "agent-runtime",
+      "to": "map-domain",
+      "type": "import"
+    },
+    {
+      "id": "e6",
+      "from": "event-bus",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e7",
+      "from": "task-engine",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e8",
+      "from": "task-engine",
+      "to": "persistence",
+      "type": "db"
+    },
+    {
+      "id": "e9",
+      "from": "task-engine",
+      "to": "map-domain",
+      "type": "import"
+    },
+    {
+      "id": "e10",
+      "from": "task-engine",
+      "to": "agent-runtime",
+      "type": "call"
+    },
+    {
+      "id": "e11",
+      "from": "task-engine",
+      "to": "event-bus",
+      "type": "event"
+    },
+    {
+      "id": "e12",
+      "from": "server-api",
+      "to": "contract-foundation",
+      "type": "import"
+    },
+    {
+      "id": "e13",
+      "from": "server-api",
+      "to": "persistence",
+      "type": "db"
+    },
+    {
+      "id": "e14",
+      "from": "server-api",
+      "to": "map-domain",
+      "type": "call"
+    },
+    {
+      "id": "e15",
+      "from": "server-api",
+      "to": "agent-runtime",
+      "type": "call"
+    },
+    {
+      "id": "e16",
+      "from": "server-api",
+      "to": "event-bus",
+      "type": "event"
+    },
+    {
+      "id": "e17",
+      "from": "server-api",
+      "to": "task-engine",
+      "type": "call"
+    },
+    {
+      "id": "e18",
+      "from": "server-api",
+      "to": "map-toolchain",
+      "type": "config"
+    },
+    {
+      "id": "e19",
+      "from": "renderer-core",
+      "to": "server-api",
+      "type": "api"
+    },
+    {
+      "id": "e20",
+      "from": "renderer-core",
+      "to": "desktop-shell",
+      "type": "call",
+      "direction_violation": true
+    },
+    {
+      "id": "e21",
+      "from": "console-ui",
+      "to": "renderer-core",
+      "type": "import"
+    },
+    {
+      "id": "e22",
+      "from": "console-ui",
+      "to": "map-canvas",
+      "type": "import"
+    },
+    {
+      "id": "e23",
+      "from": "console-ui",
+      "to": "chat-ui",
+      "type": "import"
+    },
+    {
+      "id": "e24",
+      "from": "console-ui",
+      "to": "task-ui",
+      "type": "import"
+    },
+    {
+      "id": "e25",
+      "from": "chat-ui",
+      "to": "renderer-core",
+      "type": "import"
+    },
+    {
+      "id": "e26",
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import"
+    },
+    {
+      "id": "e27",
+      "from": "task-ui",
+      "to": "renderer-core",
+      "type": "import"
+    },
+    {
+      "id": "e28",
+      "from": "map-canvas",
+      "to": "renderer-core",
+      "type": "import"
+    },
+    {
+      "id": "e29",
+      "from": "map-canvas",
+      "to": "chat-ui",
+      "type": "import"
+    },
+    {
+      "id": "e30",
+      "from": "desktop-shell",
+      "to": "server-api",
+      "type": "api"
+    },
+    {
+      "id": "e31",
+      "from": "desktop-shell",
+      "to": "console-ui",
+      "type": "config"
+    },
+    {
+      "id": "e32",
+      "from": "desktop-shell",
+      "to": "map-toolchain",
+      "type": "config"
+    }
+  ],
+  "health": {
+    "decay_flags": [
+      "layer_violation",
+      "responsibility_overlap"
+    ],
+    "concerns": [
+      {
+        "id": "c-arch-1",
+        "severity": "critical"
+      },
+      {
+        "id": "c-arch-2",
+        "severity": "high"
+      },
+      {
+        "id": "c-arch-3",
+        "severity": "high"
+      }
+    ]
+  }
+}

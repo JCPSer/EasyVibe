@@ -33,3 +33,17 @@ jobs:
       # 入口 shim 可用性（矩阵 §五命令）
       - name: shim 入口（verify-assets.sh）
         run: bash scripts/verify-assets.sh --check
+
+      # R2 壳边界守卫：桌面壳对前端产物只有「托管」语义，不得有「符号依赖」
+      - name: 壳边界守卫（desktop-shell 零前端引用）
+        run: python3 scripts/check_shell_boundary.py --check
+
+      - name: 壳边界守卫自检（反例必红自证）
+        run: python3 scripts/check_shell_boundary.py --selfcheck
+
+      # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture
+      - name: 地图无环验收（对受版本控制 fixture）
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_migration.json
+
+      - name: 地图无环守卫自检（负例必红）
+        run: python3 scripts/verify_map_acyclic.py --selfcheck

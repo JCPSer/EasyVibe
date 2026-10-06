@@ -22,6 +22,13 @@ META = os.path.join(MAP_DIR, 'meta.json')
 ORDER = os.path.join(MAP_DIR, 'emit_order.json')
 SCHEMA = os.environ.get('SCHEMA_PATH', os.path.join(REPO, 'easyvibe-map-schema-v1.1.json'))
 
+# R3/R4：构建期关系判据与图判据的唯一实现（scripts/map_policy.py，受版本控制）
+sys.path.insert(0, os.path.join(REPO, 'scripts'))
+import map_policy  # noqa: E402
+
+# R4 关口 C：direction_violation 棘轮基线（只降不升）
+DV_BASELINE = 1
+
 MODULE_KEYS = {'id', 'last_analyzed_at', 'name', 'layer', 'responsibility', 'files',
                'key_entries', 'dependencies', 'health', 'notes'}
 
@@ -275,6 +282,16 @@ def cmd_emit_module():
 def cmd_emit_edges():
     raw = sys.stdin.read()
     obj = json.loads(raw)   # {"id": "...", "out_edges": [...]}
+    # R3 前置过滤：构建期产物托管/内嵌关系不得写入 parts（fail-closed，打回归纳重判）
+    pol = map_policy.load_policy(REPO)
+    md = map_policy.must_drop_pairs(pol)
+    rejected = ['%s->%s' % (e.get('from'), e.get('to')) for e in obj['out_edges']
+                if (e.get('from'), e.get('to')) in md]
+    if rejected:
+        print(json.dumps({'ok': False,
+                          'errors': ['build-time relation rejected: %s' % r for r in rejected]},
+                         ensure_ascii=False))
+        sys.exit(1)
     sch = load_schema()
     item = sch['properties']['edges']['items']
     errors = []
@@ -329,6 +346,7 @@ def cmd_append_log():
 # ---------------------------------------------------------------- finalize
 def assemble():
     order = json.load(open(ORDER, encoding='utf-8'))
+    retired = set(order.get('retired_edge_ids', []))
     modules = []
     edges = []
     eid = 0
@@ -338,6 +356,8 @@ def assemble():
         out = json.load(open(ep, encoding='utf-8'))['out_edges'] if os.path.exists(ep) else []
         for e in out:
             eid += 1
+            while 'e%d' % eid in retired:   # 退役 id 永久腾空（INV-4：边 id 稳定）
+                eid += 1
             e = dict(e)
             e['id'] = 'e%d' % eid
             if e.get('direction_violation') is None:
@@ -348,20 +368,68 @@ def assemble():
     layers = sorted(order['layers'], key=lambda l: l['order'])
     return layers, modules, edges
 
+def apply_module_correction(modules, edges, mid, patch):
+    """校正事件：以补丁的 out_edges 重放某模块出边，dependencies 恒由出边派生（INV-1/INV-2）。"""
+    m = next((x for x in modules if x['id'] == mid), None)
+    if m is None:
+        return
+    if 'out_edges' in patch:
+        edges[:] = [e for e in edges if e['from'] != mid]
+        edges.extend(patch['out_edges'])
+        cur_out = patch['out_edges']
+    else:
+        cur_out = [e for e in edges if e['from'] == mid]
+    derived = [e['to'] for e in cur_out]
+    if 'dependencies' in patch and patch['dependencies'] != derived:
+        print(json.dumps({'ok': False, 'stage': 'replay',
+                          'problems': ['correction deps mismatch: %s declared=%s derived=%s'
+                                       % (mid, patch['dependencies'], derived)]}, ensure_ascii=False))
+        sys.exit(1)
+    m['dependencies'] = derived
+
+
 def replay_from_log():
     lines = [json.loads(l) for l in open(GROWTH, encoding='utf-8') if l.strip()]
     layers, modules, edges, health = [], [], [], None
     for ev in lines:
-        if ev['type'] == 'layer':
+        t = ev.get('type')
+        if t == 'layer':
             layers.append(ev['layer'])
-        elif ev['type'] == 'module':
+        elif t == 'module':
             m = dict(ev['module'])
             out = m.pop('out_edges')
+            m['dependencies'] = [e['to'] for e in out]   # ★ 派生：与 assemble 同源，不再信日志原值
             edges.extend(out)
             modules.append(m)
-        elif ev['type'] == 'arch_health':
+        elif t == 'arch_health':
             health = ev['health']
+        elif t == 'correction':                          # 追加式校正（append-only，未知类型仍静默跳过）
+            tgt = ev.get('target', '')
+            if tgt == 'arch_health':
+                health = dict(health or {})
+                health.update(ev.get('patch', {}))
+            elif tgt.startswith('module:'):
+                apply_module_correction(modules, edges, tgt.split(':', 1)[1], ev.get('patch', {}))
     return layers, modules, edges, health
+
+def check_gates(layers, modules, edges):
+    """R4 关口 A/B/C（fail-closed）。返回问题列表，空 = 通过。"""
+    problems = []
+    policy = map_policy.load_policy(REPO)
+    # 关口 A：构建期产物托管/内嵌关系不得成为依赖边（R3）
+    for eid, frm, to in map_policy.policy_violations(edges, policy):
+        problems.append('A build-time relation leaked as edge: %s %s->%s' % (eid, frm, to))
+    # 关口 B：跨层 SCC 即 fail（只锁跨层；同层互引不阻断）
+    layer_order = {l['id']: l['order'] for l in layers}
+    mod_order = {m['id']: layer_order.get(m['layer']) for m in modules}
+    for g in map_policy.cross_layer_scc([m['id'] for m in modules], edges, mod_order):
+        problems.append('B cross-layer cycle: %s' % g)
+    # 关口 C：direction_violation 计数棘轮（只降不升）
+    dv = sum(1 for e in edges if e.get('direction_violation'))
+    if dv > DV_BASELINE:
+        problems.append('C direction_violation %d > baseline %d' % (dv, DV_BASELINE))
+    return problems
+
 
 def cmd_finalize():
     set_progress('assembling', percent=95)
@@ -406,6 +474,12 @@ def cmd_finalize():
         print(json.dumps({'ok': False, 'stage': 'coverage', 'ratio': ratio,
                           'uncovered': uncovered[:50]}, ensure_ascii=False))
         sys.exit(1)
+    # R4 关口 A/B/C（构建期边 / 跨层环 / DV 棘轮）
+    gate_problems = check_gates(layers, modules, edges)
+    if gate_problems:
+        set_progress('failed', percent=95, error='; '.join(gate_problems[:5]))
+        print(json.dumps({'ok': False, 'stage': 'gate', 'problems': gate_problems}, ensure_ascii=False))
+        sys.exit(1)
     # replay compare
     rl, rm, re_, rh = replay_from_log()
     rl_sorted = sorted(rl, key=lambda l: l['order'])
@@ -441,6 +515,113 @@ def cmd_finalize():
     print(json.dumps({'ok': True, 'modules': len(modules), 'edges': len(edges),
                       'files_total': len(files), 'coverage': round(ratio, 4)},
                      ensure_ascii=False))
+
+# ---------------------------------------------------------------- normalize-edges（R1/R5 迁移）
+ARCH_REVIEW_NOTE = (
+    "本轮整体结构面较上轮（18 模块 / 9 层 / 48 边）显著收敛：模拟量归并为 14 模块 31 边，"
+    "后端 0 组双向依赖、前端 0 组双向依赖，全库 direction_violation 边仅剩 1 条"
+    "（renderer-core → desktop-shell，即 host.ts 门面，已被 archGuard 断言组 6 白名单化）。"
+    "上轮点名的宿主能力越界已整体闭环——src/runtime/host.ts 成为全库唯一 import '@tauri-apps/*' 处，"
+    "console-ui 的 AppShell / useBackendConnection / lib/updater / runtime/notify 四处直连全部收敛，"
+    "console-ui → desktop-shell 边因此摘除。"
+    "原 c-arch-2 所述『三模块环』经复核为 6 模块 SCC"
+    "（chat-ui/console-ui/desktop-shell/map-canvas/renderer-core/task-ui），由单边割集 {e20, e31} 各自支撑"
+    "（非唯一钥匙边）；本轮按策略选择剥离构建期托管边 e31"
+    "（保 c-arch-3 受控适配点 e20，理由是 e20 为全库唯一宿主能力落点），SCC 归零、全库成 DAG。"
+    "宿主门面 e20 仍为受控 direction_violation（白名单在册、不再参与任何环）。"
+    "余下架构级问题集中在 server-api（c-arch-1 双向枢纽与业务规则内驻）与前端组件归属（c-arch-3），"
+    "由后续轮次处理。分数 74 低于模块均分：模块级都健康，但架构级的耦合集中是模块分看不见的。"
+)
+
+
+def correct_arch_health(ah):
+    """R5：闭环 c-arch-2 + 订正 review_note（幂等）。"""
+    out = dict(ah)
+    out['review_note'] = ARCH_REVIEW_NOTE
+    out['concerns'] = [c for c in ah.get('concerns', []) if c.get('id') != 'c-arch-2']
+    return out
+
+
+def cmd_normalize_edges():
+    """把命中策略 must_drop 的存量依赖边按「同一事务」剥离（幂等，fail-closed，可回滚）。
+
+    步骤：备份 → parts/*.edges.json 过滤 → parts/*.json dependencies 派生 →
+          retired_edge_ids 合并 → growth.log append correction → 重跑 finalize。
+    """
+    order = json.load(open(ORDER, encoding='utf-8'))
+    policy = map_policy.load_policy(REPO)
+    md = map_policy.must_drop_pairs(policy)
+    ts = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    changes = []
+    for mid in order['modules']:
+        ep = os.path.join(PARTS, mid + '.edges.json')
+        if not os.path.exists(ep):
+            continue
+        obj = json.load(open(ep, encoding='utf-8'))
+        out = obj.get('out_edges', [])
+        kept = [e for e in out if (e['from'], e['to']) not in md]
+        if len(kept) != len(out):
+            removed = [e for e in out if (e['from'], e['to']) in md]
+            changes.append({'mid': mid, 'obj': obj, 'kept': kept, 'removed': removed})
+    if not changes:
+        print(json.dumps({'ok': True, 'changed': 0,
+                          'note': 'no must_drop edge present (idempotent no-op)'}, ensure_ascii=False))
+        return
+    # [0] 备份（回滚单位 = parts + growth.log，见方案 §3.3.6 / Q10）
+    backups = []
+
+    def backup(path):
+        if os.path.exists(path):
+            b = '%s.bak.%s' % (path, ts)
+            shutil.copy2(path, b)
+            backups.append((path, b))
+
+    backup(GROWTH)
+    for ch in changes:
+        backup(os.path.join(PARTS, ch['mid'] + '.edges.json'))
+        backup(os.path.join(PARTS, ch['mid'] + '.json'))
+    backup(os.path.join(PARTS, '_arch_health.json'))
+    backup(ORDER)
+    try:
+        # [1] 过滤出边（保持相对顺序，不重排）+ [2] dependencies 派生
+        for ch in changes:
+            ch['obj']['out_edges'] = ch['kept']
+            write_json_atomic(os.path.join(PARTS, ch['mid'] + '.edges.json'), ch['obj'])
+            mp = os.path.join(PARTS, ch['mid'] + '.json')
+            m = json.load(open(mp, encoding='utf-8'))
+            m['dependencies'] = [e['to'] for e in ch['kept']]
+            write_json_atomic(mp, m)
+        # [2b] 健康块写回（finalize 的 rh != ah 直读本文件）
+        ahp = os.path.join(PARTS, '_arch_health.json')
+        ah_new = correct_arch_health(json.load(open(ahp, encoding='utf-8')))
+        write_json_atomic(ahp, ah_new)
+        # [3] 退役 id 合并（永久腾空，INV-4）
+        retired = sorted(set(order.get('retired_edge_ids', [])) |
+                         {e['id'] for ch in changes for e in ch['removed'] if e.get('id')})
+        order['retired_edge_ids'] = retired
+        write_json_atomic(ORDER, order)
+        # [4] append-only correction
+        corr = []
+        for ch in changes:
+            corr.append({'type': 'correction', 'target': 'module:' + ch['mid'],
+                         'patch': {'out_edges': ch['kept'],
+                                   'dependencies': [e['to'] for e in ch['kept']]},
+                         'reason': 'R1 build-time hosting is not a dependency edge'})
+        corr.append({'type': 'correction', 'target': 'arch_health', 'patch': ah_new,
+                     'reason': 'R5 c-arch-2 corrected'})
+        append_lines(corr)
+        # [5] 重生成 map.json（内部自带 R4 关口 A/B/C + replay 校验）
+        cmd_finalize()
+    except SystemExit as exc:
+        for path, b in backups:   # fail-closed 回滚
+            shutil.copy2(b, path)
+        print(json.dumps({'ok': False, 'stage': 'normalize-rollback',
+                          'restored': [p for p, _ in backups]}, ensure_ascii=False))
+        raise SystemExit(exc.code if isinstance(exc.code, int) else 1)
+    print(json.dumps({'ok': True, 'changed': len(changes),
+                      'retired': retired,
+                      'backups': [b for _, b in backups]}, ensure_ascii=False))
+
 
 # ---------------------------------------------------------------- self-check / coverage
 def self_check(m):
@@ -508,7 +689,7 @@ def main():
         print(__doc__); sys.exit(2)
     cmd = sys.argv[1]
     {'init': cmd_init, 'emit-module': cmd_emit_module, 'emit-edges': cmd_emit_edges,
-     'append-log': cmd_append_log, 'finalize': cmd_finalize,
+     'append-log': cmd_append_log, 'finalize': cmd_finalize, 'normalize-edges': cmd_normalize_edges,
      'self-check': cmd_self_check, 'coverage': cmd_coverage}[cmd]()
 
 if __name__ == '__main__':

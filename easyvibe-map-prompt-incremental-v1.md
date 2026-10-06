@@ -41,6 +41,8 @@ patch JSON 写进 `.easyvibe/map/map.patch.json`，形状严格如下：
 - `updated_modules`/`new_modules` 里的模块必须是**完整对象**（不是差量字段）——后端按 id 整体替换/插入
 - 模块对象格式与 `<CURRENT_MAP>` 中现有模块完全一致（同 Schema、同枚举值域、id 命名规则同 v2.2）
 - 没有变更的数组给空数组 `[]`，字段不得省略
+- `new_edges` **不得包含构建期产物托管/内嵌关系**（`frontendDist`/`bundle.resources`、`beforeBuildCommand` 产物复制、`build.rs` `include_dir!(<dist>)`、静态目录托管、`cp -R dist`）；权威白/黑名单见 `scripts/map_edge_policy.json`（命中即被 finalize 拒收）
+- `removed_edge_ids` 可用于**策略性删边**（如按上述判据剥离历史遗留的托管边），与地图管线的 `correction` 通道对齐
 - version/layers/架构级 health 等全局结构**不在 patch 范围**——不要去重排层、不要动架构级 health
 
 ## 白名单纪律（最高优先级——只能动 affected 模块）
@@ -71,4 +73,5 @@ patch JSON 写进 `.easyvibe/map/map.patch.json`，形状严格如下：
 - [ ] `new_modules` 的 id 未与旧 id 重名，layer 存在，files glob 覆盖其 diff 文件
 - [ ] 每条 `new_edges` 的 from/to 都是存在的模块 id；`removed_edge_ids` 都是旧图真实边 id
 - [ ] 所有枚举值合法、concerns ≤3 条、模块对象字段完整（Schema 对照过）
+- [ ] `new_edges` 不含构建期产物托管/内嵌关系（对照 `scripts/map_edge_policy.json` 的 must_drop）
 - [ ] 未臆造 diff 之外的文件/依赖；未改动非 affected 模块

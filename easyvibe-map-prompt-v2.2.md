@@ -152,6 +152,22 @@ percent 按阶段权重：init 0% → scanning 10% → clustering 35% → module
 - 各模块出边写入 `parts/<module-id>.edges.json`，随模块事件一起追加
 - 阶段结束置 `phase=edging, percent=80`
 
+#### 构建期关系不连边（硬性）
+
+**判据（先问"运行期是否持有对方的代码符号/接口契约/消息协议"）**：
+
+- 否 → 再看"是否只是复制对方构建产物 / 内嵌对方 dist / 编译期读配置清单"：是则属 **构建期关系，不连依赖边**；
+- 是 → 属正常依赖边（`call` / `import` / `api` / `event` / `db`）。
+
+**不连边（正例）**：`tauri.conf` 的 `frontendDist` / `bundle.resources`、`beforeBuildCommand` 里的产物复制脚本、
+`build.rs` 的 `include_dir!(<dist>)`、静态目录托管（`ServeDir`）、`*.sh` 里的 `cp -R dist` —— 壳/后端对前端产物只有"托管"语义，图上不连边。
+
+**要连边（反例）**：sidecar spawn、REST/WS 调用、`import`/`require`、共享数据库、事件订阅 —— 这些是真实的运行期依赖。
+
+**边界澄清**：本判据只摘"对**产物字节/配置清单**的关系"，不摘"对**代码符号/接口**的关系"；同一份产物被多处托管（壳打包、后端内嵌、静态目录）都不产生依赖边。
+
+> 权威判据与白/黑名单以 `scripts/map_edge_policy.json` 为准（受版本控制）；最终化（finalize）会以同一判据拒绝违规边。
+
 ### 6. health（串行收尾）
 
 - 汇总各模块 health，做全局校准：只允许收紧不允许放松（例如两个模块互相引用形成环，两端 coupling 不得低于 medium）
@@ -202,4 +218,5 @@ easyvibe-map finalize       # 汇总(层序归一) → 全量 Schema 校验 → 
 - [ ] 所有枚举值合法
 - [ ] 模块 files glob 对代码文件覆盖率 >90%
 - [ ] growth.log 重放与 map.json 一致，parts/ 与日志一致
+- [ ] edges[] 不含构建期产物托管/内嵌关系（`frontendDist`/`resources`/`include_dir!`/`ServeDir`/产物复制脚本；对照 `scripts/map_edge_policy.json` 的 must_drop）
 - [ ] 已存在的旧 map.json 按三分类规则处理，decision_reason 已记录，需备份时已备份并告知

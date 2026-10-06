@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "rule": "build-time artifact hosting/embedding MUST NOT be a dependency edge",
+  "must_drop": [
+    {
+      "from": "desktop-shell",
+      "to": "console-ui",
+      "reason": "tauri.conf resources/dist + frontendDist + sync-desktop.sh cp -R dist（打包期产物复制，非运行期符号引用）",
+      "decision": "Q1-A: chosen over e20 because e20 is the c-arch-3 controlled host-capability adapter"
+    },
+    {
+      "from": "server-api",
+      "to": "console-ui",
+      "reason": "build.rs include_dir!(dist) + router.rs ServeDir（编译期内嵌 / 运行期静态目录托管产物字节）"
+    }
+  ],
+  "observe": [
+    {"from": "server-api", "to": "map-toolchain", "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"},
+    {"from": "desktop-shell", "to": "map-toolchain", "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"}
+  ]
+}
