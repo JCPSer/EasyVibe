@@ -42,10 +42,10 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（c-arch-1 拆分后的当前快照 = map_post_split.json，16 模块 / 38 边）；
+      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，19 模块 / 48 边）；
       # 旧快照 map_post_migration.json（14 模块 / 31 边）仅由 --selfcheck 的 H0/H1 负例自证使用。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 48
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
@@ -91,9 +91,9 @@ jobs:
       - name: REST/WS 直连守卫自检（负例必红）
         run: python3 scripts/check_renderer_rest.py --selfcheck
 
-      # renderer 拆格粒度守卫：防 renderer-core（89 文件 god_module）复发。
-      # 判据 G0–G4（退役 id 不得回册 / 三格覆盖探针唯一命中 / runtime 与 components/ui 不得同格 /
-      # 三格 glob 数上限 / emit_order 中 ui-kit 先于 console-ui）。不依赖 live map，对受版本控制 fixture。
+      # renderer 拆格粒度守卫：防 renderer-core（89 文件 god_module）复发（守卫四套 ↔ 地图四格：runtime/api/shared/ui-kit）。
+      # 判据 G0–G4（退役 id 不得回册 / 四格覆盖探针唯一命中 / runtime 与 components/ui 不得同格 /
+      # 四格 glob 数上限 / emit_order 中 ui-kit 先于 console-ui）。不依赖 live map，对受版本控制 fixture。
       - name: renderer 粒度守卫（防 god_module 复发）
         run: python3 scripts/check_renderer_granularity.py --check --map scripts/tests/fixtures/map_post_split.json
 

@@ -2,26 +2,28 @@
 # -*- coding: utf-8 -*-
 """R10（c-arch-2 收口）：地图 renderer 拆格后的**粒度守卫**（纯 python3 CI 载体）。
 
-背景：`renderer-core`（89 文件）已拆为三格——
-  renderer-runtime = easyvibe-renderer/src/runtime/** + src/api/**
+背景：`renderer-core`（89 文件）已拆为四格——
+  renderer-runtime = easyvibe-renderer/src/runtime/**
+  renderer-api     = easyvibe-renderer/src/api/**
   renderer-shared  = easyvibe-renderer/src/shared/** + src/types/**
   ui-kit           = easyvibe-renderer/src/components/ui/** + src/lib/utils.ts + src/hooks/use-mobile.ts
-另 easyvibe-renderer/scripts/** 归 map-toolchain（非渲染器三格）。
+另 easyvibe-renderer/scripts/** 归 map-toolchain（非渲染器四格）。
 
 本脚本把「拆分不再回退」落成一条 CI 可见的可执行判据（秒级、fail-closed）：
 
   --check [--map PATH]  默认读 .easyvibe/map/map.json；CI 传受版本控制的 fixture。
-  --selfcheck           合成输入 N0–N4（不读 live map、不改仓库），逐条自证负例必红/正例必绿。
+  --selfcheck           合成输入 N0–N5（不读 live map、不改仓库），逐条自证负例必红/正例必绿。
 
 判据：
   G0 已退役的 renderer-core 不得回到模块 id 集合（防回归）。
-  G1 三格均在册；用**探针文件表**断言每个真实探针恰被**恰好一个新格 glob** 命中
+  G1 四格均在册；用**探针文件表**断言每个真实探针恰被**恰好一个新格 glob** 命中
      （渲染器侧 runtime/api/shared/types/components-ui/lib/utils.ts/hooks/use-mobile.ts 各 ≥1），
-     且 easyvibe-renderer/scripts/** 探针命中 map-toolchain、不被三格命中。
+     且 easyvibe-renderer/scripts/** 探针命中 map-toolchain、不被四格命中。
      探针文件不存在于磁盘 → fail-closed（不得静默跳过）。
+  N5（--selfcheck 反回归负例）把 easyvibe-renderer/src/api/** 回并 renderer-runtime → 必红（G1）。
   G2 反聚合哨兵（god_module 判据）：任一模块 files 同时命中
      easyvibe-renderer/src/runtime/host.ts 与 easyvibe-renderer/src/components/ui/button.tsx → 红。
-  G3 粒度上限：三格 files glob 数量上限（runtime ≤4 / shared ≤4 / ui-kit ≤5），超限即红。
+  G3 粒度上限：四格 files glob 数量上限（runtime ≤4 / api ≤2 / shared ≤4 / ui-kit ≤5），超限即红。
   G4 归位顺序：若 .easyvibe/map/emit_order.json 在册且含 ui-kit，
      断言 emit_order.modules 中 ui-kit 下标 < console-ui 下标（防 console-ui 的 lib/**、hooks/**
      抢走 lib/utils.ts / hooks/use-mobile.ts）；文件缺失或不同代（无 ui-kit）记为 SKIP，不因此红。
@@ -45,8 +47,8 @@ EMIT_ORDER = os.path.join(REPO, ".easyvibe", "map", "emit_order.json")
 FIXTURE = os.path.join(REPO, "scripts", "tests", "fixtures", "map_post_split.json")
 
 RETIRED = "renderer-core"
-GRIDS = ("renderer-runtime", "renderer-shared", "ui-kit")
-CAPS = {"renderer-runtime": 4, "renderer-shared": 4, "ui-kit": 5}
+GRIDS = ("renderer-runtime", "renderer-api", "renderer-shared", "ui-kit")
+CAPS = {"renderer-runtime": 4, "renderer-api": 2, "renderer-shared": 4, "ui-kit": 5}
 TOOLCHAIN = "map-toolchain"
 
 HOST_PROBE = "easyvibe-renderer/src/runtime/host.ts"
@@ -55,14 +57,14 @@ UI_PROBE = "easyvibe-renderer/src/components/ui/button.tsx"
 # (探针真实路径, 期望命中的新格)
 PROBES = (
     ("easyvibe-renderer/src/runtime/host.ts", "renderer-runtime"),
-    ("easyvibe-renderer/src/api/core.ts", "renderer-runtime"),
+    ("easyvibe-renderer/src/api/core.ts", "renderer-api"),
     ("easyvibe-renderer/src/shared/logic/layout.ts", "renderer-shared"),
     ("easyvibe-renderer/src/types/map.ts", "renderer-shared"),
     ("easyvibe-renderer/src/components/ui/button.tsx", "ui-kit"),
     ("easyvibe-renderer/src/lib/utils.ts", "ui-kit"),
     ("easyvibe-renderer/src/hooks/use-mobile.ts", "ui-kit"),
 )
-# 工具链探针：应命中 map-toolchain，且不被三格命中
+# 工具链探针：应命中 map-toolchain，且不被四格命中
 TOOLCHAIN_PROBES = ("easyvibe-renderer/scripts/gen-types.mjs",)
 
 
@@ -143,14 +145,14 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
     else:
         checks["G0"] = "PASS"
 
-    # ---- G1 三格覆盖 + 探针唯一命中（先查探针存在性，fail-closed）
+    # ---- G1 四格覆盖 + 探针唯一命中（先查探针存在性，fail-closed）
     missing_probes = [p for p, _ in PROBES] + list(TOOLCHAIN_PROBES)
     missing_probes = [p for p in missing_probes if not os.path.isfile(os.path.join(root, p))]
     if missing_probes:
         problems.append("G1 探针文件不在磁盘（fail-closed，不静默跳过）: %s" % missing_probes)
     absent_grids = [g for g in GRIDS if g not in by_id]
     if absent_grids:
-        problems.append("G1 三格缺失: %s" % absent_grids)
+        problems.append("G1 四格缺失: %s" % absent_grids)
 
     if not missing_probes and not absent_grids:
         for probe, expect in PROBES:
@@ -166,7 +168,7 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
             grid_hits = [(g, gl) for g in GRIDS for gl in by_id.get(g, []) if glob_match(probe, gl)]
             tc_hit = any(glob_match(probe, gl) for gl in by_id.get(TOOLCHAIN, []))
             if grid_hits:
-                problems.append("G1 工具链探针 %s 不应被三格命中: %s" % (probe, grid_hits))
+                problems.append("G1 工具链探针 %s 不应被四格命中: %s" % (probe, grid_hits))
             if not tc_hit:
                 problems.append("G1 工具链探针 %s 未被 %s 命中" % (probe, TOOLCHAIN))
     checks["G1"] = "FAIL" if any(p.startswith("G1") for p in problems) else "PASS"
@@ -183,7 +185,7 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
     else:
         checks["G2"] = "PASS"
 
-    # ---- G3 粒度上限（三格 glob 数量）
+    # ---- G3 粒度上限（四格 glob 数量）
     g3_fail = False
     for gid, cap in sorted(CAPS.items()):
         if gid not in by_id:
@@ -249,10 +251,11 @@ def cmd_check(map_path):
 
 # ------------------------------------------------------------------ --selfcheck
 def _green_map():
-    """合成「拆分后」绿图：三格 + map-toolchain + console-ui（含 lib/**、hooks/**）。"""
+    """合成「拆分后」绿图：四格 + map-toolchain + console-ui（含 lib/**、hooks/**）。"""
     return {"modules": [
         {"id": "map-toolchain", "files": ["run/**", "scripts/**", "easyvibe-renderer/scripts/**"]},
-        {"id": "renderer-runtime", "files": ["easyvibe-renderer/src/runtime/**", "easyvibe-renderer/src/api/**"]},
+        {"id": "renderer-runtime", "files": ["easyvibe-renderer/src/runtime/**"]},
+        {"id": "renderer-api", "files": ["easyvibe-renderer/src/api/**"]},
         {"id": "renderer-shared", "files": ["easyvibe-renderer/src/shared/**", "easyvibe-renderer/src/types/**"]},
         {"id": "ui-kit", "files": ["easyvibe-renderer/src/components/ui/**",
                                    "easyvibe-renderer/src/lib/utils.ts",
@@ -268,7 +271,7 @@ def cmd_selfcheck():
     def add(name, map_obj, expect_red, want_check=None):
         cases.append((name, map_obj, expect_red, want_check))
 
-    add("N0 合成拆分后三格（正例）", _green_map(), False)
+    add("N0 合成拆分后四格（正例）", _green_map(), False)
 
     m1 = _green_map()
     m1["modules"].append({"id": "renderer-blob", "files": [
@@ -288,6 +291,12 @@ def cmd_selfcheck():
                 "easyvibe-renderer/src/lib/updater.ts",
             ]
     add("N3 ui-kit glob 超上限 → G3 必红", m3, True, "G3")
+
+    m4 = _green_map()
+    for mm in m4["modules"]:
+        if mm["id"] == "renderer-runtime":
+            mm["files"] = mm["files"] + ["easyvibe-renderer/src/api/**"]
+    add("N5 api 回并 renderer-runtime → G1 必红", m4, True, "G1")
 
     failed = 0
     for name, map_obj, expect_red, want_check in cases:
@@ -332,7 +341,7 @@ def cmd_selfcheck():
             detail += " ← " + problems[0]
         print("%s N4 真值双向断言（判据本身工作）  %s" % ("PASS" if ok else "FAIL", detail))
 
-    print("N0–N4 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
+    print("N0–N5 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
     return 0 if failed == 0 else 1
 
 

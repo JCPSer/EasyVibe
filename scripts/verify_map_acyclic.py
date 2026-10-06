@@ -3,7 +3,7 @@
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
                          CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
-                         与 EXPECT_EDGES 同代：renderer-core 粒度拆分后的 18 模块 / 44 边快照）。
+                         与 EXPECT_EDGES 同代：renderer-api 析出后的 19 模块 / 48 边快照）。
                          fixture 是**结构投影**：只保留本文件与 verify_arch_split 断言的字段
                          （模块 id/name/layer/files/dependencies/health 与 concern 的 id+severity、
                          边的 id/from/to/type/strength/DV），prose（review_note / concern 正文 /
@@ -33,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 44
+EXPECT_EDGES = 48
 DV_MAX = 1
 EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
 RETIRED_CONCERN = "c-arch-2"

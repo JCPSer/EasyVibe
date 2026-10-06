@@ -2,12 +2,12 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-06T16:45:09+08:00",
+    "generated_at": "2026-10-06T17:41:31+08:00",
     "stats": {
       "files_total": 358,
       "files_covered": 358,
       "coverage_ratio": 1.0,
-      "edges_derived": 44
+      "edges_derived": 48
     }
   },
   "layers": [
@@ -299,25 +299,37 @@
       "name": "渲染运行时",
       "layer": "presentation-support",
       "files": [
-        "easyvibe-renderer/src/runtime/**",
-        "easyvibe-renderer/src/api/**"
+        "easyvibe-renderer/src/runtime/**"
       ],
       "dependencies": [
-        "server-api",
         "desktop-shell"
       ],
       "health": {
-        "score": 74,
+        "score": 80,
         "coupling": "medium",
         "complexity": "medium",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
+      "id": "renderer-api",
+      "name": "渲染接口层",
+      "layer": "presentation-support",
+      "files": [
+        "easyvibe-renderer/src/api/**"
+      ],
+      "dependencies": [
+        "server-api"
+      ],
+      "health": {
+        "score": 88,
+        "coupling": "low",
+        "complexity": "low",
         "churn": "medium",
         "decay_flags": [],
-        "concerns": [
-          {
-            "id": "c-renderer-runtime-1",
-            "severity": "high"
-          }
-        ]
+        "concerns": []
       }
     },
     {
@@ -369,6 +381,7 @@
       ],
       "dependencies": [
         "renderer-runtime",
+        "renderer-api",
         "renderer-shared",
         "ui-kit",
         "map-canvas",
@@ -402,6 +415,7 @@
       ],
       "dependencies": [
         "renderer-runtime",
+        "renderer-api",
         "renderer-shared",
         "task-ui"
       ],
@@ -428,6 +442,7 @@
       ],
       "dependencies": [
         "renderer-runtime",
+        "renderer-api",
         "renderer-shared"
       ],
       "health": {
@@ -448,6 +463,7 @@
       ],
       "dependencies": [
         "renderer-runtime",
+        "renderer-api",
         "renderer-shared",
         "ui-kit",
         "chat-ui"
@@ -677,17 +693,17 @@
     {
       "id": "e21",
       "from": "renderer-runtime",
-      "to": "server-api",
-      "type": "api",
-      "strength": "strong"
-    },
-    {
-      "id": "e22",
-      "from": "renderer-runtime",
       "to": "desktop-shell",
       "type": "call",
       "strength": "weak",
       "direction_violation": true
+    },
+    {
+      "id": "e22",
+      "from": "renderer-api",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
     },
     {
       "id": "e23",
@@ -699,145 +715,173 @@
     {
       "id": "e24",
       "from": "console-ui",
-      "to": "renderer-shared",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e25",
       "from": "console-ui",
-      "to": "ui-kit",
+      "to": "renderer-shared",
       "type": "import",
-      "strength": "normal"
+      "strength": "strong"
     },
     {
       "id": "e26",
       "from": "console-ui",
-      "to": "map-canvas",
+      "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e27",
       "from": "console-ui",
-      "to": "chat-ui",
+      "to": "map-canvas",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e28",
       "from": "console-ui",
-      "to": "task-ui",
+      "to": "chat-ui",
       "type": "import",
       "strength": "normal"
     },
     {
       "id": "e29",
-      "from": "chat-ui",
-      "to": "renderer-runtime",
+      "from": "console-ui",
+      "to": "task-ui",
       "type": "import",
-      "strength": "strong"
+      "strength": "normal"
     },
     {
       "id": "e30",
       "from": "chat-ui",
-      "to": "renderer-shared",
+      "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e32",
       "from": "chat-ui",
-      "to": "task-ui",
-      "type": "import",
-      "strength": "weak"
-    },
-    {
-      "id": "e33",
-      "from": "task-ui",
-      "to": "renderer-runtime",
+      "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e34",
-      "from": "task-ui",
+      "id": "e33",
+      "from": "chat-ui",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
+      "id": "e34",
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
       "id": "e35",
-      "from": "map-canvas",
+      "from": "task-ui",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e36",
+      "from": "task-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e37",
+      "from": "task-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e38",
+      "from": "map-canvas",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e39",
+      "from": "map-canvas",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e40",
       "from": "map-canvas",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e37",
+      "id": "e41",
       "from": "map-canvas",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e38",
+      "id": "e42",
       "from": "map-canvas",
       "to": "chat-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e39",
+      "id": "e43",
       "from": "desktop-shell",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e40",
+      "id": "e44",
       "from": "desktop-shell",
       "to": "map-toolchain",
       "type": "config",
       "strength": "weak"
     },
     {
-      "id": "e41",
+      "id": "e45",
       "from": "easyvibe-git",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e42",
+      "id": "e46",
       "from": "easyvibe-pipeline",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e43",
+      "id": "e47",
       "from": "easyvibe-pipeline",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e44",
+      "id": "e48",
       "from": "easyvibe-pipeline",
       "to": "agent-runtime",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e45",
+      "id": "e49",
       "from": "easyvibe-pipeline",
       "to": "event-bus",
       "type": "import",
@@ -845,7 +889,7 @@
     }
   ],
   "health": {
-    "score": 76,
+    "score": 77,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",

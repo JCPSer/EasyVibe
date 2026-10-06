@@ -11,7 +11,7 @@
 
 模式：
   --check（默认） 对真实仓库扫描；任一命中 → exit 1
-  --selfcheck     反例自证（S1 必红 / S2 去注释不误报 / S3 必红 / S4 真仓库必绿 / S5 新模块名必红）
+  --selfcheck     反例自证（S1 必红 / S2 去注释不误报 / S3 必红 / S4 真仓库必绿 / S5 新模块名必红 / S6 renderer-api 必红）
 
 本文件不得出现任何受管契约名 / env 名（由 scripts/verify_assets.py --forbid-literals 自守卫）。
 """
@@ -29,7 +29,7 @@ SCAN_DIRS = ["easyvibe-desktop/src-tauri/src"]
 
 FORBIDDEN = [
     "console-ui", "chat-ui", "task-ui", "map-canvas", "renderer-core",
-    "renderer-runtime", "renderer-shared", "ui-kit",
+    "renderer-runtime", "renderer-api", "renderer-shared", "ui-kit",
     "easyvibe-renderer", "easyvibe_renderer",
     "@/components", "@/runtime", "@/api", "@/shared",
 ]
@@ -149,6 +149,11 @@ def selfcheck(real_root):
             fh.write(base + 'let _ = "renderer-runtime";\n')
         h5 = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
         results.append(("S5 注入新模块名 → 必红", len(h5) > 0, "; ".join(x[2] for x in h5[:2])))
+        # S6 注入 renderer-api（api 析出为独立模块）→ 必红
+        with open(lib, "w", encoding="utf-8") as fh:
+            fh.write(base + 'let _ = "renderer-api";\n')
+        h6 = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
+        results.append(("S6 注入 renderer-api → 必红", len(h6) > 0, "; ".join(x[2] for x in h6[:2])))
         with open(lib, "w", encoding="utf-8") as fh:
             fh.write(base)
         # S4 真仓库 → 必绿（仅白名单路径）
@@ -169,7 +174,7 @@ def main():
     args = ap.parse_args()
     root = os.path.abspath(args.root)
     if args.selfcheck:
-        print("▶ 壳边界守卫自检 S1–S5")
+        print("▶ 壳边界守卫自检 S1–S6")
         return 0 if selfcheck(root) else 1
     hits = scan(root)
     for rel, lineno, token, line in hits:
