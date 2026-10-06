@@ -90,3 +90,12 @@ jobs:
 
       - name: REST/WS 直连守卫自检（负例必红）
         run: python3 scripts/check_renderer_rest.py --selfcheck
+
+      # renderer 拆格粒度守卫：防 renderer-core（89 文件 god_module）复发。
+      # 判据 G0–G4（退役 id 不得回册 / 三格覆盖探针唯一命中 / runtime 与 components/ui 不得同格 /
+      # 三格 glob 数上限 / emit_order 中 ui-kit 先于 console-ui）。不依赖 live map，对受版本控制 fixture。
+      - name: renderer 粒度守卫（防 god_module 复发）
+        run: python3 scripts/check_renderer_granularity.py --check --map scripts/tests/fixtures/map_post_split.json
+
+      - name: renderer 粒度守卫自检（反例必红）
+        run: python3 scripts/check_renderer_granularity.py --selfcheck
