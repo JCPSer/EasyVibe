@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Loader2, Wrench, RefreshCw, Lightbulb } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
+import { suggest } from '@/api/chat'
 import type { Suggestion } from '@/shared/logic/taskContext'
 import { buildSuggestionTask, type TaskDraft } from '@/shared/logic/taskContext'
 
@@ -37,7 +38,7 @@ export function SuggestPanel({ backendRepo, map, onCreateTask }: Props) {
     abortRef.current = ac
     setLoading(true)
     setError(null)
-    fetch(`/api/repos/${backendRepo}/suggest`, { method: 'POST', signal: ac.signal })
+    suggest(backendRepo, { signal: ac.signal })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()

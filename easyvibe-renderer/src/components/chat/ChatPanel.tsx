@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { chatHistory, compactChat, resetChat, sendChat } from '@/api/chat'
+import { decideTask } from '@/api/task'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
 import { type ChatMessage, type Clarify, type PendingApproval } from './types'
@@ -114,7 +116,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   const loadEarlier = () => {
     if (!backendRepo || !messages.length || loadingMore) return
     setLoadingMore(true)
-    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}before=${messages[0].id}&limit=50`)
+    chatHistory(backendRepo, `${convQ ? convQ + '&' : '?'}before=${messages[0].id}&limit=50`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { hasMore: boolean; messages: { id: number; role: string; content: string }[] } }) => {
         setHasMore(d.data.hasMore)
@@ -134,7 +136,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     let stale = false
     setMessages([])
     loadConvs()
-    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}limit=50`)
+    chatHistory(backendRepo, `${convQ ? convQ + '&' : '?'}limit=50`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { usage: { promptTokens: number; completionTokens: number }; hasMore: boolean; pendingApprovals?: PendingApproval[]; conversation?: { id: string; title: string | null }; messages: { id: number; role: string; content: string }[] } }) => {
         if (stale) return
@@ -168,11 +170,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   const decide = useCallback(
     (p: PendingApproval, decision: 'approved' | 'rejected', note?: string) => {
       if (!backendRepo) return
-      fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(p.taskId)}/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, note }),
-      })
+      decideTask(backendRepo, p.taskId, { decision, note })
         .then((r) =>
           r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? `HTTP ${r.status}`))),
         )
@@ -215,12 +213,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     const ac = new AbortController()
     abortRef.current = ac
     const sentConvId = convId // 归属锚点：响应到达时比对当前会话
-    fetch(`/api/repos/${backendRepo}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: withAttach, images: sendImages, moduleRefs: sendMentions, ...convBody }),
-      signal: ac.signal,
-    })
+    sendChat(
+      backendRepo,
+      { message: withAttach, images: sendImages, moduleRefs: sendMentions, ...convBody },
+      { signal: ac.signal },
+    )
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -262,7 +259,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   const compressCtx = () => {
     if (!backendRepo || compacting) return
     setCompacting(true)
-    fetch(`/api/repos/${backendRepo}/chat/compact${convQ}`, { method: 'POST' })
+    compactChat(backendRepo, convQ)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -280,7 +277,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   // 清空当前会话（消息/摘要/计数归零，会话行保留）
   const reset = () => {
     if (!backendRepo || sending) return
-    fetch(`/api/repos/${backendRepo}/chat/reset${convQ}`, { method: 'POST' })
+    resetChat(backendRepo, convQ)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setMessages([])

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SubMap } from '@/types/map'
 import { enqueue } from '@/runtime/sessionQueue'
 import { onQueueChanged, onSessionEvent, onSessionOutput as onSessionOutputListener } from '@/runtime/growthBus'
+import { analyzeSubmap as analyzeSubmapRequest, submap } from '@/api/canvas'
+import { fetchStatic } from '@/api/core'
 
 /**
  * 子图（模块内部结构）分析域：懒加载 / 深入分析 / 诚实三态错误 / agent 输出直播缓冲。
@@ -88,8 +90,8 @@ export function useSubmaps(backendRepo: string | null) {
   useEffect(() => {
     for (const [id, v] of Object.entries(submaps)) {
       if (v !== 'loading') continue
-      const url = backendRepo ? `/api/repos/${backendRepo}/modules/${id}` : `/data/modules/${id}.json`
-      fetch(url)
+      const req = backendRepo ? submap(backendRepo, id) : fetchStatic(`/data/modules/${id}.json`)
+      req
         .then((r) => {
           if (!r.ok) throw new Error(String(r.status))
           return r.json() as Promise<SubMap>
@@ -119,7 +121,7 @@ export function useSubmaps(backendRepo: string | null) {
     (id: string) => {
       if (!backendRepo) return
       setSubmapErrors((prev) => ({ ...prev, [id]: '' }))
-      fetch(`/api/repos/${backendRepo}/modules/${encodeURIComponent(id)}/analyze-submap`, { method: 'POST' })
+      analyzeSubmapRequest(backendRepo, id)
         .then(async (r) => {
           // 必须抛 Response 本体：catch 里要读 body 判别 409（单会话纪律）
           if (!r.ok) throw r

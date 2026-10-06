@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
 import { onTaskEvent } from '@/runtime/growthBus'
+import { chatHistory, conversations as fetchConversations, createConversation, deleteConversation, renameConversation } from '@/api/chat'
 import type { ChatRestore, ConversationSummary, PendingApproval } from './types'
 
 export function useConversations({
@@ -35,7 +36,7 @@ export function useConversations({
 
   const loadConvs = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/conversations`)
+    fetchConversations(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: ConversationSummary[] } | null) => {
         if (d?.data) setConvs(d.data)
@@ -45,7 +46,7 @@ export function useConversations({
 
   const refreshPending = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/chat${convId ? `?conv=${encodeURIComponent(convId)}&limit=1` : '?limit=1'}`)
+    chatHistory(backendRepo, convId ? `?conv=${encodeURIComponent(convId)}&limit=1` : '?limit=1')
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: ChatRestore } | null) => {
         if (d?.data?.pendingApprovals) setPendingApprovals(d.data.pendingApprovals)
@@ -58,11 +59,7 @@ export function useConversations({
 
   const createConv = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(defaultConvTitle ? { title: defaultConvTitle } : {}),
-    })
+    createConversation(backendRepo, defaultConvTitle ? { title: defaultConvTitle } : {})
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ConversationSummary }) => {
         setConvId(d.data.id)
@@ -75,11 +72,7 @@ export function useConversations({
 
   const renameConv = useCallback(() => {
     if (!backendRepo || !convId || !renameVal.trim()) return
-    fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(convId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: renameVal.trim() }),
-    })
+    renameConversation(backendRepo, convId, renameVal.trim())
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setRenaming(false)
@@ -91,7 +84,7 @@ export function useConversations({
   const deleteConv = useCallback(() => {
     if (!backendRepo || !convId) return
     if (!window.confirm('删除该会话？（其消息与关联任务留痕一并删除，不可恢复）')) return
-    fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(convId)}`, { method: 'DELETE' })
+    deleteConversation(backendRepo, convId)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setConvId(null)

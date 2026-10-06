@@ -5,6 +5,7 @@ import { onPatrolFinished, onTaskEvent } from '@/runtime/growthBus'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { stageOf } from '@/components/taskworkflow/taskStage'
 import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import { decideTask, listTasks } from '@/api/task'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 任务编排看板（方案 v3 §4.3 施工，取代旧「我的待办」列表）：
@@ -116,7 +117,7 @@ export function TaskBoardPage({
 
   const load = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+    listTasks(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: BoardTask[] } | null) => setTasks(d?.data ?? []))
       .catch(() => {})
@@ -176,10 +177,10 @@ export function TaskBoardPage({
     if (!backendRepo || deciding) return
     setDeciding(t.id + decision)
     try {
-      const r = await fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(t.id)}/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, note: decision === 'rejected' ? rejectNote.trim() : undefined, gate: t.gate }),
+      const r = await decideTask(backendRepo, t.id, {
+        decision,
+        note: decision === 'rejected' ? rejectNote.trim() : undefined,
+        gate: t.gate,
       })
       const d = await r.json().catch(() => null)
       if (!r.ok) {

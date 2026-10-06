@@ -4,6 +4,7 @@ import { toast } from '@/runtime/toast'
 import { onTaskEvent } from '@/runtime/growthBus'
 import { stageOf, gateLabel, STAGES } from '@/components/taskworkflow/taskStage'
 import { rewindTask } from '@/components/taskworkflow/taskAdmin'
+import { decideTask, devDocs, listTasks, taskApprovals, taskDiff } from '@/api/task'
 import { StagePipeline } from '@/components/taskworkflow/StagePipeline'
 import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
 import type { CodeMap } from '@/types/map'
@@ -55,7 +56,7 @@ export function TaskWorkflowPage({
   const [rejecting, setRejecting] = useState(false)
   const load = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+    listTasks(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: TaskItem[] } | null) => {
         if (!d?.data) return
@@ -80,11 +81,11 @@ export function TaskWorkflowPage({
     const tid = sel.id
     const apply = (patch: Partial<NonNullable<typeof detailFor>>) =>
       setDetailFor((prev) => (prev && prev.taskId === tid ? { ...prev, ...patch } : { taskId: tid, approvals: [], diffFull: null, diffStat: null, docs: [], docsAt: 0, ...patch }))
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(tid)}/approvals`)
+    taskApprovals(backendRepo, tid)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: Approval[] } | null) => apply({ approvals: d?.data ?? [] }))
       .catch(() => {})
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(tid)}/diff`)
+    taskDiff(backendRepo, tid)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { diff?: string | null; diffStat?: string | null } } | null) =>
         apply({ diffFull: d?.data?.diff ?? null, diffStat: d?.data?.diffStat ?? null }),
@@ -92,7 +93,7 @@ export function TaskWorkflowPage({
       .catch(() => {})
     // 产物文档（方案 v3 §4.4）：终态/审批关才拉，running 期文档窗随 now() 扩张——
     // 带 5s 最小间隔，轮询节拍复用终端 tick
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-docs?taskId=${encodeURIComponent(tid)}`)
+    devDocs(backendRepo, tid)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { docs?: DevDoc[] } } | null) => apply({ docs: d?.data?.docs ?? [], docsAt: Date.now() }))
       .catch(() => {})
@@ -120,11 +121,7 @@ export function TaskWorkflowPage({
       return
     }
     setDeciding(decision)
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(sel.id)}/decide`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision, note: decision === 'rejected' ? note.trim() : undefined, gate: sel.gate }),
-    })
+    decideTask(backendRepo, sel.id, { decision, note: decision === 'rejected' ? note.trim() : undefined, gate: sel.gate })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         toast(decision === 'approved' ? '已通过' : '已打回')

@@ -1,0 +1,10 @@
+{
+  "_comment": "REST/WS 直连基线（c-arch-4 / R10）。business = presentation 业务文件直连，迁移完成后=空表（只降不升 + 键集全等）；network = renderer-core 受控网络层出口（R5 裁定：runtime 为 leaf，独立登记、只降不升）。任何新增直连 → 键集不等 → CI 必红。",
+  "business": {},
+  "network": {
+    "src/runtime/analytics.ts": 2,
+    "src/runtime/sessionQueue.ts": 2,
+    "src/runtime/useRepoActivity.ts": 2,
+    "src/runtime/ws.ts": 3
+  }
+}

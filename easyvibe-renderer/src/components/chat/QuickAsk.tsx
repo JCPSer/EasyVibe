@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { chatHistory, compactChat, resetChat, sendChat } from '@/api/chat'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
 import type { Selection } from '@/shared/contract/selection'
@@ -96,7 +97,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
   const loadEarlier = () => {
     if (!backendRepo || !messages.length || loadingMore) return
     setLoadingMore(true)
-    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}before=${messages[0].id}&limit=50`)
+    chatHistory(backendRepo, `${convQ ? convQ + '&' : '?'}before=${messages[0].id}&limit=50`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { hasMore: boolean; messages: { id: number; role: string; content: string }[] } }) => {
         setHasMore(d.data.hasMore)
@@ -116,7 +117,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
     if (!backendRepo) return
     let stale = false
     loadConvs()
-    fetch(`/api/repos/${backendRepo}/chat${convQ ? convQ + '&' : '?'}limit=50`)
+    chatHistory(backendRepo, `${convQ ? convQ + '&' : '?'}limit=50`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { usage: { promptTokens: number; completionTokens: number }; hasMore: boolean; pendingApprovals?: PendingApproval[]; conversation?: { id: string; title: string | null }; messages: { id: number; role: string; content: string }[] } }) => {
         if (stale) return
@@ -173,12 +174,11 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
     const ac = new AbortController()
     abortRef.current = ac
     const sentConvId = convId // 归属锚点：响应到达时比对当前会话
-    fetch(`/api/repos/${backendRepo}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: withAttach, images: sendImages, moduleRefs: sendMentions, ...convBody }),
-      signal: ac.signal,
-    })
+    sendChat(
+      backendRepo,
+      { message: withAttach, images: sendImages, moduleRefs: sendMentions, ...convBody },
+      { signal: ac.signal },
+    )
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -219,7 +219,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
   const compressCtx = () => {
     if (!backendRepo || compacting) return
     setCompacting(true)
-    fetch(`/api/repos/${backendRepo}/chat/compact${convQ}`, { method: 'POST' })
+    compactChat(backendRepo, convQ)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json()
@@ -236,7 +236,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
 
   const reset = () => {
     if (!backendRepo || sending) return
-    fetch(`/api/repos/${backendRepo}/chat/reset${convQ}`, { method: 'POST' })
+    resetChat(backendRepo, convQ)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setMessages([])

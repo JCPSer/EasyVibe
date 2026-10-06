@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, AtSign, BookmarkPlus, Check, CheckCircle2, Copy, Crosshair, Loader2, MessagesSquare } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { saveView } from '@/api/chat'
 import { AnswerCards } from '@/components/chat/AnswerCards'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
@@ -47,29 +48,29 @@ export function MessageStream({
   }, [map])
 
   const saveAsView = (idx: number) => {
+    // 后端未就绪时 repo 为空：保持既有观感（原裸 fetch 会拼出 /repos/null 并落到同一错误文案）
+    if (!backendRepo) {
+      toast('存视图失败（需要本地后端在线）', 'error')
+      return
+    }
     const m = messages[idx]
     const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
     const name = (viewName.trim() || q).slice(0, 40)
-    fetch(`/api/repos/${backendRepo}/views`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        nodes: m.refs.map((id) => `module:${id}`),
-        edges: [],
-        annotations: [
-          { ref: 'conversation', note: q },
-          ...(m.content.match(/```mermaid[\s\S]*?```/g) ?? []).map((content) => ({ type: 'mermaid', content, note: q })),
-        ],
-      }),
+    saveView(backendRepo, {
+      name,
+      nodes: m.refs.map((id) => `module:${id}`),
+      edges: [],
+      annotations: [
+        { ref: 'conversation', note: q },
+        ...(m.content.match(/```mermaid[\s\S]*?```/g) ?? []).map((content) => ({ type: 'mermaid', content, note: q })),
+      ],
     })
       .then(async (r) => {
         if (r.status === 409) {
           if (window.confirm(`已存在同名视图「${name}」。覆盖它？（取消则放弃保存）`)) {
-            const again = await fetch(`/api/repos/${backendRepo}/views?force=true`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
+            const again = await saveView(
+              backendRepo,
+              {
                 name,
                 nodes: m.refs.map((id) => `module:${id}`),
                 edges: [],
@@ -77,8 +78,9 @@ export function MessageStream({
                   { ref: 'conversation', note: q },
                   ...(m.content.match(/```mermaid[\s\S]*?```/g) ?? []).map((content) => ({ type: 'mermaid', content, note: q })),
                 ],
-              }),
-            })
+              },
+              '?force=true',
+            )
             if (!again.ok) throw new Error(String(again.status))
           } else {
             return

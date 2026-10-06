@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, X } from 'lucide-react'
 import { onSessionOutput } from '@/runtime/growthBus'
 import { prefersReducedMotion } from '@/runtime/motion'
+import { mapProgress } from '@/api/canvas'
+import { sessionOutput } from '@/api/system'
 import {
   formatTickerLine,
   interpretInductionProgress,
@@ -36,7 +38,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
     let stale = false
     let last = ''
     const tick = () => {
-      fetch(`/api/repos/${encodeURIComponent(repo)}/progress`)
+      mapProgress(repo)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data: InductionProgress | null } | null) => {
           if (stale) return
@@ -93,9 +95,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
     if (silentTimerRef.current) window.clearTimeout(silentTimerRef.current)
     if (!enabled || !repo || !sessionId) return
     armSilentTimer()
-    fetch(
-      `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=0&limit=5000`,
-    )
+    sessionOutput(repo, sessionId, 0, 5000)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { seq: number; stream: string; line: string }[] } | null) => {
         for (const row of d?.data ?? []) pushLine(row.seq, row.stream, row.line)
@@ -107,9 +107,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
     })
     // 低频重同步兜底：WS 断线时 ticker 不冻死（progress.json 轮询同款的降级思路）
     const resync = window.setInterval(() => {
-      fetch(
-        `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${maxSeqRef.current}&limit=5000`,
-      )
+      sessionOutput(repo, sessionId, maxSeqRef.current, 5000)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { seq: number; stream: string; line: string }[] } | null) => {
           for (const row of d?.data ?? []) pushLine(row.seq, row.stream, row.line)

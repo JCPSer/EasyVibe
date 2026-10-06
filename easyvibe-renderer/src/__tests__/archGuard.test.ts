@@ -243,37 +243,95 @@ const API_FILES = [
 ]
 const API_ABS = API_FILES.map((f) => `src/${f}`)
 
-/** 网络层 leaf / 测试 / 生成物豁免（见方案 §3.3.2）。runtime 是网络层且为 leaf（不得 import @/api）。 */
+/** 网络层 leaf / 测试 / 生成物豁免（见方案 §3.3.2）。runtime 是网络层且为 leaf（不得 import @/api），
+ *  R5 裁定：保持豁免，但其直连作为**受控网络层出口**独立登记（见 NETWORK_REST_BASELINE），只降不升。 */
 const DIRECT_REST_WHITELIST = /^(src\/api\/|src\/runtime\/|src\/types\/generated)|(__tests__\/|\.test\.tsx?$)/
-/** 批 C 四域存量（本轮未迁；棘轮只降不升——清干净须摘牌，新增文件不得蒙混）。 */
-const DIRECT_REST_LEGACY: ReadonlyArray<readonly [string, number]> = [
-  ['src/components/canvas/Canvas.tsx', 4],
-  ['src/components/canvas/InductionOverlay.tsx', 6],
-  ['src/components/canvas/useGrowthPlayback.ts', 4],
-  ['src/components/canvas/useSubmaps.ts', 4],
-  ['src/components/chat/ChatPanel.tsx', 8],
-  ['src/components/chat/MessageStream.tsx', 4],
-  ['src/components/chat/QuickAsk.tsx', 10],
-  ['src/components/chat/QuickAskStream.tsx', 4],
-  ['src/components/chat/SuggestPanel.tsx', 2],
-  ['src/components/chat/WorkbenchPage.tsx', 16],
-  ['src/components/chat/useConversations.ts', 10],
-  ['src/components/settings/AgentSection.tsx', 10],
-  ['src/components/settings/HarnessSection.tsx', 14],
-  ['src/components/taskworkflow/DocCard.tsx', 4],
-  ['src/components/taskworkflow/PhaseDocReview.tsx', 8],
-  ['src/components/taskworkflow/TaskBoardPage.tsx', 4],
-  ['src/components/taskworkflow/TaskGovernancePage.tsx', 2],
-  ['src/components/taskworkflow/TaskWorkflowPage.tsx', 10],
-  ['src/components/taskworkflow/stages/DoneStage.tsx', 2],
-  ['src/components/taskworkflow/stages/ErrorStage.tsx', 2],
-  ['src/components/taskworkflow/stages/TerminalStage.tsx', 2],
-  ['src/components/taskworkflow/taskAdmin.ts', 7],
+/** 业务域存量（R7 真值化：R6 修复 stripComments 后按去注释真值登记）。
+ *  逐域迁移（canvas → taskworkflow → chat → settings）后**已清空**：业务文件直连 REST = 0。
+ *  棘轮纪律不撤销：键集双向全等（任何新增直连 → 键集不等 → 必红）+ 只降不升。 */
+const DIRECT_REST_LEGACY: ReadonlyArray<readonly [string, number]> = []
+
+/** R5 裁定：runtime 直连 = renderer-core 内部**受控网络层出口**（raw fetch / WS 属传输层自身实现，
+ *  不构成 presentation→application 直连）；独立登记、只降不升，与业务棘轮分表。 */
+const NETWORK_REST_BASELINE: ReadonlyArray<readonly [string, number]> = [
+  ['src/runtime/analytics.ts', 2],
+  ['src/runtime/sessionQueue.ts', 2],
+  ['src/runtime/useRepoActivity.ts', 2],
+  ['src/runtime/ws.ts', 3],
 ]
 
-/** 去注释（保留字符串字面量——`/api/` 字面量正是要抓的）：`/* *\/` 与行注释，行注释避开 `https://`。 */
-const stripComments = (s: string): string =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+/** 去注释（保留字符串字面量——`/api/` 字面量正是要抓的）。
+ *
+ * R6 盲区修复：旧实现「先删块注释」时，块注释起始记号会出现在行注释文本里
+ * （例如「见 ./settings/*（x）」中的注释起始符），与后续某处的块注释结束符配对，
+ * 吞掉大段真实代码（`SettingsPanel.tsx` 26→0、`ChatPanel.tsx` 12→8），导致键集两侧同盲的假绿。
+ * 改为**单遍状态机**：进入行注释即跳到行尾（行注释优先于块注释识别）；字符串/模板
+ * 字面量内原样保留（`'/api/*'` 不被误删，仍会被 RE_APIPATH 抓到）；未闭合块注释到文件尾。 */
+const stripComments = (s: string): string => {
+  const out: string[] = []
+  let state: 'code' | 'line' | 'block' | 'string' = 'code'
+  let quote = ''
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    const d = s[i + 1]
+    if (state === 'code') {
+      if (c === '/' && d === '/') {
+        state = 'line'
+        i += 2
+        continue
+      }
+      if (c === '/' && d === '*') {
+        state = 'block'
+        i += 2
+        continue
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        quote = c
+        state = 'string'
+        out.push(c)
+        i += 1
+        continue
+      }
+      out.push(c)
+      i += 1
+      continue
+    }
+    if (state === 'line') {
+      if (c === '\n') {
+        state = 'code'
+        out.push(c)
+      }
+      i += 1
+      continue
+    }
+    if (state === 'block') {
+      if (c === '*' && d === '/') {
+        state = 'code'
+        i += 2
+        continue
+      }
+      i += 1
+      continue
+    }
+    // state === 'string'：反斜杠转义保真，闭合引号回 code；内容原样保留。
+    if (c === '\\') {
+      out.push(c)
+      if (i + 1 < s.length) out.push(s[i + 1])
+      i += 2
+      continue
+    }
+    if (c === quote) {
+      state = 'code'
+      out.push(c)
+      i += 1
+      continue
+    }
+    out.push(c)
+    i += 1
+  }
+  return out.join('')
+}
 const RE_FETCH = /(?<![\w.])fetch\s*\(/g
 const RE_APIPATH = /['"`]\/api\//g
 const RE_WS = /new\s+WebSocket\b/g
@@ -320,6 +378,46 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
     expect(hits).toBe(3)
     // 注释中的 /api/ 与 fetch 不误报
     expect(directRestHits('src/api/core.ts')).toBeGreaterThan(0) // 唯一出口自身持有 fetch（在 src/api 内合法）
+  })
+  it('⑤ runtime 网络层出口登记（R5）：只降不升（与业务棘轮分表，见 NETWORK_REST_BASELINE）', () => {
+    const actual: Record<string, number> = {}
+    for (const f of walk('src/runtime')) {
+      const n = directRestHits(f)
+      if (n > 0) actual[f] = n
+    }
+    // 键集全等：网络层出口若新增/消失须同步登记表
+    expect(sorted(Object.keys(actual)), 'runtime 网络层出口文件集').toEqual(
+      sorted(NETWORK_REST_BASELINE.map(([f]) => f)),
+    )
+    for (const [f, budget] of NETWORK_REST_BASELINE) {
+      expect(actual[f] ?? 0, `${f} 网络层直连处数`).toBeLessThanOrEqual(budget)
+    }
+  })
+  it('⑥ 盲区回归哨兵（R6/A7）：stripComments 不吞代码；行注释内的 `/*` 不改变计数', () => {
+    // 复现旧盲区最小样例：行注释里的 `/*` 曾与后续 JSX 注释的 `*/` 配对吞掉大段代码
+    const sample = "// 见 ./settings/*（2026-10-05）\nconst a = 1\n{/* 分区导航 */}\nconst b = 2\n"
+    const stripped = stripComments(sample)
+    expect(stripped).toContain('const a = 1')
+    expect(stripped).toContain('const b = 2')
+    // 字符串里的 `/*` / `/api/` 原样保留（不去注释，仍可被 RE_APIPATH 抓）
+    expect(stripComments(`const u = '/api/*'`)).toContain('/api/*')
+    // 对真实文件的计数不因行注释注入 `/*` 而改变（永久哨兵）
+    const target = 'src/components/settings/SettingsPanel.tsx'
+    const before = directRestHits(target)
+    const src = read(target)
+    const injected = src.replace(/^(.*)$/m, '$1 // 注入 /* 干扰哨兵')
+    // 用同一状态机对注入文本计数（直接Rest样本级验证）
+    const countOf = (text: string) =>
+      ((t: string) => (t.match(RE_FETCH)?.length ?? 0) + (t.match(RE_APIPATH)?.length ?? 0) + (t.match(RE_WS)?.length ?? 0))(
+        stripComments(text),
+      )
+    expect(countOf(injected)).toBe(before)
+  })
+  it('⑦ 迁移终态（R6/R7/R3/R2）：SettingsPanel 26→0、ChatPanel 12→0（盲区已修，归零可证）', () => {
+    // 轨迹：R6 修复前 SettingsPanel 26（盲区，守卫不可见）、ChatPanel 12→8（丢 4）；
+    // R6 修复后二者真值可证（26 / 12，登记入 R7 棘轮）；R3/R2 迁移后归零。
+    expect(directRestHits('src/components/settings/SettingsPanel.tsx')).toBe(0)
+    expect(directRestHits('src/components/chat/ChatPanel.tsx')).toBe(0)
   })
 })
 

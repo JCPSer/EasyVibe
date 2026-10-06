@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Pencil, Save, Sparkles } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { customFile, customFiles, generateCustom, harness, putCustomFile, toggleCustomFile } from '@/api/settings'
 import { SCOPES, type CustomSlot } from './common'
 import { IosToggle } from './controls'
 
@@ -17,11 +18,11 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
   const [confirmClear, setConfirmClear] = useState(false)
 
   const load = useCallback(() => {
-    fetch('/api/harness/custom/files')
+    customFiles()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { slots?: CustomSlot[] } } | null) => setSlots(d?.data?.slots ?? []))
       .catch(() => setSlots([]))
-    fetch('/api/harness')
+    harness()
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { manifest?: { version?: string } } } | null) => {
         const v = d?.data?.manifest?.version
@@ -39,11 +40,7 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
   const toggleMaster = (on: boolean) => {
     Promise.all(
       allKeys.map((k) =>
-        fetch('/api/harness/custom/toggle', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: slotFile(k), enabled: on }),
-        })
+        toggleCustomFile({ path: slotFile(k), enabled: on })
       )
     )
       .then(() => {
@@ -61,11 +58,7 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
   const openAi = (scope: string) => setAi({ scope, description: '', mode: 'ai', manual: '', generating: false })
 
   const saveRule = (scopeKey: string, content: string, label: string) =>
-    fetch('/api/harness/custom/file', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: slotFile(scopeKey), content }),
-    })
+    putCustomFile({ path: slotFile(scopeKey), content })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then(() => {
         toast(`「${label}」规则已生效——${SCOPES.find((s) => s.key === scopeKey)?.desc ?? ''}`, 'info')
@@ -77,11 +70,7 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
     if (!ai || !ai.description.trim()) return
     setAi({ ...ai, generating: true })
     const scope = SCOPES.find((s) => s.key === ai.scope) ?? SCOPES[0]
-    fetch('/api/harness/custom/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slot: scope.key, description: ai.description.trim() }),
-    })
+    generateCustom({ slot: scope.key, description: ai.description.trim() })
       .then((r) => (r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(new Error(e?.error ?? String(r.status))))))
       .then((d: { data?: { content?: string } }) => saveRule(scope.key, d?.data?.content ?? '', scope.label))
       .catch((e: Error) => toast(`生成失败：${e.message}`, 'error'))
@@ -105,7 +94,7 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
     }
     Promise.all(
       existing.map((s) =>
-        fetch(`/api/harness/custom/file?path=${encodeURIComponent(s.path)}`)
+        customFile(s.path)
           .then((r) => (r.ok ? r.json() : null))
           .then((d: { data?: { content?: string } } | null) => `## ${s.path}\n\n${d?.data?.content ?? ''}`)
       )
@@ -124,7 +113,7 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
 
   const clearRules = () => {
     const existing = (slots ?? []).filter((s) => s.exists)
-    Promise.all(existing.map((s) => fetch(`/api/harness/custom/file?path=${encodeURIComponent(s.path)}`, { method: 'DELETE' })))
+    Promise.all(existing.map((s) => customFile(s.path, { method: 'DELETE' })))
       .then(() => {
         toast('已清空全部自定义规则——agent 上下文恢复为纯出厂规则', 'info')
         setConfirmClear(false)

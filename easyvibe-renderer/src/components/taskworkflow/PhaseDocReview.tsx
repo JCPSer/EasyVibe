@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, ShieldAlert } from 'lucide-react'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
+import { devDoc, devDocs } from '@/api/task'
 
 /** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
  *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮
@@ -54,7 +55,7 @@ export function PhaseDocReview({
 
   useEffect(() => {
     let dead = false
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-docs?taskId=${encodeURIComponent(taskId)}`)
+    devDocs(backendRepo, taskId)
       .then((r) => (r.ok ? r.json() : null))
       .then(async (d: { data?: { docs?: { path: string; mtime: number }[] } } | null) => {
         const hit = (d?.data?.docs ?? [])
@@ -67,9 +68,7 @@ export function PhaseDocReview({
           }
           return
         }
-        const resp = await fetch(
-          `/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(hit.path)}`,
-        )
+        const resp = await devDoc(backendRepo, hit.path)
         const full = resp.ok ? await resp.json().catch(() => null) : null
         if (dead) return
         if (!full?.data) {
@@ -91,7 +90,7 @@ export function PhaseDocReview({
   useEffect(() => {
     if (!compareDirHint) return
     let dead = false
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/dev-docs?taskId=${encodeURIComponent(taskId)}`)
+    devDocs(backendRepo, taskId)
       .then((r) => (r.ok ? r.json() : null))
       .then(async (d: { data?: { docs?: { path: string; mtime: number }[] } } | null) => {
         if (!dead) {
@@ -105,9 +104,7 @@ export function PhaseDocReview({
           if (!dead) setCompareMissing(true)
           return
         }
-        const full = await fetch(
-          `/api/repos/${encodeURIComponent(backendRepo)}/dev-doc?path=${encodeURIComponent(hit.path)}`,
-        ).then((r) => (r.ok ? r.json().catch(() => null) : null))
+        const full = await devDoc(backendRepo, hit.path).then((r) => (r.ok ? r.json().catch(() => null) : null))
         if (!dead && full?.data) setCompareDoc({ path: hit.path, content: full.data.content ?? '' })
       })
       .catch(() => {})

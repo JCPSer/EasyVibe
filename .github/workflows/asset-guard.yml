@@ -80,3 +80,13 @@ jobs:
 
       - name: 地图域守卫自检（负例必红，含解析失败 fail-closed）
         run: python3 scripts/check_map_domain_guard.py --selfcheck
+
+      # c-arch-4 收口验收：REST/WS 传输层收敛「走完另一半」——presentation 业务文件不得绕过
+      # src/api/** 直连 fetch。本仓 CI 不跑 vitest（见文件头），故用**原始文本**（不去注释）最严
+      # 口径另落一条纯 python3 判据，与本地 archGuard 断言组 5 同源；runtime 为受控网络层出口，
+      # 独立登记（scripts/rest_baseline.json，R5 裁定），两组各自键集全等 + 只降不升。
+      - name: REST/WS 直连守卫（业务空表 + 网络层登记）
+        run: python3 scripts/check_renderer_rest.py --check
+
+      - name: REST/WS 直连守卫自检（负例必红）
+        run: python3 scripts/check_renderer_rest.py --selfcheck

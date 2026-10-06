@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal, Unplug } from 'lucide-react'
 import { terminalLines, terminalLastSeq, pushTerminalLine } from '@/runtime/terminalBuffer'
+import { sessionOutput } from '@/api/system'
 import { taskDuration } from '../diffParse'
 import type { TaskItem } from '../types'
 
@@ -31,9 +32,7 @@ export function TerminalStage({ sel, repo, onOpenRuns }: { sel: TaskItem; repo?:
     if (!isRunning || !sessionId || !repo) return
     let cancelled = false
     const pull = () => {
-      fetch(
-        `/api/repos/${encodeURIComponent(repo)}/sessions/${encodeURIComponent(sessionId)}/output?afterSeq=${terminalLastSeq(sessionId) + 1}&limit=5000`,
-      )
+      sessionOutput(repo, sessionId, terminalLastSeq(sessionId) + 1, 5000)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { data?: { seq: number; stream: string; line: string }[] } | null) => {
           if (cancelled) return

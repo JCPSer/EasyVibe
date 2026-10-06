@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Copy, Loader2 } from 'lucide-react'
 import { onPatrolFinished, onTaskEvent } from '@/runtime/growthBus'
+import { listTasks } from '@/api/task'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { stageOf, gateLabel } from '@/components/taskworkflow/taskStage'
 import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
@@ -73,7 +74,7 @@ export function TaskGovernancePage({
 
   const load = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks`)
+    listTasks(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: GovTask[] } | null) => setTasks(d?.data ?? []))
       .catch(() => {})

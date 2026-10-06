@@ -3,6 +3,7 @@
 import { CheckCircle2, Copy } from 'lucide-react'
 import { toast } from '@/runtime/toast'
 import { absTime } from '@/shared/logic/diffStat'
+import { patrol } from '@/api/canvas'
 import type { TaskItem } from '../types'
 
 export function DoneStage({ sel, backendRepo, impact }: {
@@ -49,7 +50,7 @@ export function DoneStage({ sel, backendRepo, impact }: {
       <button
         onClick={() => {
           if (!backendRepo) return
-          fetch(`/api/repos/${encodeURIComponent(backendRepo)}/patrol`, { method: 'POST' }).catch(() => {})
+          patrol(backendRepo).catch(() => {})
           toast('巡检已启动——稍后到健康看板验证改善', 'info')
         }}
         className="mt-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"

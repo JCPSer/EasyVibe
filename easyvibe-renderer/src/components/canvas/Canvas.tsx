@@ -10,6 +10,8 @@ import type { Selection } from '@/shared/contract/selection'
 import { TaskFormPanel } from './TaskFormPanel'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import { onFreshnessEvent, onSessionEvent } from '@/runtime/growthBus'
+import { freshness as fetchFreshness } from '@/api/canvas'
+import { cancelSessionQueue } from '@/api/system'
 import { nodeTypes } from './nodeTypes'
 import { buildFlow } from './buildFlow'
 import { Legend } from './Legend'
@@ -154,7 +156,7 @@ export function Canvas({
   // 排队取消：DELETE /session-queue（口径同 RunsPage.cancelQueue）
   const cancelReinduceQueue = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${encodeURIComponent(backendRepo)}/session-queue`, { method: 'DELETE' })
+    cancelSessionQueue(backendRepo)
       .then(async (r) => {
         if (r.status === 404) toast('没有排队任务', 'error')
         else if (!r.ok) toast(`取消排队失败（HTTP ${r.status}）`, 'error')
@@ -198,7 +200,7 @@ export function Canvas({
   // S2：地图保鲜——启动拉一次 + WS freshness.changed 增量（git 有新提交而地图未更新）
   useEffect(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/freshness`)      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    fetchFreshness(backendRepo)      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: { status: string; commitsSinceMap?: number | null } }) => {
         setFreshness(d.data.status === 'fresh' ? null : d.data.status)
         setFreshnessInfo({ commitsSinceMap: d.data.commitsSinceMap })

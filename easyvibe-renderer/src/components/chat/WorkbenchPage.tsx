@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, AlertTriangle, Plus, GitBranch, Pencil, Trash2, Check, X, ClipboardList, MessagesSquare } from 'lucide-react'
 import { ChatPanel, type ConversationSummary } from '@/components/chat/ChatPanel'
 import { StagePipeline } from '@/components/taskworkflow/StagePipeline'
+import { conversations as fetchConversations, createConversation, renameConversation, deleteConversation } from '@/api/chat'
+import { listTasks, taskDiff } from '@/api/task'
 import { onTaskEvent } from '@/runtime/growthBus'
 import { toast } from '@/runtime/toast'
 import type { TaskDraft } from '@/shared/logic/taskContext'
@@ -71,7 +73,7 @@ export function WorkbenchPage({
   // 会话列表（含运行时摘要）
   const loadConvs = useCallback(() => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/conversations`)
+    fetchConversations(backendRepo)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: ConversationSummary[] } | null) => {
         if (d?.data) setConvs(d.data)
@@ -85,7 +87,7 @@ export function WorkbenchPage({
       setTasks([])
       return
     }
-    fetch(`/api/repos/${backendRepo}/tasks?conv=${encodeURIComponent(activeConv)}`)
+    listTasks(backendRepo, `?conv=${encodeURIComponent(activeConv)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: TaskItem[] } | null) => {
         if (d?.data) setTasks(d.data)
@@ -101,7 +103,7 @@ export function WorkbenchPage({
       return
     }
     const candidate = tasks.find((t) => t.status === 'done') ?? tasks[0]
-    fetch(`/api/repos/${backendRepo}/tasks/${encodeURIComponent(candidate.id)}/diff`)
+    taskDiff(backendRepo, candidate.id)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: { diffStat?: string | null } } | null) => {
         setDiffStat(d?.data?.diffStat ?? null)
@@ -121,11 +123,7 @@ export function WorkbenchPage({
     if (!pendingChatContext || !backendRepo) return
     const ctx = pendingChatContext
     onConsumeChatContext()
-    fetch(`/api/repos/${backendRepo}/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
+    createConversation(backendRepo, {})
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ConversationSummary }) => {
         setActiveConv(d.data.id)
@@ -151,11 +149,7 @@ export function WorkbenchPage({
   useEffect(() => {
     if (!initialIdea?.trim() || !backendRepo) return
     onConsumeIdea?.()
-    fetch(`/api/repos/${backendRepo}/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
+    createConversation(backendRepo, {})
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ConversationSummary }) => {
         setActiveConv(d.data.id)
@@ -168,11 +162,7 @@ export function WorkbenchPage({
 
   const createConv = () => {
     if (!backendRepo) return
-    fetch(`/api/repos/${backendRepo}/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
+    createConversation(backendRepo, {})
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data: ConversationSummary }) => {
         setActiveConv(d.data.id)
@@ -184,11 +174,7 @@ export function WorkbenchPage({
   // 会话管理（重审 P0）：主入口列表的改名/删除——此前 embedded 模式全藏，误建会话无路可退
   const renameConv = async (cid: string) => {
     if (!backendRepo || !renameVal.trim()) return
-    const r = await fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(cid)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: renameVal.trim() }),
-    }).catch(() => null)
+    const r = await renameConversation(backendRepo, cid, renameVal.trim()).catch(() => null)
     if (!r?.ok) {
       toast('改名失败', 'error')
       return
@@ -199,9 +185,7 @@ export function WorkbenchPage({
 
   const deleteConv = async (cid: string) => {
     if (!backendRepo) return
-    const r = await fetch(`/api/repos/${backendRepo}/conversations/${encodeURIComponent(cid)}`, {
-      method: 'DELETE',
-    }).catch(() => null)
+    const r = await deleteConversation(backendRepo, cid).catch(() => null)
     if (!r?.ok) {
       const d = await r?.json().catch(() => null)
       toast(d?.error ?? '删除失败（最后一个会话需保留）', 'error')

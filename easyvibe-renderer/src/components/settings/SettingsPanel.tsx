@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, X } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { deleteSetting, harness, listSettings, putSetting } from '@/api/settings'
+import { health, llmTest } from '@/api/system'
 import { SECTIONS, SLOTS, type SectionId, type Service } from './common'
 import { AgentSection } from './AgentSection'
 import { ServicesSection } from './ServicesSection'
@@ -36,7 +38,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
     const scopes = ['global', backendRepo].filter(Boolean) as string[]
     const merged: Record<string, unknown> = {}
     for (const scope of scopes) {
-      const r = await fetch(`/api/settings?scope=${encodeURIComponent(scope)}`)
+      const r = await listSettings(scope)
       if (!r.ok) continue
       const d = await r.json()
       for (const item of d.data as { key: string; value: unknown }[]) merged[item.key] = item.value
@@ -85,8 +87,8 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   useEffect(() => {
     if (section !== 'about') return
     Promise.all([
-      fetch('/api/health').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/harness').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      health().then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      harness().then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]).then(([h, hw]) => {
       setAbout({
         backend: h?.data?.version ?? h?.version ?? '未知',
@@ -121,32 +123,20 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       const puts: Promise<Response>[] = []
       for (const s of Object.values(services)) {
         puts.push(
-          fetch('/api/settings/set', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope: 'global', key: `llm.service.${s.id}`, value: { name: s.name, baseUrl: s.baseUrl, model: s.model } }),
-          }),
-          fetch('/api/settings/set', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope: 'global', key: `llm.service.${s.id}.apiKey`, value: s.apiKey }),
-          }),
+          putSetting({ scope: 'global', key: `llm.service.${s.id}`, value: { name: s.name, baseUrl: s.baseUrl, model: s.model } }),
+          putSetting({ scope: 'global', key: `llm.service.${s.id}.apiKey`, value: s.apiKey }),
         )
       }
       for (const [s] of SLOTS) {
         puts.push(
-          fetch('/api/settings/set', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope: 'global', key: `slot.${s}`, value: slots[s] ?? 'default' }),
-          }),
+          putSetting({ scope: 'global', key: `slot.${s}`, value: slots[s] ?? 'default' }),
         )
       }
       puts.push(
-        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key: 'adv.contextBudget', value: adv.contextBudget }) }),
-        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key: 'adv.maxTokens', value: adv.maxTokens }) }),
-        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key: 'adv.autoPatrolEnabled', value: adv.autoPatrolEnabled }) }),
-        fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key: 'adv.autoPatrolHours', value: adv.autoPatrolHours }) }),
+        putSetting({ scope: 'global', key: 'adv.contextBudget', value: adv.contextBudget }),
+        putSetting({ scope: 'global', key: 'adv.maxTokens', value: adv.maxTokens }),
+        putSetting({ scope: 'global', key: 'adv.autoPatrolEnabled', value: adv.autoPatrolEnabled }),
+        putSetting({ scope: 'global', key: 'adv.autoPatrolHours', value: adv.autoPatrolHours }),
       )
       const rs = await Promise.all(puts)
       if (rs.some((r) => !r.ok)) throw new Error('部分配置写入失败')
@@ -178,8 +168,8 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       return rest
     })
     await Promise.all([
-      fetch(`/api/settings/global/${encodeURIComponent(`llm.service.${id}`)}`, { method: 'DELETE' }),
-      fetch(`/api/settings/global/${encodeURIComponent(`llm.service.${id}.apiKey`)}`, { method: 'DELETE' }),
+      deleteSetting('global', `llm.service.${id}`),
+      deleteSetting('global', `llm.service.${id}.apiKey`),
     ])
     toast('服务已删除')
   }
@@ -191,11 +181,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
     if (!s) return
     setTestingSvc(id)
     try {
-      const r = await fetch('/api/llm/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service_id: id, base_url: s.baseUrl, model: s.model, api_key: s.apiKey }),
-      })
+      const r = await llmTest({ service_id: id, base_url: s.baseUrl, model: s.model, api_key: s.apiKey })
       const d: { data?: { ok: boolean; latencyMs: number; protocol: string; error?: string } } = r.ok ? await r.json() : null
       if (!d?.data) {
         toast('测试失败（后端响应异常）', 'error')

@@ -4,6 +4,8 @@ import { toast } from '@/runtime/toast'
 import { enqueue } from '@/runtime/sessionQueue'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/shared/logic/growthMerge'
 import { onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, setWsCloseListener } from '@/runtime/growthBus'
+import { growth as fetchGrowth, reinduce } from '@/api/canvas'
+import { fetchStatic } from '@/api/core'
 import type { GrowthState } from './types'
 
 /**
@@ -135,8 +137,8 @@ export function useGrowthPlayback(
   }, [growth?.done])
 
   const startGrowth = useCallback(() => {
-    const url = backendRepo ? `/api/repos/${backendRepo}/growth` : '/data/growth.log'
-    fetch(url)
+    const req = backendRepo ? fetchGrowth(backendRepo) : fetchStatic('/data/growth.log')
+    req
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.text()
@@ -156,7 +158,7 @@ export function useGrowthPlayback(
     // R7 清债：重新归纳 = spawn 全仓库 agent（数分钟 + LLM 成本），先确认
     if (!window.confirm('重新归纳将 spawn agent 全量分析仓库（通常数分钟），期间地图数据会被刷新。继续？')) return
     setInducing(true)
-    fetch(`/api/repos/${backendRepo}/reinduce`, { method: 'POST' })
+    reinduce(backendRepo)
       .then((r) => {
         // S2：必须抛 Response 本体——catch 里要读 status/body 判别 409（与 analyzeSubmap 同因）
         if (!r.ok) throw r

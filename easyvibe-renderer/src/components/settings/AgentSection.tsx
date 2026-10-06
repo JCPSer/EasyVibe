@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { agentDetect, agentStatus as fetchAgentStatus, agentTest } from '@/api/system'
+import { deleteSetting, putSetting } from '@/api/settings'
 import { field } from './common'
 import { Field } from './controls'
 
@@ -23,7 +25,7 @@ export function AgentSection() {
     const agentDirty = agentEdit !== null && JSON.stringify(agentEdit) !== agentSnap
 
     const loadAgent = useCallback(async () => {
-      const r = await fetch('/api/agent/status')
+      const r = await fetchAgentStatus()
       const d = await r.json().catch(() => null)
       const st: AgentStatus | null = d?.data ?? null
       if (!st) return
@@ -50,8 +52,7 @@ export function AgentSection() {
       if (!agentEdit || agentBusy) return
       setAgentBusy('save')
       try {
-        const put = (key: string, value: unknown) =>
-          fetch('/api/settings/set', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'global', key, value }) })
+        const put = (key: string, value: unknown) => putSetting({ scope: 'global', key, value })
         const puts: Promise<Response>[] = [
           put('agent.command', agentEdit.command.trim() || 'claude'),
           put('agent.args.global', splitArgs(agentEdit.argsGlobal)),
@@ -59,7 +60,7 @@ export function AgentSection() {
         ]
         // 槽位：留空 = 删除键（跟随全局）——整体替换语义
         for (const [key, val] of [['agent.args.task', agentEdit.argsTask], ['agent.args.review', agentEdit.argsReview]] as const) {
-          puts.push(val.trim() ? put(key, splitArgs(val)) : fetch(`/api/settings/global/${encodeURIComponent(key)}`, { method: 'DELETE' }))
+          puts.push(val.trim() ? put(key, splitArgs(val)) : deleteSetting('global', key))
         }
         const rs = await Promise.all(puts)
         if (rs.some((x) => !x.ok)) throw new Error('部分配置写入失败')
@@ -76,7 +77,7 @@ export function AgentSection() {
       if (agentBusy) return
       setAgentBusy('test')
       try {
-        const r = await fetch('/api/agent/test', { method: 'POST' })
+        const r = await agentTest()
         const d = await r.json().catch(() => null)
         if (!r.ok) throw new Error(d?.error ?? '测试失败')
         toast(d.data.ok ? `协议兼容，${d.data.latencyMs}ms` : `不兼容：${d.data.protocol}`, d.data.ok ? 'info' : 'error')
@@ -92,7 +93,7 @@ export function AgentSection() {
       if (agentBusy) return
       setAgentBusy('detect')
       try {
-        const r = await fetch('/api/agent/detect', { method: 'POST' })
+        const r = await agentDetect()
         if (!r.ok) throw new Error('探测失败')
         await loadAgent()
         toast('探测完成')

@@ -3,6 +3,7 @@
 import { Copy, Hammer, XCircle } from 'lucide-react'
 import { toast } from '@/runtime/toast'
 import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import { remediateTask } from '@/components/taskworkflow/taskAdmin'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import { STATUS_LABEL, type TaskItem } from '../types'
 
@@ -31,10 +32,8 @@ export function ErrorStage({ sel, backendRepo, onCreateTask, onReload, onCleared
         {sel.status === 'rejected' && (
           <button
             onClick={() => {
-              fetch(`/api/repos/${encodeURIComponent(backendRepo)}/tasks/${encodeURIComponent(sel.id)}/remediate`, { method: 'POST' })
-                .then(async (r) => {
-                  const d = await r.json().catch(() => null)
-                  if (!r.ok) throw new Error(d?.error ?? '操作失败')
+              remediateTask(backendRepo, sel.id)
+                .then(() => {
                   toast('已带审查意见进入修改复审——完成后子 agent 自动复审')
                   onReload()
                 })
