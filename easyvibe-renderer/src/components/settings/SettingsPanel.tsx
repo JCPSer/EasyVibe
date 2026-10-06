@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, X } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/lib/i18n'
 import { deleteSetting, harness, listSettings, putSetting } from '@/api/settings'
 import { health, llmTest } from '@/api/system'
 import { SECTIONS, SLOTS, type SectionId, type Service } from './common'
@@ -22,6 +23,7 @@ interface Props {
 // 文案纪律：只说价值与现状，不提内部施工编号。
 
 export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
+  const { t } = useLang()
   const [section, setSection] = useState<SectionId>('services')
   const [services, setServices] = useState<Record<string, Service>>({})
   const [slots, setSlots] = useState<Record<string, string>>({})
@@ -214,15 +216,15 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
           >
             <s.icon size={14} className="mt-0.5 shrink-0" />
             <span>
-              <span className={`block text-[12px] font-bold ${section === s.id ? 'text-slate-800 dark:text-slate-100' : ''}`}>{s.label}</span>
-              <span className="text-micro block text-slate-400 dark:text-slate-500">{s.hint}</span>
+              <span className={`block text-[12px] font-bold ${section === s.id ? 'text-slate-800 dark:text-slate-100' : ''}`}>{t(`settings.section.${s.id}`)}</span>
+              <span className="text-micro block text-slate-400 dark:text-slate-500">{t(`settings.section.${s.id}Hint`)}</span>
             </span>
           </button>
         ))}
         <div className="mt-auto text-micro px-2.5 leading-4 text-slate-300 dark:text-slate-600">
-          API Key 加密存储
+          {t('settings.shell.keyEncrypted')}
           <br />
-          仅本机可解密
+          {t('settings.shell.keyLocalOnly')}
         </div>
       </nav>
 
@@ -230,10 +232,10 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{SECTIONS.find((s) => s.id === section)?.label}</h2>
+            <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{t(`settings.section.${section}`)}</h2>
             {dirty && (
               <span className="anim-scale-in flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-semibold text-amber-600">
-                <i className="h-1 w-1 rounded-full bg-amber-500" /> 未保存
+                <i className="h-1 w-1 rounded-full bg-amber-500" /> {t('settings.shell.unsaved')}
               </span>
             )}
           </div>
@@ -245,7 +247,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 pt-20 text-[12px] text-slate-400 dark:text-slate-500">
-              <Loader2 size={14} className="animate-spin" /> 加载配置…
+              <Loader2 size={14} className="animate-spin" /> {t('settings.shell.loading')}
             </div>
           ) : section === 'agent' ? (
             <AgentSection />
@@ -283,17 +285,17 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
               disabled={saving}
               className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-cap font-semibold text-slate-500 dark:text-slate-400 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
             >
-              <RotateCcw size={11} /> 放弃更改
+              <RotateCcw size={11} /> {t('settings.shell.discard')}
             </button>
           )}
-          <span className="text-micro ml-auto text-slate-300 dark:text-slate-600">{backendRepo ? '' : '需要本地后端在线'}</span>
+          <span className="text-micro ml-auto text-slate-300 dark:text-slate-600">{backendRepo ? '' : t('settings.shell.backendOffline')}</span>
           <button
             onClick={save}
             disabled={saving || loading || !dirty || !backendRepo}
             className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-[12px] font-bold text-white transition-all hover:bg-blue-700 disabled:opacity-40"
           >
             {saving ? <Loader2 size={12} className="animate-spin" /> : dirty ? <Save size={12} /> : <Check size={12} />}
-            {saving ? '保存中…' : dirty ? '保存配置' : '已是最新'}
+            {saving ? t('settings.shell.saving') : dirty ? t('settings.shell.save') : t('settings.shell.saved')}
           </button>
         </div>
       </div>

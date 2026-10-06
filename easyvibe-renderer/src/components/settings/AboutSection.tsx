@@ -1,8 +1,26 @@
-// 关于分区：应用后端版本 / Harness 版本 / 数据存储（只读事实）。
+// 关于分区：界面语言（切换即时全界面生效）+ 应用后端版本 / Harness 版本 / 数据存储（只读事实）。
 // 拆自 SettingsPanel.tsx（2026-10-05 防膨胀）。
+import { useLang, type Lang } from '@/lib/i18n'
+import { Select } from '@/components/ui/SelectMenu'
+
 export function AboutSection({ about }: { about: { backend: string; harness: string } | null }) {
+  const { lang, setLang, t } = useLang()
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
+        <span className="text-[12px] text-slate-500 dark:text-slate-400">{t('common.language')}</span>
+        {/* 选项用各语言自名（中文恒显「中文」），与系统设置惯例一致 */}
+        <Select
+          className="w-40"
+          ariaLabel={t('common.language')}
+          value={lang}
+          options={[
+            { value: 'zh', label: '中文' },
+            { value: 'en', label: 'English' },
+          ]}
+          onChange={(v) => setLang(v as Lang)}
+        />
+      </div>
       {[
         { label: '应用后端版本', value: about?.backend ?? '加载中…' },
         { label: 'Harness 版本', value: about?.harness ?? '加载中…' },

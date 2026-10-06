@@ -88,7 +88,7 @@ const SUBDIR_FILES: Record<string, string[]> = {
   ],
   overlays: [
     'overlays/ChecklistOverlay.tsx', 'overlays/OnboardingChecklist.tsx',
-    'overlays/SessionBubble.tsx', 'overlays/SuggestDrawer.tsx',
+    'overlays/SessionBubble.tsx', 'overlays/SessionBubbleCard.tsx', 'overlays/SuggestDrawer.tsx',
     'overlays/TaskDraftOverlay.tsx', 'overlays/ViewsDrawer.tsx', 'overlays/ViewsPanel.tsx',
     'overlays/WelcomeOverlay.tsx', 'overlays/WelcomePage.tsx',
   ],

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Activity, Clock, HeartPulse, Search, Sparkles, X } from 'lucide-react'
 import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/runtime/growthBus'
 import { toast } from '@/runtime/toast'
-import { absTime, toMs } from '@/shared/logic/diffStat'
+import { toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel } from '@/runtime/sessionQueue'
+import { useLang } from '@/lib/i18n'
+import { SessionBubbleCard } from './SessionBubbleCard'
 import { sessionsOverview } from '@/api/repos'
 import { listTasks } from '@/api/task'
 import { killSession, cancelSessionQueue } from '@/api/system'
@@ -37,6 +39,7 @@ interface Overview {
 }
 
 export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTasks }: { backendRepo: string | null; resyncKey?: number; onOpenRuns?: (sessionId?: string) => void; onOpenTasks?: () => void }) {
+  const { t } = useLang()
   const [ov, setOv] = useState<Overview | null>(null)
   // 任务槽排队（与会话队列并列的第二类排队：任务 permit 满退回 pending，从未进会话队列）
   const [pendingTasks, setPendingTasks] = useState(0)
@@ -87,10 +90,11 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
         const hit = ovRef.current?.active.find((a) => a.sessionId === e.sessionId)
         const label = hit?.label ?? e.sessionId
         setFailed({ label })
-        toast(`「${label}」执行失败`, 'error')
+        toast(t('shell.bubble.sessionFailed', { label }), 'error')
         window.setTimeout(() => setFailed((f) => (f?.label === label ? null : f)), 5000)
       }),
-    [],
+    // t 为模块级稳定函数，仅作翻译取词（含它仅为满足 exhaustive-deps）
+    [t],
   )
 
   const activeList = failed ? [] : ov?.active ?? []
@@ -122,15 +126,15 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
   // 任务执行/审查等未知 label（kindFromLabel 返回 null）→ Activity 图标
   const Icon = kind === 'patrol' ? HeartPulse : kind === 'submap' ? Search : kind === 'reinduce' ? Sparkles : Activity
 
-  const kill = (a: OverviewActive) => {
-    if (!window.confirm(`确定取消「${a.label}」（${a.repo}）？该操作不可撤销。`)) return
+  const kill = (a: Pick<OverviewActive, 'sessionId' | 'repo' | 'label'>) => {
+    if (!window.confirm(t('shell.bubble.killConfirm', { label: a.label, repo: a.repo }))) return
     killSession(a.repo, a.sessionId)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
-        toast(`已取消「${a.label}」`)
+        toast(t('shell.bubble.killOk', { label: a.label }))
         pull()
       })
-      .catch(() => toast('取消失败（请确认后端在线后重试）。', 'error'))
+      .catch(() => toast(t('shell.bubble.killErr'), 'error'))
   }
 
   const cancelQueue = (q: OverviewQueued) => {
@@ -138,15 +142,15 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
       .then(async (r) => {
         if (r.status === 404) {
           const b = (await r.json().catch(() => null)) as { error?: string } | null
-          toast(b?.error ?? '没有排队任务', 'error')
+          toast(b?.error ?? t('shell.bubble.queueNone'), 'error')
         } else if (!r.ok) {
-          toast(`取消排队失败（HTTP ${r.status}）`, 'error')
+          toast(t('shell.bubble.queueCancelFailed', { status: r.status }), 'error')
         } else {
-          toast('已取消排队')
+          toast(t('shell.bubble.queueCancelled'))
         }
         pull()
       })
-      .catch(() => toast('取消排队失败（请确认后端在线后重试）。', 'error'))
+      .catch(() => toast(t('shell.bubble.queueCancelErr'), 'error'))
   }
 
   const foreign = (repo: string) => backendRepo && repo !== backendRepo
@@ -158,7 +162,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
       <div
         onClick={() => onOpenRuns?.(primary?.sessionId)}
         role={onOpenRuns ? 'button' : undefined}
-        title={onOpenRuns ? '查看 agent 流水（跨仓库；点击定位到当前会话）' : undefined}
+        title={onOpenRuns ? t('shell.bubble.viewRunsTip') : undefined}
         className={`glass elev-2 flex h-[26px] items-center gap-1.5 rounded-full border pl-1 pr-2.5 ${onOpenRuns ? 'cursor-pointer' : ''} ${
           failed ? 'border-red-300 dark:border-red-800' : 'border-slate-200 dark:border-slate-700'
         }`}
@@ -192,15 +196,25 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
         />
         <span className="max-w-[220px] truncate whitespace-nowrap text-cap font-semibold leading-none text-slate-700 dark:text-slate-200">
           {failed
-            ? `${failed.label} · 失败`
+            ? t('shell.bubble.failed', { label: failed.label })
             : primary
               ? activeList.length > 1
-                ? `${activeList.length} 个会话进行中`
-                : `${primary.label}${foreign(primary.repo) ? ` · ${primary.repo}` : ''} · 进行中`
-              : `排队中：${queuedPrimary?.label ?? ''}${foreign(queuedPrimary?.repo ?? '') ? ` · ${queuedPrimary?.repo}` : ''}`}
+                ? t('shell.bubble.manyRunning', { count: activeList.length })
+                : t('shell.bubble.running', {
+                    label: foreign(primary.repo) ? `${primary.label} · ${primary.repo}` : primary.label,
+                  })
+              : t('shell.bubble.queued', {
+                  label: `${queuedPrimary?.label ?? ''}${foreign(queuedPrimary?.repo ?? '') ? ` · ${queuedPrimary?.repo}` : ''}`,
+                })}
         </span>
         <span className="tnum whitespace-nowrap text-micro leading-none text-slate-400 dark:text-slate-500">
-          {failed ? '会话已结束' : primary ? (elapsed !== null ? `已运行 ${elapsed}` : '进行中…') : '结束后自动开始'}
+          {failed
+            ? t('shell.bubble.sessionEnded')
+            : primary
+              ? elapsed !== null
+                ? t('shell.bubble.elapsed', { elapsed })
+                : t('shell.bubble.runningShort')
+              : t('shell.bubble.autoStart')}
         </span>
         {/* 排队 chip：琥珀小胶囊，跨仓库逐个列出，行内 × 随时取消 */}
         {queuedList.slice(0, 2).map((q) => (
@@ -210,8 +224,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
           >
             <Clock size={9} />
             <span className="max-w-[110px] truncate">
-              排队:{q.label}
-              {foreign(q.repo) ? `·${q.repo}` : ''}
+              {t('shell.bubble.queuedChip', { label: `${q.label}${foreign(q.repo) ? ` · ${q.repo}` : ''}` })}
             </span>
             <button
               onClick={(e) => {
@@ -219,7 +232,7 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
                 cancelQueue(q)
               }}
               className="rounded-full p-0.5 text-amber-400 transition-colors hover:bg-amber-100 hover:text-amber-700 dark:text-amber-600 dark:hover:bg-amber-900/50 dark:hover:text-amber-300"
-              title="取消排队"
+              title={t('shell.bubble.cancelQueueTip')}
             >
               <X size={9} />
             </button>
@@ -235,58 +248,17 @@ export function SessionBubble({ backendRepo, resyncKey = 0, onOpenRuns, onOpenTa
               onOpenTasks()
             }}
             className={`flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 py-0.5 pl-1.5 pr-2 text-micro font-medium leading-none text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 ${onOpenTasks ? 'cursor-pointer hover:border-amber-400' : ''}`}
-            title="有任务在排队等待执行槽位（并发满自动开始）——点击查看任务"
+            title={t('shell.bubble.tasksQueuedTip')}
           >
             <Clock size={9} />
-            任务排队×{pendingTasks}
+            {t('shell.bubble.tasksQueued', { count: pendingTasks })}
           </span>
         )}
       </div>
 
-      {/* 悬停详情卡：跨仓库列出全部活动会话（仓库 · label · 起止 · 各自取消） */}
+      {/* 悬停详情卡：跨仓库列出全部活动会话（含仓库），可分别终止——纯展示拆件见 ./SessionBubbleCard */}
       {activeList.length > 0 && !failed && (
-        <div className="pointer-events-none invisible absolute left-1/2 top-full z-50 mt-1.5 w-72 -translate-x-1/2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100">
-          <div className="glass elev-3 anim-scale-in rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-          <p className="text-cap font-bold text-slate-700 dark:text-slate-200">
-            运行中的会话（{activeList.length}）
-          </p>
-          <div className="mt-1.5 space-y-2">
-            {activeList.map((a) => {
-              const st = a.startedAt ? toMs(a.startedAt) : null
-              return (
-                <div key={a.sessionId} className="rounded-lg bg-slate-50 dark:bg-slate-950/70 px-2.5 py-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-cap font-semibold text-slate-700 dark:text-slate-200">{a.label}</span>
-                    <span className="shrink-0 rounded bg-blue-50 dark:bg-blue-950/40 px-1 py-px text-micro font-semibold text-blue-600 dark:text-blue-300">
-                      {a.repo}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between text-micro text-slate-500 dark:text-slate-400">
-                    <span className="mono">{a.sessionId}</span>
-                    <span className="tnum">
-                      {st !== null ? `已运行 ${formatElapsed(now - st)}` : '…'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => kill(a)}
-                    className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-micro font-semibold text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/40"
-                    title="取消该会话（二次确认）"
-                  >
-                    <X size={10} />
-                    取消该会话
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-          {primaryStartedMs !== null && (
-            <p className="mt-2 flex justify-between text-micro text-slate-400 dark:text-slate-500">
-              <span>启动时间</span>
-              <span className="tnum">{absTime(new Date(primaryStartedMs).toISOString()).slice(5)}</span>
-            </p>
-          )}
-          </div>
-        </div>
+        <SessionBubbleCard activeList={activeList} primaryStartedMs={primaryStartedMs} now={now} onKill={kill} />
       )}
     </div>
   )

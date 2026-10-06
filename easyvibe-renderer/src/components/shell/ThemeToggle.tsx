@@ -1,15 +1,18 @@
 import { Moon, Sun } from 'lucide-react'
+import { useLang } from '@/lib/i18n'
 
 /** 主题开关（2026-10-04）：苹果式滑动拨块——亮=太阳 / 暗=月亮，
  *  拨块带滑动过渡与图标交叉淡化；主题本体由 App 持有（html.dark class + localStorage）。 */
 export function ThemeToggle({ dark, onChange }: { dark: boolean; onChange: (v: boolean) => void }) {
+  const { t } = useLang()
+  const label = t(dark ? 'shell.topbar.toLight' : 'shell.topbar.toDark')
   return (
     <button
       onClick={() => onChange(!dark)}
       role="switch"
       aria-checked={dark}
-      aria-label={dark ? '切换到亮色模式' : '切换到暗黑模式'}
-      title={dark ? '切换到亮色模式' : '切换到暗黑模式'}
+      aria-label={label}
+      title={label}
       className={`relative h-6 w-[52px] shrink-0 rounded-full transition-colors duration-300 ${
         dark ? 'bg-slate-700' : 'bg-slate-200'
       }`}

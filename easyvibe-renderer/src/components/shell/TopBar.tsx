@@ -1,6 +1,7 @@
 import { Activity, CircleHelp, FileDown, LayoutGrid, Lightbulb, Settings, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { isWsConnected, onWsConnection } from '@/runtime/growthBus'
+import { useLang } from '@/lib/i18n'
 import { ThemeToggle } from './ThemeToggle'
 import { TopCenter } from './TopCenter'
 
@@ -9,16 +10,17 @@ import { TopCenter } from './TopCenter'
  * 断开时显示弱琥珀提示；正常时零占用。HTTP 兜底（终端/运行页）已覆盖主要消费端。
  */
 function WsStatusChip() {
+  const { t } = useLang()
   const [connected, setConnected] = useState(isWsConnected())
   useEffect(() => onWsConnection(setConnected), [])
   if (connected) return null
   return (
     <span
       className="flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700"
-      title="与后端的实时连接已断开，正在自动重连；页面数据走 HTTP 轮询兜底（实时性降级）"
+      title={t('shell.topbar.wsReconnectTip')}
     >
       <WifiOff size={12} />
-      重连中
+      {t('shell.topbar.wsReconnect')}
     </span>
   )
 }
@@ -67,6 +69,7 @@ export function TopBar({
   page: string
   onOpenSettings: () => void
 }) {
+  const { t } = useLang()
   return (
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <TopCenter
@@ -82,19 +85,19 @@ export function TopBar({
         <button
           onClick={onToggleViews}
           className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
-          title="我的视图（对话沉淀的图资产）"
+          title={t('shell.topbar.viewsTip')}
         >
           <LayoutGrid size={12} />
-          视图
+          {t('shell.topbar.views')}
         </button>
         {backendRepo && (
           <button
             onClick={onToggleSuggest}
             className="flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-[12px] font-semibold text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-            title="AI 主动发现优化建议，逐条可发起修复"
+            title={t('shell.topbar.suggestTip')}
           >
             <Lightbulb size={12} />
-            优化建议
+            {t('shell.topbar.suggest')}
           </button>
         )}
         {backendRepo && (
@@ -104,19 +107,19 @@ export function TopBar({
             className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[12px] font-semibold transition-colors disabled:opacity-40 ${
               patrolling ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700' : 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 hover:bg-emerald-100'
             }`}
-            title={!agentReady ? '未检测到执行 agent——先安装或在设置中配置' : '巡检：Supervisor 直调 LLM（带健康基线），产出新地图并落健康历史'}
+            title={t(!agentReady ? 'shell.topbar.patrolDisabledTip' : 'shell.topbar.patrolTip')}
           >
             <Activity size={12} className={patrolling ? 'animate-pulse' : ''} />
-            {patrolling ? '巡检中…' : '巡检'}
+            {t(patrolling ? 'shell.topbar.patrolling' : 'shell.topbar.patrol')}
           </button>
         )}
         <button
           onClick={onExport}
           className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-[12px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70"
-          title="导出架构健康报告（Markdown，零 token 成本）"
+          title={t('shell.topbar.exportTip')}
         >
           <FileDown size={12} />
-          导出
+          {t('shell.topbar.export')}
         </button>
         {/* 主题开关：亮=太阳 / 暗=月亮滑动拨块（2026-10-04） */}
         <ThemeToggle dark={dark} onChange={onToggleDark} />
@@ -128,7 +131,7 @@ export function TopBar({
               ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300'
               : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
           }`}
-          title="新手引导（欢迎页 + 上手指引）——再点关闭"
+          title={t('shell.topbar.welcomeTip')}
         >
           <CircleHelp size={12} />
         </button>
@@ -137,7 +140,7 @@ export function TopBar({
           className={`rounded-lg border px-2 py-1 text-[12px] font-semibold ${
             page === 'settings' ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70'
           }`}
-          title="设置（LLM 服务 / 槽位绑定 / 高级）"
+          title={t('shell.topbar.settingsTip')}
         >
           <Settings size={12} />
         </button>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { TrafficLightsSpacer, FakeTrafficLights } from './WindowControls'
 import { startWindowDrag, toggleWindowMaximize } from '@/runtime/host'
+import { useLang } from '@/lib/i18n'
 import {
   GitBranch,
   Map as MapIcon,
@@ -42,34 +43,35 @@ export type PageId =
   | 'kb-apis'
   | 'settings'
 
-const NAV: { group: string; items: { id: PageId; label: string; icon: typeof MapIcon }[] }[] = [
+// 导航文案经 i18n key 取词（字典见 @/lib/i18n，域 shell.nav）。
+const NAV: { groupKey: string; items: { id: PageId; labelKey: string; icon: typeof MapIcon }[] }[] = [
   {
-    group: '探索',
+    groupKey: 'shell.nav.group.explore',
     items: [
-      { id: 'map', label: '架构地图', icon: MapIcon },
-      { id: 'modules', label: '模块目录', icon: Boxes },
-      { id: 'deps', label: '依赖关系', icon: Waypoints },
-      { id: 'drift', label: '漂移洞察', icon: Radar },
-      { id: 'health', label: '健康看板', icon: HeartPulse },
+      { id: 'map', labelKey: 'shell.nav.map', icon: MapIcon },
+      { id: 'modules', labelKey: 'shell.nav.modules', icon: Boxes },
+      { id: 'deps', labelKey: 'shell.nav.deps', icon: Waypoints },
+      { id: 'drift', labelKey: 'shell.nav.drift', icon: Radar },
+      { id: 'health', labelKey: 'shell.nav.health', icon: HeartPulse },
     ],
   },
   {
-    group: '工作区',
+    groupKey: 'shell.nav.group.workspace',
     items: [
-      { id: 'workbench', label: '任务对话', icon: MessagesSquare },
-      { id: 'tasks', label: '任务', icon: ClipboardList },
-      { id: 'runs', label: '运行', icon: Activity },
-      { id: 'usage', label: '用量', icon: Gauge },
-      { id: 'changes', label: '变更记录', icon: History },
-      { id: 'git', label: 'Git', icon: GitBranch },
+      { id: 'workbench', labelKey: 'shell.nav.workbench', icon: MessagesSquare },
+      { id: 'tasks', labelKey: 'shell.nav.tasks', icon: ClipboardList },
+      { id: 'runs', labelKey: 'shell.nav.runs', icon: Activity },
+      { id: 'usage', labelKey: 'shell.nav.usage', icon: Gauge },
+      { id: 'changes', labelKey: 'shell.nav.changes', icon: History },
+      { id: 'git', labelKey: 'shell.nav.git', icon: GitBranch },
     ],
   },
   {
-    group: '知识库',
+    groupKey: 'shell.nav.group.kb',
     items: [
-      { id: 'kb-docs', label: '文档中心', icon: BookOpen },
-      { id: 'kb-decisions', label: '决策记录', icon: ScrollText },
-      { id: 'kb-apis', label: '接口目录', icon: Plug },
+      { id: 'kb-docs', labelKey: 'shell.nav.kb-docs', icon: BookOpen },
+      { id: 'kb-decisions', labelKey: 'shell.nav.kb-decisions', icon: ScrollText },
+      { id: 'kb-apis', labelKey: 'shell.nav.kb-apis', icon: Plug },
     ],
   },
 ]
@@ -90,6 +92,7 @@ interface Props {
 }
 
 export function AppShell({ page, onPageChange, badges, attentionBar, topBar, topCenter, children }: Props) {
+  const { t } = useLang()
   // 默认展开（设计师：默认即 90% 场景，折叠只是权力不是义务）；折叠选择持久化（真人测试建议#5）
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && localStorage.getItem('ev.nav.collapsed') === '1')
   const toggleCollapsed = () => {
@@ -141,8 +144,8 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, top
         >
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
             {NAV.map((g) => (
-              <div key={g.group}>
-                {!collapsed && <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wider text-slate-300 dark:text-slate-600">{g.group}</p>}
+              <div key={g.groupKey}>
+                {!collapsed && <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wider text-slate-300 dark:text-slate-600">{t(g.groupKey)}</p>}
                 {g.items.map((it) => {
                   const active = page === it.id
                   const badge = badges?.[it.id]
@@ -153,13 +156,13 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, top
                     <button
                       key={it.id}
                       onClick={() => onPageChange(it.id)}
-                      title={collapsed ? it.label : undefined}
+                      title={collapsed ? t(it.labelKey) : undefined}
                       className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] transition-colors ${
                         active ? 'border-r-2 border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 font-semibold text-blue-700' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-700'
                       } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
                     >
                       <it.icon size={15} className="shrink-0" />
-                      {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{it.label}</span>}
+                      {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{t(it.labelKey)}</span>}
                       {alert ? (
                         <span key="a" className="anim-scale-in rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{alert}</span>
                       ) : null}
@@ -179,23 +182,23 @@ export function AppShell({ page, onPageChange, badges, attentionBar, topBar, top
           <div className={`border-t border-slate-100 dark:border-slate-800 py-2 ${collapsed ? 'flex flex-col items-center' : ''}`}>
             <button
               onClick={() => onPageChange('settings')}
-              title="设置"
+              title={t('shell.nav.settings')}
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-[13px] ${
                 page === 'settings' ? 'font-semibold text-blue-700' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-700'
               } ${collapsed ? 'justify-center border-r-0 px-0' : ''}`}
             >
               <Settings size={15} className="shrink-0" />
-              {!collapsed && <span>设置</span>}
+              {!collapsed && <span>{t('shell.nav.settings')}</span>}
             </button>
             <button
               onClick={toggleCollapsed}
-              title={collapsed ? '展开导航' : '收起导航'}
+              title={t(collapsed ? 'shell.nav.expandTip' : 'shell.nav.collapseTip')}
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 dark:text-slate-600 hover:text-slate-500 ${collapsed ? 'justify-center px-0' : ''}`}
             >
               {collapsed ? <PanelLeftOpen size={14} /> : (
                 <>
                   <PanelLeftClose size={14} />
-                  <span>收起</span>
+                  <span>{t('shell.nav.collapse')}</span>
                 </>
               )}
             </button>
