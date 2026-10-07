@@ -4,6 +4,7 @@
 // 闭包陷阱对策：所有时变值经回调/ref 注入，不捕获调用方 state 快照（沿用既有 serverVersionRef 口径）。
 import { dismissToast, toast } from '@/runtime/toast'
 import { track } from '@/runtime/analytics'
+import { health } from '@/api/system'
 import { sysNotify } from '@/runtime/notify'
 import { pushTerminalLine } from '@/runtime/terminalBuffer'
 import {
@@ -52,7 +53,8 @@ export function connectWs(opts: ConnectWsOptions): () => void {
       // 全量重同步（覆盖断线期间的变更）+ 队列快照重拉
       opts.onReconnected()
       // Y7：重连点比对后端版本——热重启/更新后前端是旧契约，提示刷新
-      fetch('/api/health')
+      // c-arch-9：经 @/api 唯一 fetch 出口（URL 逐字等价：/health → /api/health）
+      health()
         .then((r) => r.json())
         .then((h: { data?: { version?: string } }) => {
           const v = h.data?.version

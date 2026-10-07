@@ -2,12 +2,12 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-07T08:14:05+08:00",
+    "generated_at": "2026-10-07T13:51:34+08:00",
     "stats": {
       "files_total": 371,
       "files_covered": 371,
       "coverage_ratio": 1.0,
-      "edges_derived": 54,
+      "edges_derived": 55,
       "edges_inferred": 0,
       "retried_modules": 0
     }
@@ -407,7 +407,8 @@
         "easyvibe-renderer/src/runtime/**"
       ],
       "dependencies": [
-        "server-api"
+        "server-api",
+        "renderer-api"
       ],
       "health": {
         "score": 84,
@@ -416,10 +417,6 @@
         "churn": "low",
         "decay_flags": [],
         "concerns": [
-          {
-            "id": "c-renderer-runtime-1",
-            "severity": "high"
-          },
           {
             "id": "c-renderer-runtime-2",
             "severity": "high"
@@ -884,6 +881,13 @@
       "strength": "strong"
     },
     {
+      "id": "e56",
+      "from": "renderer-runtime",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
       "id": "e27",
       "from": "renderer-api",
       "to": "server-api",
@@ -1089,10 +1093,6 @@
       "responsibility_overlap"
     ],
     "concerns": [
-      {
-        "id": "c-arch-9",
-        "severity": "high"
-      },
       {
         "id": "c-arch-10",
         "severity": "high"

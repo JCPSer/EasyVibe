@@ -13,3 +13,7 @@ export const killSession = (repo: string, sessionId: string) =>
   apiFetch(`${repoBase(repo)}/sessions/${encodeURIComponent(sessionId)}/kill`, { method: 'POST' })
 export const cancelSessionQueue = (repo: string) =>
   apiFetch(`${repoBase(repo)}/session-queue`, { method: 'DELETE' })
+/** 会话排队入队（202 语义/non-2xx/异常由 runtime 调用方判读；client 只换传输层）——
+ *  c-arch-9：补 runtime 出口收敛所需的唯一缺口端点（与 cancelSessionQueue 同域同基路径）。 */
+export const enqueueSessionQueue = (repo: string, kind: string, moduleId?: string) =>
+  apiFetch(`${repoBase(repo)}/session-queue`, jsonInit('POST', moduleId ? { kind, moduleId } : { kind }))

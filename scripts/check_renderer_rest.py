@@ -11,12 +11,16 @@
 扫描面：easyvibe-renderer/src/**   排除 src/api/**、__tests__/**、*.test.ts(x)、types/generated
 分组：
   business  业务文件（presentation 四域 + pages/hooks/lib/App 等）——迁移完成 = 空表
-  network   src/runtime/**（R5 裁定：renderer-core 受控网络层出口，独立登记、只降不升）
+  network   src/runtime/**（c-arch-9 收敛后：REST 取数一律经 src/api/** 唯一 fetch 出口，
+            自身仅保留 WS 传输原语，故登记收敛为「唯一豁免键」——独立登记、只降不升）
 
 模式：
   --check [--baseline scripts/rest_baseline.json]
       两组各自 ① 键集双向全等 ② per-file 实际 ≤ 预算；任一不满足 → exit 1（fail-closed）
-  --selfcheck   负例自证（S1 加一处 fetch 必红 / S2 删基线项必红 / S3 合法改注释不变 / S4 复原必绿）
+      network 组另判 ③ 登记面结构上限（独立于磁盘）：键数 ≤ NETWORK_MAX_ENTRIES 且键 ⊆
+      NETWORK_ALLOWED_KEYS——堵「基线改回多键 + 磁盘造回多文件」的成对回退（旧谓词无免疫力）
+  --selfcheck   负例自证（S1 加一处 fetch 必红 / S2 删基线项必红 / S3 合法改注释不变 / S4 复原必绿
+                / S6 runtime 第二出口必红 / S7 基线多键 + 磁盘多文件 → 键数上限必红）
   --map <map.json>  地图 presentation 口径边集复核（A8a/A8b/A8c；本地/归纳期）
 
 本文件不得出现任何受管契约名 / env 名（由 scripts/verify_assets.py --forbid-literals 自守卫）。
@@ -37,6 +41,13 @@ RE_WS = re.compile(r"new\s+WebSocket\b")
 # presentation 五模块（地图口径 A8a/A8b 的 from 白名单；settings-ui 于 c-console-ui-3 析出）
 PRESENTATION = {"console-ui", "settings-ui", "chat-ui", "task-ui", "map-canvas"}
 APPLICATION = {"server-api", "task-engine", "event-bus"}
+
+# c-arch-9 收敛后的**登记面结构判据**（独立于磁盘，互补于 check_group 的「键集全等」）：
+#   network 只允许登记「唯一残留传输原语」——WebSocket 落点 src/runtime/ws.ts，键数上限 1。
+# 该判据只看基线自身，故「基线改回 4 键 + 磁盘造回 4 个含 fetch( 的文件」这一成对回退
+# （键集恰好全等、旧谓词无法识别）也会被拦下（见 --selfcheck S7）。
+NETWORK_MAX_ENTRIES = 1
+NETWORK_ALLOWED_KEYS = {"src/runtime/ws.ts"}
 
 
 def is_excluded(rel):
@@ -94,6 +105,25 @@ def check_group(label, actual, budget):
     return problems
 
 
+def assert_network_structural(network_baseline):
+    """登记面结构判据（c-arch-9）：只依赖基线自身，不依赖磁盘。
+
+    堵「成对回退」：若把 network 基线改回多键、同时在 runtime 造回对应多文件，则
+    check_group 的「键集全等」判据全绿；此处以「键数上限 + 豁免键集」独立拦下。
+    """
+    problems = []
+    keys = set(network_baseline.keys())
+    if len(keys) > NETWORK_MAX_ENTRIES:
+        problems.append(
+            "network 登记键数 %d 超上限 %d(唯一豁免=%s)：%s"
+            % (len(keys), NETWORK_MAX_ENTRIES, sorted(NETWORK_ALLOWED_KEYS), sorted(keys))
+        )
+    extra = keys - NETWORK_ALLOWED_KEYS
+    if extra:
+        problems.append("network 出现非豁免键（唯一豁免=WS 传输原语 %s）：%s" % (sorted(NETWORK_ALLOWED_KEYS), sorted(extra)))
+    return problems
+
+
 def run(root, baseline_path):
     baseline_path = baseline_path if os.path.isabs(baseline_path) else os.path.join(root, baseline_path)
     with open(baseline_path, encoding="utf-8") as fh:
@@ -102,6 +132,7 @@ def run(root, baseline_path):
     problems = []
     problems += check_group("business", business, baseline.get("business", {}))
     problems += check_group("network", network, baseline.get("network", {}))
+    problems += assert_network_structural(baseline.get("network", {}))
     disabled = [x for x in ("business", "network") if baseline.get(x) == [] or x not in baseline]
     return problems, business, network, disabled
 
@@ -170,6 +201,28 @@ def selfcheck(real_root):
         # S4 复原 → 必绿
         p4, _, _, _ = run(tmp, base_path)
         results.append(("S4 合法基线 → 必绿", not p4, "; ".join(p4[:1])))
+        # S6 磁盘在 runtime 新增第 2 个含 fetch( 的文件 → 键集不等 → 必红（探针可见性）
+        write_baseline({}, {"src/runtime/ws.ts": 1})
+        with open(os.path.join(base, "runtime", "analytics.ts"), "w", encoding="utf-8") as fh:
+            fh.write("export const t = () => fetch('/api/repos/x/events')\n")
+        p6, _, _, _ = run(tmp, base_path)
+        results.append(("S6 runtime 第二出口 → 必红", any(x.startswith("network 键集不等") for x in p6), "; ".join(p6[:1])))
+        # S7 基线改回 4 键 + 磁盘造回 4 个含 fetch( 的文件 → 键集全等却因键数上限 → 必红（防成对回退）
+        for name in ("sessionQueue", "useRepoActivity"):
+            with open(os.path.join(base, "runtime", name + ".ts"), "w", encoding="utf-8") as fh:
+                fh.write("export const t = () => fetch('/api/repos/x/events')\n")
+        write_baseline({}, {
+            "src/runtime/ws.ts": 1,
+            "src/runtime/analytics.ts": 2,
+            "src/runtime/sessionQueue.ts": 2,
+            "src/runtime/useRepoActivity.ts": 2,
+        })
+        p7, _, _, _ = run(tmp, base_path)
+        results.append((
+            "S7 基线多键 + 磁盘多文件 → 键数上限必红",
+            any("键数" in x and "超上限" in x for x in p7),
+            "; ".join(p7[:1]),
+        ))
     # S5 真仓库 → 必绿
     problems, business, network, disabled = run(real_root, os.path.join(real_root, DEFAULT_BASELINE))
     detail = "business=%d network=%d" % (len(business), len(network))
@@ -193,7 +246,7 @@ def main():
     args = ap.parse_args()
     root = os.path.abspath(args.root)
     if args.selfcheck:
-        print("▶ REST/WS 直连守卫自检 S1–S5")
+        print("▶ REST/WS 直连守卫自检 S1–S7")
         return 0 if selfcheck(root) else 1
     if args.map:
         problems, detail = map_scope(os.path.abspath(args.map))
@@ -208,6 +261,11 @@ def main():
         {k: v for k, v in sorted(business.items())}, {k: v for k, v in sorted(network.items())},
     )
     print("  %s --check 问题 %d ｜ %s" % ("OK  " if not problems else "FAIL", len(problems), summary))
+    # R12 复检趋势锚点：network 出口收敛度（files/hits 目标 ≤1，只降不升）
+    reg_net = network if not problems else {k: v for k, v in sorted(network.items())}
+    print("        network 入口 文件数=%d 处数=%d（上限 %d，只降不升）" % (
+        len(reg_net), sum(reg_net.values()), NETWORK_MAX_ENTRIES,
+    ))
     return 0 if not problems else 1
 
 

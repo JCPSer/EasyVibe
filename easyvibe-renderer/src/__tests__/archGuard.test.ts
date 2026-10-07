@@ -243,22 +243,24 @@ const API_FILES = [
   'api/repos.ts', 'api/settings.ts', 'api/system.ts', 'api/task.ts',
 ]
 const API_ABS = API_FILES.map((f) => `src/${f}`)
+/** api 层允许的别名白名单（c-arch-9）：@/types 放行，@/runtime 明确**禁止**（反向环门禁）。
+ *  独立为可执行谓词，供断言组 3 的循环与负例共用（避免注释与判据自相矛盾）。 */
+const apiAliasAllowed = (s: string): boolean => /^@\/(?:types)\//.test(s)
 
-/** 网络层 leaf / 测试 / 生成物豁免（见方案 §3.3.2）。runtime 是网络层且为 leaf（不得 import @/api），
- *  R5 裁定：保持豁免，但其直连作为**受控网络层出口**独立登记（见 NETWORK_REST_BASELINE），只降不升。 */
+/** 网络层 / 测试 / 生成物豁免（见方案 §3.3.2）。runtime 是网络层：REST 取数一律经 `@/api` 唯一
+ *  fetch 出口（c-arch-9 收敛），自身仅保留 WS 传输原语；因 WS 非 REST，作为**唯一豁免登记**
+ *  （见 NETWORK_REST_BASELINE），只降不升。 */
 const DIRECT_REST_WHITELIST = /^(src\/api\/|src\/runtime\/|src\/types\/generated)|(__tests__\/|\.test\.tsx?$)/
 /** 业务域存量（R7 真值化：R6 修复 stripComments 后按去注释真值登记）。
  *  逐域迁移（canvas → taskworkflow → chat → settings）后**已清空**：业务文件直连 REST = 0。
  *  棘轮纪律不撤销：键集双向全等（任何新增直连 → 键集不等 → 必红）+ 只降不升。 */
 const DIRECT_REST_LEGACY: ReadonlyArray<readonly [string, number]> = []
 
-/** R5 裁定：runtime 直连 = renderer-core 内部**受控网络层出口**（raw fetch / WS 属传输层自身实现，
- *  不构成 presentation→application 直连）；独立登记、只降不升，与业务棘轮分表。 */
+/** c-arch-9 收敛后：runtime 的 REST 取数已全部经 `@/api` 唯一 fetch 出口，仅余「WS 传输原语」
+ *  （`new WebSocket`，非 REST）作为**唯一豁免**——独立登记、只降不升，与业务棘轮分表。
+ *  收敛度：4 文件 9 处 → 1 文件 1 处（files ≤ 1 / hits ≤ 1）。 */
 const NETWORK_REST_BASELINE: ReadonlyArray<readonly [string, number]> = [
-  ['src/runtime/analytics.ts', 2],
-  ['src/runtime/sessionQueue.ts', 2],
-  ['src/runtime/useRepoActivity.ts', 2],
-  ['src/runtime/ws.ts', 3],
+  ['src/runtime/ws.ts', 1],
 ]
 
 /** 去注释（保留字符串字面量——`/api/` 字面量正是要抓的）。
@@ -360,17 +362,20 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
       expect(violating[f] ?? 0, `${f} 直连 REST 处数`).toBeLessThanOrEqual(budget)
     }
   })
-  it('③ src/api/** 依赖白名单：只许相对路径 + @/runtime + @/types（不得反向 import 业务层）', () => {
+  it('③ src/api/** 依赖白名单：只许相对路径 + @/types（不得反向 import 业务层 / @/runtime）', () => {
     const forbidden = /^(?:@\/(?:components|pages|hooks|lib|App|shared|api)|easyvibe-renderer\/src\/(?:components|pages|hooks|lib|App|shared|api))/
     for (const f of API_ABS) {
       for (const s of specs(f)) {
         const r = resolveRel(f, s) ?? s
         const isRelative = s.startsWith('./') || s.startsWith('../')
-        const allowedAlias = /^@\/(?:runtime|types)\//.test(s)
         expect(forbidden.test(s) || forbidden.test(r), `${f} → ${s}`).toBe(false)
-        expect(isRelative || allowedAlias, `${f} → ${s}（api 层只许相对路径 / @/runtime / @/types）`).toBe(true)
+        expect(isRelative || apiAliasAllowed(s), `${f} → ${s}（api 层只许相对路径 / @/types）`).toBe(true)
       }
     }
+    // 反向门禁负例（c-arch-9）：api 层出现 @/runtime/* 即越界——否则 runtime→api 的收敛
+    // 会换来 api→runtime 的同层 SCC（verify_map_acyclic E 断言硬门禁）。
+    expect(apiAliasAllowed('@/runtime/ws')).toBe(false)
+    expect(apiAliasAllowed('@/types/generated/api')).toBe(true)
   })
   it('④ 反绕过：fetch 与 /api/ 字面量两条同时扫（const u="/api/x"; fetch(u) 逃逸被堵）', () => {
     // 直接对内联样例断言扫描器行为（守卫自身可执行性，R12）
@@ -380,6 +385,8 @@ describe('archGuard · 断言组 5：api client 层 + 禁业务文件直连 REST
     // 注释中的 /api/ 与 fetch 不误报
     expect(directRestHits('src/api/core.ts')).toBeGreaterThan(0) // 唯一出口自身持有 fetch（在 src/api 内合法）
   })
+  // c-arch-9：runtime 唯一豁免 = WS 传输原语（`new WebSocket`，非 REST）；REST 取数经 @/api 唯一出口。
+  // 键集全等 + 只降不升即「收敛度文件数/处数 ≤ 1」的本地前哨（CI 侧等价判据 + 键数上限见 check_renderer_rest.py）。
   it('⑤ runtime 网络层出口登记（R5）：只降不升（与业务棘轮分表，见 NETWORK_REST_BASELINE）', () => {
     const actual: Record<string, number> = {}
     for (const f of walk('src/runtime')) {

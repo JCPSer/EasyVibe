@@ -1,10 +1,7 @@
 {
-  "_comment": "REST/WS 直连基线（c-arch-4 / R10）。business = presentation 业务文件直连，迁移完成后=空表（只降不升 + 键集全等）；network = renderer-core 受控网络层出口（R5 裁定：runtime 为 leaf，独立登记、只降不升）。任何新增直连 → 键集不等 → CI 必红。",
+  "_comment": "REST/WS 直连基线（c-arch-4 / R10；c-arch-9 收敛后）。business = presentation 业务文件直连，迁移完成后=空表（只降不升 + 键集全等）；network = renderer-runtime 的**唯一残留传输原语**（WebSocket 传输）登记——REST 取数已全部经 src/api/** 唯一 fetch 出口（c-arch-9 收敛：4 文件 9 处 → 1 文件 1 处），键数上限=1、只降不升。任何新增直连 → 键集不等 → CI 必红；成对回退（基线改回多键 + 磁盘造回多文件）由 NETWORK_MAX_ENTRIES 独立判据拦截。",
   "business": {},
   "network": {
-    "src/runtime/analytics.ts": 2,
-    "src/runtime/sessionQueue.ts": 2,
-    "src/runtime/useRepoActivity.ts": 2,
-    "src/runtime/ws.ts": 3
+    "src/runtime/ws.ts": 1
   }
 }

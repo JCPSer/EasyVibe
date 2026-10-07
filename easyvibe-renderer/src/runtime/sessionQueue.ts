@@ -1,5 +1,6 @@
 import { toast } from '@/runtime/toast'
 import { t } from '@/runtime/i18n'
+import { enqueueSessionQueue } from '@/api/system'
 
 // 会话排队入队 helper（运行会话气泡 + 单会话排队，2026-10-04）：
 // 409（单会话纪律）的各入口统一走这里——POST /repos/{id}/session-queue 一次原子裁决：
@@ -56,11 +57,8 @@ export async function enqueue(
   moduleId?: string,
 ): Promise<EnqueueResult | null> {
   try {
-    const r = await fetch(`/api/repos/${encodeURIComponent(repo)}/session-queue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(moduleId ? { kind, moduleId } : { kind }),
-    })
+    // c-arch-9：经 @/api 唯一 fetch 出口（URL/method/body 逐字等价；202 语义仍在此判读）
+    const r = await enqueueSessionQueue(repo, kind, moduleId)
     if (r.status === 202) {
       const d = (await r.json().catch(() => null)) as {
         data?: { queued?: boolean; started?: boolean; replaced?: { label?: string } | null }
