@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { chatHistory, compactChat, resetChat, sendChat } from '@/api/chat'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
@@ -31,6 +32,7 @@ interface Props {
 }
 
 export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateModule, onGoWorkbench, pendingMention, defaultConvTitle }: Props) {
+  const { t } = useLang()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [usage, setUsage] = useState({ promptTokens: 0, completionTokens: 0 })
   const [input, setInput] = useState('')
@@ -158,7 +160,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
       attachments.length > 0
         ? q +
           '\n\n' +
-          attachments.map((a) => `--- 附件：${a.name}（${(a.size / 1024).toFixed(1)}KB）---\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
+          attachments.map((a) => t('chat.attachHeader', { name: a.name, size: (a.size / 1024).toFixed(1) }) + `\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
         : q
     setMessages((prev) => [
       ...prev,
@@ -193,7 +195,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
         setClarify(d.data.clarify)
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: d.data.reply.trim() || '（未获得回答——请重试）', refs: d.data.refs },
+          { role: 'assistant', content: d.data.reply.trim() || t('chat.emptyReply'), refs: d.data.refs },
           // auto-compact 留痕（"上下文已压缩：82%→34%"系统消息）
           ...(d.data.compaction ? [{ role: 'system' as const, content: d.data.compaction, refs: [] }] : []),
         ])
@@ -203,9 +205,9 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
       .catch((e) => {
         if (convIdRef.current !== sentConvId) return // 会话已切换：错误也不得追加进新会话
         if (ac.signal.aborted) {
-          setMessages((prev) => [...prev, { role: 'system', content: '已停止生成（后端调用已发出，token 已计费）', refs: [] }])
+          setMessages((prev) => [...prev, { role: 'system', content: t('chat.stopped'), refs: [] }])
         } else {
-          setMessages((prev) => [...prev, { role: 'assistant', content: `（对话服务不可用：${String(e).slice(0, 80)}）`, refs: [] }])
+          setMessages((prev) => [...prev, { role: 'assistant', content: t('chat.unavailable', { err: String(e).slice(0, 80) }), refs: [] }])
         }
       })
       .finally(() => {
@@ -230,7 +232,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
         }
         setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
       })
-      .catch(() => toast('压缩失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.compressFail'), 'error'))
       .finally(() => setCompacting(false))
   }
 
@@ -244,26 +246,26 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
         setPendingApprovals([])
         loadConvs()
       })
-      .catch(() => toast('重置失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.resetFail'), 'error'))
   }
 
   const exportAndClear = () => {
     exportChat()
     setTimeout(() => {
-      if (!window.confirm('已导出。清空当前会话？（清空后不可恢复，视图文件不受影响）')) return
+      if (!window.confirm(t('chat.confirmClear'))) return
       reset()
     }, 400)
   }
 
   const exportChat = () => {
     const md = [
-      `# EasyVibe 对话导出 · ${backendRepo ?? ''}`,
+      t('chat.exportTitle', { repo: backendRepo ?? '' }),
       `> ${new Date().toLocaleString()}`,
       '',
       ...messages.flatMap((m) => {
         if (m.role === 'system') return [`> ${m.content}`, '']
-        if (m.role === 'user') return [`## 问`, '', m.content, '']
-        return [`## 答`, '', m.content, '']
+        if (m.role === 'user') return [`## ${t('chat.exportAsk')}`, '', m.content, '']
+        return [`## ${t('chat.exportAnswer')}`, '', m.content, '']
       }),
     ].join('\n')
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
@@ -305,7 +307,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
           <button
             onClick={() => setConvMenuOpen((v) => !v)}
             className="min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70"
-            title="切换 / 新建会话"
+            title={t('chat.switchTip')}
           >
             <span className="block truncate text-[12px] font-semibold text-slate-700 dark:text-slate-200">{displayTitle}</span>
           </button>
@@ -314,7 +316,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
             <button
               onClick={() => onGoWorkbench?.()}
               className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40"
-              title="有待审批任务：去工作台裁决"
+              title={t('chat.approvalBadgeTip')}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
               <span className="text-micro font-bold leading-3 text-red-600 dark:text-red-400">{pendingCount}</span>
@@ -327,7 +329,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
               <button
                 onClick={() => setChipDismissed(true)}
                 className="text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
-                title="移除上下文标记（不影响 @提及）"
+                title={t('chat.chipRemoveTip')}
               >
                 <XIcon size={9} />
               </button>
@@ -337,7 +339,7 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
             <button
               onClick={() => setMoreOpen((v) => !v)}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
-              title="更多操作"
+              title={t('chat.moreTip')}
             >
               <MoreHorizontal size={13} />
             </button>
@@ -347,15 +349,15 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
                 <div className="glass anim-scale-in absolute right-0 top-full z-40 mt-1 w-48 rounded-xl border border-slate-200 p-1 shadow-xl dark:border-slate-700">
                   {/* 信息头：带标签的 token 统计 */}
                   <p className="tnum flex items-baseline justify-between px-2 pb-1 pt-1.5 text-micro text-slate-400 dark:text-slate-500">
-                    <span>输入 {usage.promptTokens.toLocaleString()}</span>
-                    <span>输出 {usage.completionTokens.toLocaleString()}</span>
+                    <span>{t('chat.tokenIn', { n: usage.promptTokens.toLocaleString() })}</span>
+                    <span>{t('chat.tokenOut', { n: usage.completionTokens.toLocaleString() })}</span>
                   </p>
                   <button
                     onClick={() => { setMoreOpen(false); upgradeToTask() }}
                     disabled={!backendRepo || sending || !messages.some((m) => m.role === 'user')}
                     className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/70"
                   >
-                    <Wrench size={11} /> 转为任务
+                    <Wrench size={11} /> {t('chat.toTask')}
                   </button>
                   <div className="mx-2 my-0.5 border-t border-slate-100 dark:border-slate-800" />
                   <button
@@ -363,14 +365,14 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
                     disabled={!backendRepo || messages.length === 0}
                     className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/70"
                   >
-                    <Download size={11} /> 导出/清空
+                    <Download size={11} /> {t('chat.exportClear')}
                   </button>
                   <button
                     onClick={() => { setMoreOpen(false); compressCtx() }}
                     disabled={!backendRepo || compacting}
                     className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/70"
                   >
-                    <Shrink size={11} /> {compacting ? '压缩中…' : '压缩上下文'}
+                    <Shrink size={11} /> {compacting ? t('chat.compressing') : t('chat.compress')}
                   </button>
                   {convId && (
                     <>
@@ -380,14 +382,14 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
                         disabled={!backendRepo}
                         className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/70"
                       >
-                        <Pencil size={11} /> 重命名会话
+                        <Pencil size={11} /> {t('chat.rename')}
                       </button>
                       <button
                         onClick={() => { setMoreOpen(false); deleteConv() }}
                         disabled={!backendRepo}
                         className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-red-500 transition-colors hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-950/40"
                       >
-                        <XIcon size={11} /> 删除会话
+                        <XIcon size={11} /> {t('chat.deleteConv')}
                       </button>
                     </>
                   )}
@@ -415,26 +417,26 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
                     )}
                     <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === convId ? 'font-bold text-blue-700 dark:text-blue-400' : 'text-slate-600 dark:text-slate-300'}`}>
-                      {c.title ?? '未命名会话'}
+                      {c.title ?? t('chat.untitled')}
                     </span>
                     {c.runtime.pendingConfirmations > 0 && (
                       <span className="rounded-full bg-red-500 px-1.5 text-micro font-bold leading-4 text-white">{c.runtime.pendingConfirmations}</span>
                     )}
-                    <span className="tnum shrink-0 text-micro text-slate-300 dark:text-slate-600">{c.messageCount}条</span>
+                    <span className="tnum shrink-0 text-micro text-slate-300 dark:text-slate-600">{t('chat.msgCount', { n: c.messageCount })}</span>
                   </button>
                   {c.id === convId && (
-                    <button onClick={() => { setRenaming(true); setRenameVal(c.title ?? '') }} className="shrink-0 rounded p-0.5 text-slate-300 hover:text-blue-500 dark:text-slate-600 dark:hover:text-blue-400" title="重命名">
+                    <button onClick={() => { setRenaming(true); setRenameVal(c.title ?? '') }} className="shrink-0 rounded p-0.5 text-slate-300 hover:text-blue-500 dark:text-slate-600 dark:hover:text-blue-400" title={t('chat.rename')}>
                       <Pencil size={10} />
                     </button>
                   )}
                 </div>
               ))}
-              {convs.length === 0 && <p className="px-2 py-1.5 text-cap text-slate-400 dark:text-slate-500">还没有会话，发第一条消息即创建</p>}
+              {convs.length === 0 && <p className="px-2 py-1.5 text-cap text-slate-400 dark:text-slate-500">{t('chat.noConvs')}</p>}
               <button
                 onClick={createConv}
                 className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-1.5 text-cap font-semibold text-white hover:bg-blue-700"
               >
-                <Plus size={11} /> 新建会话
+                <Plus size={11} /> {t('chat.createConv')}
               </button>
             </div>
           </>
@@ -449,10 +451,10 @@ export function QuickAsk({ backendRepo, map, selection, onCreateTask, onLocateMo
                 if (e.key === 'Enter') renameConv()
                 if (e.key === 'Escape') setRenaming(false)
               }}
-              placeholder="会话名…"
+              placeholder={t('chat.convNamePh')}
               className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none focus:border-blue-300 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200"
             />
-            <button onClick={renameConv} className="rounded-lg bg-blue-600 px-2.5 py-1 text-cap font-bold text-white">存</button>
+            <button onClick={renameConv} className="rounded-lg bg-blue-600 px-2.5 py-1 text-cap font-bold text-white">{t('chat.saveBtn')}</button>
           </div>
         )}
       </div>

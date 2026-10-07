@@ -22,9 +22,9 @@ export function AboutSection({ about }: { about: { backend: string; harness: str
         />
       </div>
       {[
-        { label: '应用后端版本', value: about?.backend ?? '加载中…' },
-        { label: 'Harness 版本', value: about?.harness ?? '加载中…' },
-        { label: '数据存储', value: '本机 SQLite（会话/任务/巡检历史）' },
+        { label: t('settings.about.backend'), value: about?.backend ?? t('settings.about.loading') },
+        { label: t('settings.about.harness'), value: about?.harness ?? t('settings.about.loading') },
+        { label: t('settings.about.storage'), value: t('settings.about.storageVal') },
       ].map((row) => (
         <div key={row.label} className="flex items-center justify-between rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
           <span className="text-[12px] text-slate-500 dark:text-slate-400">{row.label}</span>
@@ -32,7 +32,7 @@ export function AboutSection({ about }: { about: { backend: string; harness: str
         </div>
       ))}
       <p className="text-micro px-1 leading-4 text-slate-300 dark:text-slate-600">
-        地图与产物保存在各仓库的 .easyvibe/ 目录；全部数据不出本机。
+        {t('settings.about.footer')}
       </p>
     </div>
   )

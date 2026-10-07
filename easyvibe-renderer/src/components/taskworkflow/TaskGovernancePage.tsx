@@ -5,6 +5,7 @@ import { listTasks } from '@/api/task'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { stageOf, gateLabel } from '@/components/taskworkflow/taskStage'
 import { TaskAdminButtons } from '@/components/taskworkflow/TaskAdminButtons'
+import { useLang, t } from '@/runtime/i18n'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 
 // 治理视图（v4 P2）：历史检索 + 失败治理 + 返工链可见。
@@ -31,20 +32,21 @@ type StatusFilter = 'all' | 'active' | 'awaiting' | 'done' | 'failed'
 type ChainFilter = 'all' | 'rework' | 'root'
 type TimeFilter = 'all' | '7d' | '30d'
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  pending: { label: '排队中', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' },
-  running: { label: '运行中', cls: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600' },
-  awaiting_approval: { label: '等待审批', cls: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600' },
-  done: { label: '已完成', cls: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' },
-  failed: { label: '失败', cls: 'bg-red-50 dark:bg-red-950/40 text-red-500' },
-  interrupted: { label: '已中断', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' },
-  rejected: { label: '已驳回', cls: 'bg-red-50 dark:bg-red-950/40 text-red-500' },
+/** 状态徽章样式（label 不再存中文字面量——渲染期 t(`task.status.*`) 解析）。 */
+const STATUS_META: Record<string, { labelKey: string; cls: string }> = {
+  pending: { labelKey: 'task.status.pending', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' },
+  running: { labelKey: 'task.status.running', cls: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600' },
+  awaiting_approval: { labelKey: 'task.status.awaiting', cls: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600' },
+  done: { labelKey: 'task.status.done', cls: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' },
+  failed: { labelKey: 'task.status.failed', cls: 'bg-red-50 dark:bg-red-950/40 text-red-500' },
+  interrupted: { labelKey: 'task.status.interrupted', cls: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' },
+  rejected: { labelKey: 'task.status.rejected', cls: 'bg-red-50 dark:bg-red-950/40 text-red-500' },
 }
 
 function MiniDots({ status, gate }: { status: string; gate: string | null | undefined }) {
   const s = stageOf(status, gate)
   return (
-    <span className="inline-flex items-center gap-[3px]" title="五阶段进度">
+    <span className="inline-flex items-center gap-[3px]" title={t('task.dotsTip')}>
       {[0, 1, 2, 3, 4].map((i) => {
         let cls = 'bg-slate-100 dark:bg-slate-800'
         if (s === 'done') cls = 'bg-emerald-500'
@@ -67,6 +69,8 @@ export function TaskGovernancePage({
   onOpenTask: (taskId: string) => void
   onCreateTask: (d: TaskDraft) => void
 }) {
+  const { t: tt } = useLang()
+  const t = tt
   const [tasks, setTasks] = useState<GovTask[] | null>(null)
   const [statusF, setStatusF] = useState<StatusFilter>('all')
   const [chainF, setChainF] = useState<ChainFilter>('all')
@@ -130,29 +134,29 @@ export function TaskGovernancePage({
     return sorted
   }, [tasks, statusF, chainF, timeF, chain.reworkCount])
 
-  const duration = (t: GovTask) => {
-    const a = toMs(t.createdAt)
-    const b = toMs(t.updatedAt)
+  const duration = (tk: GovTask) => {
+    const a = toMs(tk.createdAt)
+    const b = toMs(tk.updatedAt)
     if (!a || !b) return '—'
     const min = Math.floor(Math.max(0, b - a) / 60000)
-    if (min < 1) return '刚刚'
-    if (min < 60) return `${min} 分`
-    return `${Math.floor(min / 60)} 时 ${min % 60} 分`
+    if (min < 1) return t('common.justNow')
+    if (min < 60) return t('common.min', { m: min })
+    return t('common.hourMin', { h: Math.floor(min / 60), m: min % 60 })
   }
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">{t('common.pickProject')}</div>
   }
 
-  const renderRow = (t: GovTask, depth: number, child = false) => {
-    const meta = STATUS_META[t.status] ?? STATUS_META.pending
-    const reworks = chain.reworkCount.get(t.id) ?? 0
-    const violations = t.result?.contractViolations?.length ?? 0
-    const failed = ['failed', 'rejected', 'interrupted'].includes(t.status)
+  const renderRow = (tk: GovTask, depth: number, child = false) => {
+    const meta = STATUS_META[tk.status] ?? STATUS_META.pending
+    const reworks = chain.reworkCount.get(tk.id) ?? 0
+    const violations = tk.result?.contractViolations?.length ?? 0
+    const failed = ['failed', 'rejected', 'interrupted'].includes(tk.status)
     return (
-      <div key={`${depth}-${t.id}`}>
+      <div key={`${depth}-${tk.id}`}>
         <div
-          onClick={() => onOpenTask(t.id)}
+          onClick={() => onOpenTask(tk.id)}
           className={`flex cursor-pointer items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-[11px] transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
             child ? 'bg-slate-50/50 dark:bg-slate-900/50 dark:bg-slate-900/50' : ''
           }`}
@@ -161,19 +165,19 @@ export function TaskGovernancePage({
           {child && <span className="w-5 shrink-0 text-slate-300 dark:text-slate-600">└</span>}
           <span className="min-w-0 flex-1">
             <span className={`block truncate text-[12px] ${child ? 'font-normal text-slate-500 dark:text-slate-400' : 'font-semibold text-slate-700 dark:text-slate-200'}`}>
-              {t.title}
+              {tk.title}
               {violations > 0 && (
-                <span className="tnum ml-1.5 rounded-full bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-[9px] font-bold text-red-500">越界 {violations}</span>
+                <span className="tnum ml-1.5 rounded-full bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-[9px] font-bold text-red-500">{t('task.violationsChip', { n: violations })}</span>
               )}
             </span>
-            {failed && t.error && <span className="mt-0.5 block truncate text-[10px] text-red-400">{t.error}</span>}
+            {failed && tk.error && <span className="mt-0.5 block truncate text-[10px] text-red-400">{tk.error}</span>}
           </span>
-          <span className="hidden shrink-0 sm:block"><MiniDots status={t.status} gate={t.gate} /></span>
-          <span className="tnum w-14 shrink-0 text-slate-400 dark:text-slate-500">{duration(t)}</span>
-          <span className="tnum hidden w-32 shrink-0 text-slate-400 dark:text-slate-500 md:block">{absTime(t.createdAt)}</span>
+          <span className="hidden shrink-0 sm:block"><MiniDots status={tk.status} gate={tk.gate} /></span>
+          <span className="tnum w-14 shrink-0 text-slate-400 dark:text-slate-500">{duration(tk)}</span>
+          <span className="tnum hidden w-32 shrink-0 text-slate-400 dark:text-slate-500 md:block">{absTime(tk.createdAt)}</span>
           {reworks > 0 && (
-            <span className="tnum w-14 shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-px text-center text-[9px] font-bold text-amber-600" title="被返工重提的次数">
-              重提 ×{reworks}
+            <span className="tnum w-14 shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-px text-center text-[9px] font-bold text-amber-600" title={t('task.reworkTip')}>
+              {t('task.reworkChip', { n: reworks })}
             </span>
           )}
           {failed && (
@@ -181,27 +185,27 @@ export function TaskGovernancePage({
               onClick={(e) => {
                 e.stopPropagation()
                 onCreateTask({
-                  title: `${t.title}（重提）`,
-                  description: t.description ?? t.title,
-                  modules: t.modules ?? [],
+                  title: `${tk.title}${t('task.reworkSuffix')}`,
+                  description: tk.description ?? tk.title,
+                  modules: tk.modules ?? [],
                   acceptance: '',
                   source: 'manual',
-                  context: { origin_task_id: t.id },
+                  context: { origin_task_id: tk.id },
                 })
               }}
               className="shrink-0 rounded-md border border-red-200 dark:border-red-900/60 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
             >
-              <Copy size={9} className="mr-0.5 inline" /> 复制重提
+              <Copy size={9} className="mr-0.5 inline" /> {t('task.copyRetry')}
             </button>
           )}
           <span className={`shrink-0 rounded-full px-2 py-px text-[10px] font-bold ${meta.cls}`}>
-            {gateLabel(t.status, t.gate) ?? meta.label}
+            {gateLabel(tk.status, tk.gate) ?? t(meta.labelKey)}
           </span>
           {/* 管理三操作（重审 P0）：治理页是"管全部"的地方——终止/重试/删除必须在场 */}
-          <span className="shrink-0"><TaskAdminButtons repo={backendRepo} taskId={t.id} status={t.status} onDone={load} /></span>
+          <span className="shrink-0"><TaskAdminButtons repo={backendRepo} taskId={tk.id} status={tk.status} onDone={load} /></span>
         </div>
         {/* 返工子任务沿链缩进 */}
-        {(chain.childrenOf.get(t.id) ?? [])
+        {(chain.childrenOf.get(tk.id) ?? [])
           .filter((c) => rows.some((r) => r.id === c.id))
           .map((c) => renderRow(c, depth + 1, true))}
       </div>
@@ -214,16 +218,16 @@ export function TaskGovernancePage({
   return (
     <div className="flex h-full flex-col p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300">治理</span>
-        <span className="text-[10px] text-slate-400 dark:text-slate-500">全部任务的历史、失败与返工链</span>
+        <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300">{t('task.govTitle')}</span>
+        <span className="text-[10px] text-slate-400 dark:text-slate-500">{t('task.govSub')}</span>
         <span className="ml-2 flex gap-1.5">
           {(
             [
-              ['all', '全部状态'],
-              ['active', '进行中'],
-              ['awaiting', '待审批'],
-              ['done', '已完成'],
-              ['failed', '失败·驳回'],
+              ['all', t('task.f.allStatus')],
+              ['active', t('task.f.active')],
+              ['awaiting', t('task.f.awaiting')],
+              ['done', t('task.f.done')],
+              ['failed', t('task.f.failed')],
             ] as [StatusFilter, string][]
           ).map(([k, label]) => (
             <button key={k} onClick={() => setStatusF(k)} className={statusF === k ? FILTER_ON : FILTER_CLS}>{label}</button>
@@ -232,9 +236,9 @@ export function TaskGovernancePage({
         <span className="flex gap-1.5">
           {(
             [
-              ['all', '全部时间'],
-              ['7d', '近 7 天'],
-              ['30d', '近 30 天'],
+              ['all', t('task.f.allTime')],
+              ['7d', t('task.f.7d')],
+              ['30d', t('task.f.30d')],
             ] as [TimeFilter, string][]
           ).map(([k, label]) => (
             <button key={k} onClick={() => setTimeF(k)} className={timeF === k ? FILTER_ON : FILTER_CLS}>{label}</button>
@@ -243,9 +247,9 @@ export function TaskGovernancePage({
         <span className="flex gap-1.5">
           {(
             [
-              ['all', '返工链：全部'],
-              ['root', '仅源头'],
-              ['rework', '仅返工相关'],
+              ['all', t('task.f.chainAll')],
+              ['root', t('task.f.chainRoot')],
+              ['rework', t('task.f.chainRework')],
             ] as [ChainFilter, string][]
           ).map(([k, label]) => (
             <button key={k} onClick={() => setChainF(k)} className={chainF === k ? FILTER_ON : FILTER_CLS}>{label}</button>
@@ -255,25 +259,25 @@ export function TaskGovernancePage({
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-4 py-2 text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-          <span className="min-w-0 flex-1">任务</span>
-          <span className="hidden w-16 shrink-0 sm:block">阶段</span>
-          <span className="w-14 shrink-0">耗时</span>
-          <span className="hidden w-32 shrink-0 md:block">创建于</span>
-          <span className="w-14 shrink-0">血缘</span>
-          <span className="w-20 shrink-0 text-right">状态</span>
+          <span className="min-w-0 flex-1">{t('task.h.task')}</span>
+          <span className="hidden w-16 shrink-0 sm:block">{t('task.h.stage')}</span>
+          <span className="w-14 shrink-0">{t('task.h.duration')}</span>
+          <span className="hidden w-32 shrink-0 md:block">{t('task.h.created')}</span>
+          <span className="w-14 shrink-0">{t('task.h.chain')}</span>
+          <span className="w-20 shrink-0 text-right">{t('task.h.status')}</span>
         </div>
         {tasks === null && (
           <p className="flex items-center justify-center gap-2 py-14 text-[12px] text-slate-400 dark:text-slate-500">
-            <Loader2 size={13} className="animate-spin" /> 加载任务…
+            <Loader2 size={13} className="animate-spin" /> {t('task.loading')}
           </p>
         )}
         {tasks !== null && rows.length === 0 && (
-          <p className="py-14 text-center text-[12px] text-slate-300 dark:text-slate-600">这个筛选条件下没有任务</p>
+          <p className="py-14 text-center text-[12px] text-slate-300 dark:text-slate-600">{t('task.govEmpty')}</p>
         )}
         {/* 只渲染根任务（无 origin）；子任务由父行内联渲染，避免重复 */}
         {rows.filter((t) => !t.originTaskId || !rows.some((r) => r.id === t.originTaskId)).map((t) => renderRow(t, 0))}
       </div>
-      <p className="mt-1.5 text-[10px] text-slate-300 dark:text-slate-600">点任意行 → 流水线视图回看该任务全程</p>
+      <p className="mt-1.5 text-[10px] text-slate-300 dark:text-slate-600">{t('task.govFoot')}</p>
     </div>
   )
 }

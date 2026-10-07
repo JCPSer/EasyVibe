@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CodeMap } from '@/types/map'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { listRepos, addRepo as addRepoApi, removeRepo as removeRepoApi, repoMap } from '@/api/repos'
 import { health } from '@/api/system'
 import { fetchStatic } from '@/api/core'
@@ -98,27 +99,27 @@ export function useBackendConnection() {
     let path: string | null = null
     try {
       if (isTauriRuntime()) {
-        path = await pickDirectory({ title: '选择本地仓库目录' })
+        path = await pickDirectory({ title: t('hooks.repo.pickTitle') })
       } else {
-        path = window.prompt('输入本地仓库目录的绝对路径')
+        path = window.prompt(t('hooks.repo.promptPath'))
       }
     } catch {
-      path = window.prompt('目录选择器不可用，输入本地仓库目录的绝对路径')
+      path = window.prompt(t('hooks.repo.promptFallback'))
     }
     if (!path?.trim()) return false
     try {
       const r = await addRepoApi(path.trim())
       const d = await r.json().catch(() => null)
       if (!r.ok) {
-        toast(d?.error ?? '添加失败（目录不可读或已挂载）', 'error')
+        toast(d?.error ?? t('hooks.repo.addFail'), 'error')
         return false
       }
-      toast('已添加仓库，正在归纳…')
+      toast(t('hooks.repo.added'))
       refreshRepos()
       setBackendRepo(d.data.id)
       return true
     } catch {
-      toast('添加失败（需要后端在线）', 'error')
+      toast(t('hooks.repo.addOffline'), 'error')
       return false
     }
   }, [refreshRepos])
@@ -128,15 +129,15 @@ export function useBackendConnection() {
     try {
       const r = await removeRepoApi(id, wipe)
       if (!r.ok) {
-        toast('移除失败', 'error')
+        toast(t('hooks.repo.removeFail'), 'error')
         return false
       }
-      toast(wipe ? '已移除仓库并清除其数据' : '已移除仓库（数据保留，重新添加后可见）')
+      toast(wipe ? t('hooks.repo.removedWiped') : t('hooks.repo.removedKept'))
       if (id === backendRepo) setMap(null)
       refreshRepos()
       return true
     } catch {
-      toast('移除失败（需要后端在线）', 'error')
+      toast(t('hooks.repo.removeOffline'), 'error')
       return false
     }
   }, [backendRepo, refreshRepos])

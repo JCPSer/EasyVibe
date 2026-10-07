@@ -3,11 +3,12 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, AtSign, BookmarkPlus, Check, CheckCircle2, Copy, Crosshair, Loader2, MessagesSquare } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { saveView } from '@/api/chat'
 import { AnswerCards } from '@/components/chat/AnswerCards'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
-import { GATE_LABEL, type ChatMessage, type Clarify, type PendingApproval } from './types'
+import { getOnboardingCopy } from '@/shared/logic/onboardingCopy'
+import { gateWording, type ChatMessage, type Clarify, type PendingApproval } from './types'
 import type { CodeMap } from '@/types/map'
 
 export function MessageStream({
@@ -38,23 +39,24 @@ export function MessageStream({
   const [savedIdx, setSavedIdx] = useState<number | null>(null)
   const [namingIdx, setNamingIdx] = useState<number | null>(null)
   const [viewName, setViewName] = useState('')
+  const { t } = useLang()
   const samplePrompts = useMemo(() => {
-    const sp = ONBOARDING_COPY.samplePrompts
+    const sp = getOnboardingCopy(t).samplePrompts
     const first = map?.modules[0]
     return [
       ...(first ? [sp.withModule.replace('{module}', first.name)] : []),
       ...sp.generic,
     ]
-  }, [map])
+  }, [map, t])
 
   const saveAsView = (idx: number) => {
     // 后端未就绪时 repo 为空：保持既有观感（原裸 fetch 会拼出 /repos/null 并落到同一错误文案）
     if (!backendRepo) {
-      toast('存视图失败（需要本地后端在线）', 'error')
+      toast(t('chat.saveViewFail'), 'error')
       return
     }
     const m = messages[idx]
-    const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
+    const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? t('chat.viewDefault')
     const name = (viewName.trim() || q).slice(0, 40)
     saveView(backendRepo, {
       name,
@@ -67,7 +69,7 @@ export function MessageStream({
     })
       .then(async (r) => {
         if (r.status === 409) {
-          if (window.confirm(`已存在同名视图「${name}」。覆盖它？（取消则放弃保存）`)) {
+          if (window.confirm(t('chat.viewExists', { name }))) {
             const again = await saveView(
               backendRepo,
               {
@@ -92,16 +94,14 @@ export function MessageStream({
         setNamingIdx(null)
         setTimeout(() => setSavedIdx(null), 2500)
       })
-      .catch(() => toast('存视图失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.saveViewFail'), 'error'))
   }
 
   const answerClarify = (label: string, desc?: string) => {
     setClarify(null)
-    setInput(`选择：${label}${desc ? `（${desc}）` : ''}`)
-    setTimeout(() => {
-      const btn = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="问点什么"]')
-      btn?.focus()
-    }, 50)
+    setInput(t('chat.clarifyPrefix', { label }) + (desc ? `（${desc}）` : ''))
+    // i18n 第三批：不再按中文 placeholder 选择器找输入框（英文下会失焦失败）——直接用 ref
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }
 
   return (
@@ -112,12 +112,12 @@ export function MessageStream({
           <div className="max-w-[92%] rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold leading-4 text-amber-800">
               <AlertTriangle size={11} />
-              审批请求 <span className="rounded-full bg-white/80 dark:bg-slate-900/80 px-1.5 text-micro font-bold text-amber-600">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
+              {t('chat.approvalRequest')} <span className="rounded-full bg-white/80 dark:bg-slate-900/80 px-1.5 text-micro font-bold text-amber-600">{gateWording(p.gate)}</span>
             </p>
             <p className="mt-1 text-[12px] leading-5 text-slate-700 dark:text-slate-200">{p.title}</p>
             {decided[p.taskId + ':' + (p.gate ?? '')] ? (
               <p className="mt-1.5 flex items-center gap-1 text-cap font-semibold text-emerald-600">
-                <CheckCircle2 size={11} /> 已{decided[p.taskId + ':' + (p.gate ?? '')] === 'approved' ? '通过' : '驳回'}
+                <CheckCircle2 size={11} /> {decided[p.taskId + ':' + (p.gate ?? '')] === 'approved' ? t('chat.decidedApproved') : t('chat.decidedRejected')}
               </p>
             ) : rejectingApproval?.taskId === p.taskId && rejectingApproval.gate === p.gate ? (
               <div className="mt-1.5 space-y-1.5">
@@ -125,7 +125,7 @@ export function MessageStream({
                   value={rejectNote}
                   onChange={(e) => setRejectNote(e.target.value)}
                   rows={2}
-                  placeholder="驳回理由（必填，留痕可追溯）"
+                  placeholder={t('chat.rejectReasonPh')}
                   className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-2 py-1.5 text-[11px] leading-4 text-slate-700 dark:text-slate-200 outline-none focus:border-red-400"
                 />
                 <div className="flex gap-2">
@@ -134,7 +134,7 @@ export function MessageStream({
                     disabled={!rejectNote.trim()}
                     className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
                   >
-                    确认驳回
+                    {t('chat.confirmReject')}
                   </button>
                   <button
                     onClick={() => {
@@ -143,7 +143,7 @@ export function MessageStream({
                     }}
                     className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
                   >
-                    取消
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -153,7 +153,7 @@ export function MessageStream({
                   onClick={() => decide(p, 'approved')}
                   className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"
                 >
-                  通过
+                  {t('chat.approveBtn')}
                 </button>
                 <button
                   onClick={() => {
@@ -162,7 +162,7 @@ export function MessageStream({
                   }}
                   className="flex-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
                 >
-                  驳回
+                  {t('chat.rejectBtn')}
                 </button>
               </div>
             )}
@@ -176,7 +176,7 @@ export function MessageStream({
             disabled={loadingMore}
             className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-micro text-slate-500 dark:text-slate-400 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
           >
-            {loadingMore ? '加载中…' : '↑ 加载更早的消息'}
+            {loadingMore ? t('common.loading') : t('chat.loadEarlier')}
           </button>
         </div>
       )}
@@ -188,8 +188,8 @@ export function MessageStream({
             <MessagesSquare size={18} />
           </span>
           <div>
-            <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">基于语义代码地图提问</p>
-            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">回答可存为视图，引用模块可定位到画布</p>
+            <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">{t('chat.emptyTitle')}</p>
+            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">{t('chat.emptySub')}</p>
           </div>
           <div className="flex flex-wrap justify-center gap-1.5">
             {samplePrompts.map((p) => (
@@ -234,7 +234,7 @@ export function MessageStream({
                 </div>
               )}
               {m.role === 'assistant' && !m.content.trim() ? (
-                <span className="text-slate-400 dark:text-slate-500">（此条未获得回答）</span>
+                <span className="text-slate-400 dark:text-slate-500">{t('chat.noAnswer')}</span>
               ) : m.role === 'assistant' ? (
                 /* M4-2 答案卡片三型（对话面板原型）：有章节结构的回答拆卡渲染 */
                 <AnswerCards content={m.content} />
@@ -247,8 +247,8 @@ export function MessageStream({
                 <button
                   onClick={() => {
                     void navigator.clipboard?.writeText(m.content).then(
-                      () => toast('已复制该条消息', 'info'),
-                      () => toast('复制失败（剪贴板不可用）', 'error'),
+                      () => toast(t('chat.msgCopied'), 'info'),
+                      () => toast(t('common.copyFail'), 'error'),
                     )
                   }}
                   className={`rounded p-1 ${
@@ -256,7 +256,7 @@ export function MessageStream({
                       ? 'text-blue-300 hover:text-blue-600 dark:text-blue-700 dark:hover:text-blue-300'
                       : 'text-slate-300 dark:text-slate-600 hover:text-slate-500'
                   }`}
-                  title="复制该条消息"
+                  title={t('chat.copyMsgTip')}
                 >
                   <Copy size={10} />
                 </button>
@@ -268,7 +268,7 @@ export function MessageStream({
                       key={id}
                       onClick={() => onLocateModule(id)}
                       className="flex items-center gap-0.5 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 font-mono text-micro text-blue-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                      title="定位到画布"
+                      title={t('chat.locateTip')}
                     >
                       <Crosshair size={9} />
                       {id}
@@ -285,7 +285,7 @@ export function MessageStream({
                           if (e.key === 'Enter') saveAsView(i)
                           if (e.key === 'Escape') setNamingIdx(null)
                         }}
-                        placeholder="视图名…"
+                        placeholder={t('chat.viewNamePh')}
                         className="w-36 rounded-full border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2 py-0.5 text-cap outline-none"
                       />
                       <button
@@ -293,21 +293,21 @@ export function MessageStream({
                         disabled={!viewName.trim()}
                         className="rounded-full bg-emerald-600 px-2 py-0.5 text-micro font-bold text-white disabled:opacity-40"
                       >
-                        存
+                        {t('chat.saveBtn')}
                       </button>
                     </span>
                   ) : (
                     <button
                       onClick={() => {
-                        const q = messages.slice(0, i).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
+                        const q = messages.slice(0, i).reverse().find((x) => x.role === 'user')?.content ?? t('chat.viewDefault')
                         setViewName(q.replace(/\s+/g, ' ').slice(0, 24))
                         setNamingIdx(i)
                       }}
                       className="ml-auto flex items-center gap-1 rounded-full border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-micro font-semibold text-emerald-700 hover:bg-emerald-100"
-                      title="把本回答（含流程图）存为可复用视图（.easyvibe/views/）"
+                      title={t('chat.saveViewTip')}
                     >
                       {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
-                      {savedIdx === i ? '已存视图' : '存为视图'}
+                      {savedIdx === i ? t('chat.viewSaved') : t('chat.saveView')}
                     </button>
                   )}
                 </div>
@@ -347,7 +347,7 @@ export function MessageStream({
       {sending && (
         <div className="anim-msg-in flex justify-start">
           <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/70 px-3 py-2 text-[11px] text-slate-400 dark:text-slate-500">
-            <Loader2 size={12} className="animate-spin" /> 正在查询地图…
+            <Loader2 size={12} className="animate-spin" /> {t('chat.querying')}
           </div>
         </div>
       )}

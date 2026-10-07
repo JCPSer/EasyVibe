@@ -3,6 +3,7 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useEffect, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, ShieldAlert } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 import { devDoc, devDocs } from '@/api/task'
 
@@ -41,6 +42,7 @@ export function PhaseDocReview({
   onRewind?: () => void
   rewinding?: boolean
 }) {
+  const { t } = useLang()
   const [doc, setDoc] = useState<{ path: string; content: string } | null>(null)
   const [missing, setMissing] = useState(false)
   // 2026-10-03 实弹 bug：全文加载失败此前静默渲染空白——显式错误态 + 重试
@@ -121,15 +123,15 @@ export function PhaseDocReview({
           <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{title}</p>
           {doc && <p className="mono mt-0.5 truncate text-[10px] text-slate-400 dark:text-slate-500">{doc.path}</p>}
         </div>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-bold ${readonly ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>{readonly ? '回看模式' : '等待你的评审'}</span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-bold ${readonly ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>{readonly ? t('task.phaseReadonly') : t('task.phaseAwaiting')}</span>
       </div>
       {/* 对照回看标签栏：方案评审时可回看需求矩阵（只读）；缺失时标签不出现 */}
       {compareDirHint && !compareMissing && (
         <div className="flex items-center gap-1 border-b border-slate-100 dark:border-slate-800 px-4 py-1.5">
           {(
             [
-              ['main', `${title}（评审中）`],
-              ['compare', compareTitle ?? '上一阶段产物'],
+              ['main', t('task.phaseReviewing', { title })],
+              ['compare', compareTitle ?? t('task.phaseCompareDefault')],
             ] as ['main' | 'compare', string][]
           ).map(([k, label]) => (
             <button
@@ -151,7 +153,7 @@ export function PhaseDocReview({
             <MarkdownMessage content={compareDoc.content} />
           ) : (
             <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400 dark:text-slate-500">
-              <Loader2 size={13} className="animate-spin" /> 正在加载对照文档…
+              <Loader2 size={13} className="animate-spin" /> {t('task.phaseLoadingCompare')}
             </p>
           )
         ) : (
@@ -167,8 +169,8 @@ export function PhaseDocReview({
             <ShieldAlert size={11} className={review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
             <div className="min-w-0 flex-1">
               <p className={`text-micro font-bold ${review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                子 agent 初审：{review.verdict === 'pass' ? '通过' : '未通过'}
-                {review.verdict !== 'pass' && <span className="ml-1 font-normal">（建议打回重做，最终由你裁决）</span>}
+                {t('task.phasePreReview')}{review.verdict === 'pass' ? t('task.phasePass') : t('task.phaseFail')}
+                {review.verdict !== 'pass' && <span className="ml-1 font-normal">{t('task.phaseFailHint')}</span>}
               </p>
               <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{review.summary}</p>
             </div>
@@ -179,27 +181,27 @@ export function PhaseDocReview({
                 onClick={() => onDecide('rejected', review.summary)}
                 disabled={!!deciding}
                 className="shrink-0 rounded-lg bg-red-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-red-700 disabled:opacity-40"
-                title="以子 agent 初审意见为打回理由直接打回（无需手填）"
+                title={t('task.rejectByReviewTip')}
               >
-                按此意见打回
+                {t('task.rejectByReview')}
               </button>
             )}
           </div>
         )}
         {!doc && !missing && (
           <p className="flex items-center gap-2 py-8 text-center text-[12px] text-slate-400 dark:text-slate-500">
-            <Loader2 size={13} className="animate-spin" /> 正在加载产物文档…
+            <Loader2 size={13} className="animate-spin" /> {t('task.phaseLoadingDoc')}
           </p>
         )}
         {missing && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-[12px] leading-5 text-amber-700">
-            未找到本阶段产物文档（agent 未按规范路径产出）。你可以打回要求重做，或通过进入下一阶段（实施时将无矩阵/方案可依）。
+            {t('task.phaseMissing')}
           </div>
         )}
         {loadErr && (
           /* 2026-10-03 实弹 bug：全文 404 曾静默空白——失败必须显式可见 */
           <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3 py-2.5 text-[12px] leading-5 text-red-600">
-            产物文档全文加载失败（后端响应异常）。可重试；持续失败请打回重做。
+            {t('task.phaseLoadErr')}
             <button
               onClick={() => {
                 setDoc(null)
@@ -208,7 +210,7 @@ export function PhaseDocReview({
               }}
               className="ml-2 rounded-md border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-bold text-red-500 hover:bg-red-100"
             >
-              重试
+              {t('common.retry')}
             </button>
           </div>
         )}
@@ -222,23 +224,23 @@ export function PhaseDocReview({
       <div className="border-t border-slate-100 dark:border-slate-800 p-3">
         {tab === 'compare' && (
           <p className="mb-1.5 text-center text-[10px] text-slate-400 dark:text-slate-500">
-            {readonly ? '只读对照回看——不影响任务状态' : `正在对照回看——下方通过/打回作用于「${title}」`}
+            {readonly ? t('task.compareReadonly') : t('task.compareActive', { title })}
           </p>
         )}
         {readonly ? (
           /* 回看模式（2026-10-05 管道回看）：产物为最新版本，只读；重开走 rewind 端点 */
           <div className="space-y-1.5">
             <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
-              产物为目录内最新版本；此处查看不改变任务状态
+              {t('task.phaseLatest')}
             </p>
             {onRewind && (
               <button
                 onClick={onRewind}
                 disabled={!!rewinding}
                 className="w-full rounded-lg bg-violet-600 px-3 py-2 text-[12px] font-bold text-white hover:bg-violet-700 disabled:opacity-40"
-                title="把任务放回本评审关：之后可打回（带意见让 agent 重跑本阶段），或通过继续流水线"
+                title={t('task.rewindBtnTip')}
               >
-                {rewinding ? '回退中…' : '回到此关重新评审（可打回重跑本阶段）'}
+                {rewinding ? t('task.rewinding') : t('task.rewindBtn')}
               </button>
             )}
           </div>
@@ -249,7 +251,7 @@ export function PhaseDocReview({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
-              placeholder="打回意见（必填）——已预填子 agent 初审意见，可直接确认或修改"
+              placeholder={t('task.phaseRejectPh')}
               className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
             />
             <div className="flex gap-2">
@@ -258,7 +260,7 @@ export function PhaseDocReview({
                 disabled={!!deciding || !note.trim()}
                 className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
               >
-                确认打回本阶段
+                {t('task.confirmRejectStage')}
               </button>
               <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
                 取消

@@ -3,6 +3,8 @@
 // 分阶段执行流：plan → p:analysis(运行) → analysis(评审) → p:solution(运行) →
 //   solution(评审) → p:implement(运行) → diff → report → done。
 // 返回值：0-4 = 当前阶段索引（管道 now），'done' = 全部完成，'error' = 未启动/终态灰态。
+// i18n 第三批：人话标签渲染期经模块级 t 自译（枚举值为后端契约，不随语言变）。
+import { t } from '@/runtime/i18n'
 
 export type TaskStage = 0 | 1 | 2 | 3 | 4 | 'done' | 'error'
 
@@ -38,25 +40,26 @@ export function stageOf(status: string, gate: string | null | undefined): TaskSt
   }
 }
 
-/** 关卡人话标签（列表/管道用） */
+/** 关卡人话标签（列表/管道用；渲染期 t 自译，随语言切换刷新） */
 export function gateLabel(status: string, gate: string | null | undefined): string | null {
   if (status !== 'awaiting_approval' && status !== 'running') return null
   switch (gate) {
-    case 'plan': return '任务书审批'
-    case 'p:analysis': return '分析中'
-    case 'analysis': return '矩阵评审'
-    case 'p:solution': return '方案中'
-    case 'solution': return '方案评审'
-    case 'diff': return 'Diff 审批'
-    case 'report': return '审查报告'
-    default: return status === 'running' ? '实施中' : null
+    case 'plan': return t('task.gate.plan')
+    case 'p:analysis': return t('task.gate.pAnalysis')
+    case 'analysis': return t('task.gate.analysis')
+    case 'p:solution': return t('task.gate.pSolution')
+    case 'solution': return t('task.gate.solution')
+    case 'diff': return t('task.gate.diff')
+    case 'report': return t('task.gate.report')
+    default: return status === 'running' ? t('task.gate.running') : null
   }
 }
 
-export const STAGES = [
-  { key: 'analysis', label: '需求分析', hint: '需求矩阵 · 需评审' },
-  { key: 'solution', label: '方案设计', hint: '方案文档 · 需评审' },
-  { key: 'implement', label: '实施', hint: '实时执行' },
-  { key: 'review', label: '代码审查', hint: 'Diff 审批' },
-  { key: 'archive', label: '归档', hint: '审查报告 · STAR 记忆' },
-] as const
+/** 五阶段管道数据源：label/hint 只存字典 key，渲染期 t(`task.stage.*`) / t(`task.stageHint.*`) 解析。 */
+export const STAGES: readonly { key: 'analysis' | 'solution' | 'implement' | 'review' | 'archive'; labelKey: string; hintKey: string }[] = [
+  { key: 'analysis', labelKey: 'task.stage.analysis', hintKey: 'task.stageHint.analysis' },
+  { key: 'solution', labelKey: 'task.stage.solution', hintKey: 'task.stageHint.solution' },
+  { key: 'implement', labelKey: 'task.stage.implement', hintKey: 'task.stageHint.implement' },
+  { key: 'review', labelKey: 'task.stage.review', hintKey: 'task.stageHint.review' },
+  { key: 'archive', labelKey: 'task.stage.archive', hintKey: 'task.stageHint.archive' },
+]

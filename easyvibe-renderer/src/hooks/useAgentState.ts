@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { agentStatus, agentTest } from '@/api/system'
 import { putSetting } from '@/api/settings'
 
@@ -40,16 +41,18 @@ export function useAgentState(backendOnline: boolean | null) {
         const presetId = ['claude', 'codex', 'opencode'].includes(command) ? command : 'custom'
         const put = (key: string, value: unknown) => putSetting({ scope: 'global', key, value })
         const [r1, r2] = await Promise.all([put('agent.command', command), put('agent.preset', presetId)])
-        if (!r1.ok || !r2.ok) throw new Error('配置写入失败')
+        if (!r1.ok || !r2.ok) throw new Error(t('hooks.agent.writeFail'))
         const r3 = await agentTest()
         const d3 = await r3.json().catch(() => null)
         toast(
-          d3?.data?.ok ? `已采用 ${command}，协议兼容（${d3.data.latencyMs}ms）` : `已采用 ${command}，但协议测试未通过：${d3?.data?.protocol ?? '未知'}`,
+          d3?.data?.ok
+            ? t('hooks.agent.adoptedOk', { command, ms: d3.data.latencyMs })
+            : t('hooks.agent.adoptedFail', { command, protocol: d3?.data?.protocol ?? t('hooks.agent.unknown') }),
           d3?.data?.ok ? 'info' : 'error',
         )
         loadAgentState()
       } catch (e) {
-        toast(e instanceof Error ? e.message : '采用失败', 'error')
+        toast(e instanceof Error ? e.message : t('hooks.agent.adoptFail'), 'error')
       }
     },
     [loadAgentState],
@@ -58,7 +61,7 @@ export function useAgentState(backendOnline: boolean | null) {
   const CLAUDE_INSTALL_CMD = 'npm install -g @anthropic-ai/claude-code'
   const copyInstallCmd = useCallback(() => {
     void navigator.clipboard?.writeText(CLAUDE_INSTALL_CMD)
-    toast('安装命令已复制——在终端粘贴执行，完成后回到这里点"重新探测"')
+    toast(t('hooks.agent.installCopied'))
   }, [])
 
   return { agentState, adoptAgent, copyInstallCmd, reload: loadAgentState }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PageId } from '@/components/shell/AppShell'
 import { listTasks, taskApprovals } from '@/api/task'
 import { toast } from '@/runtime/toast'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
+import { t } from '@/runtime/i18n'
 import { loadOnboarding, markCheck, completeAll, CHECK_KEYS } from '@/lib/onboarding'
 
 /**
@@ -58,7 +58,7 @@ export function useOnboarding(ctx: { page: PageId; hasMap: boolean; repoCount: n
   useEffect(() => {
     const n = CHECK_KEYS.filter((k) => onboarding.checklist[k] === 'done').length
     if (n === CHECK_KEYS.length && onboardDoneRef.current !== n) {
-      toast(ONBOARDING_COPY.checklist.doneToast, 'info')
+      toast(t('onboarding.checklistDone'), 'info')
       setOnboarding((prev) => completeAll(prev))
     }
     onboardDoneRef.current = n

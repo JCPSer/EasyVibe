@@ -1,6 +1,7 @@
 // ① 需求分析·任务书待批子态：任务书 + 影响模块 + 验收 + 批准/打回。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { CheckCircle2, ClipboardList, Loader2 } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 import type { CodeMap } from '@/types/map'
 import type { Approval, TaskItem } from '../types'
 
@@ -17,10 +18,11 @@ export function AnalysisStage({
   setRejecting: (v: boolean) => void
   onDecide: (d: 'approved' | 'rejected', note?: string) => void
 }) {
+  const { t } = useLang()
   return (
     <div className="m-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
       <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-        <ClipboardList size={10} /> 任务书 · 已就绪，批准后先做需求分析
+        <ClipboardList size={10} /> {t('task.planReady')}
       </p>
       {/* TaskPanel 碎片③：监督模式风险预评（flagged 留痕——审批人必见风险理由） */}
       {(() => {
@@ -39,7 +41,7 @@ export function AnalysisStage({
           ))}
         </div>
       )}
-      {sel.acceptance && <p className="mt-2 text-micro leading-4 text-slate-400 dark:text-slate-500">验收：{sel.acceptance}</p>}
+      {sel.acceptance && <p className="mt-2 text-micro leading-4 text-slate-400 dark:text-slate-500">{t('task.acceptance', { text: sel.acceptance })}</p>}
       <div className="mt-3 flex gap-2">
         <button
           onClick={() => onDecide('approved')}
@@ -63,7 +65,7 @@ export function AnalysisStage({
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             rows={3}
-            placeholder="打回意见（必填）——将作为新任务的上下文"
+            placeholder={t('task.rejectNotePh')}
             className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
           />
           <div className="flex gap-2">
@@ -72,7 +74,7 @@ export function AnalysisStage({
               disabled={!!deciding || !rejectNote.trim()}
               className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
             >
-              确认打回
+              {t('task.confirmReject')}
             </button>
             <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
               取消

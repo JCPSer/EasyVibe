@@ -2,6 +2,7 @@
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { useState } from 'react'
 import { CheckCircle2, Loader2, Lock } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 import type { TaskItem } from '../types'
 
 export function ReportStage({
@@ -16,17 +17,18 @@ export function ReportStage({
   setRejecting: (v: boolean) => void
   onDecide: (d: 'approved' | 'rejected', note?: string) => void
 }) {
+  const { t } = useLang()
   // warnings 列表折叠（默认 3 条，防路径墙刷屏）
   const [showAllWarnings, setShowAllWarnings] = useState(false)
   return (
     <div className="m-4 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
       <p className="flex items-center gap-1 text-micro font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-        <Lock size={10} /> 审查报告 · 通过后锁定归档
+        <Lock size={10} /> {t('task.reportLock')}
       </p>
       <div className="mt-2 space-y-1.5 text-[12px] leading-5 text-slate-700 dark:text-slate-200">
         {impact.map((im, i) => (
           <p key={i} className="tnum text-micro text-slate-500 dark:text-slate-400">
-            本次变更：<span className="text-emerald-600">+{im.adds}</span> <span className="text-red-500">−{im.dels}</span> · {im.files} 文件
+            {t('task.impactLine', { adds: im.adds, dels: im.dels, files: im.files })}
           </p>
         ))}
         {(sel.result?.warnings?.length ?? 0) > 0 && (
@@ -43,12 +45,12 @@ export function ReportStage({
                 onClick={() => setShowAllWarnings((v) => !v)}
                 className="mt-0.5 text-micro font-semibold text-amber-500 hover:text-amber-600"
               >
-                {showAllWarnings ? '收起' : `展开全部 ${sel.result!.warnings!.length} 条`}
+                {showAllWarnings ? t('task.collapse') : t('task.expandAll', { n: sel.result!.warnings!.length })}
               </button>
             )}
           </div>
         )}
-        <p className="text-micro text-slate-400 dark:text-slate-500">审查报告全文随归档产出；通过后任务锁定，STAR 记忆与操作日志留痕。</p>
+        <p className="text-micro text-slate-400 dark:text-slate-500">{t('task.reportNote')}</p>
       </div>
       <div className="mt-3 flex gap-2">
         <button
@@ -73,7 +75,7 @@ export function ReportStage({
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             rows={3}
-            placeholder="打回意见（必填）——agent 带意见重跑实施，完成后自动复审"
+            placeholder={t('task.diffRejectPh')}
             className="w-full resize-none rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30 px-2.5 py-1.5 text-[12px] outline-none focus:border-red-300"
           />
           <div className="flex gap-2">
@@ -82,7 +84,7 @@ export function ReportStage({
               disabled={!!deciding || !rejectNote.trim()}
               className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-red-700 disabled:opacity-40"
             >
-              确认打回
+              {t('task.confirmReject')}
             </button>
             <button onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[12px] text-slate-500 dark:text-slate-400">
               取消

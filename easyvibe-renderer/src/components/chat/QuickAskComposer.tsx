@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import { AtSign, Paperclip, Send, Square, X as XIcon } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import type { CodeMap } from '@/types/map'
 
 export function QuickAskComposer({
@@ -28,6 +29,7 @@ export function QuickAskComposer({
   abortRef: React.RefObject<AbortController | null>
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
 }) {
+  const { t } = useLang()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (files: FileList | null) => {
@@ -35,11 +37,11 @@ export function QuickAskComposer({
     for (const f of Array.from(files)) {
       if (f.type.startsWith('image/')) {
         if (images.length >= 2) {
-          toast('图片最多 2 张', 'error')
+          toast(t('chat.imgMax'), 'error')
           continue
         }
         if (f.size > 1.5 * 1024 * 1024) {
-          toast(`图片 ${f.name} 超过 1.5MB 上限（当前 ${(f.size / 1024 / 1024).toFixed(1)}MB）`, 'error')
+          toast(t('chat.imgTooBig', { name: f.name, size: (f.size / 1024 / 1024).toFixed(1) }), 'error')
           continue
         }
         const reader = new FileReader()
@@ -47,11 +49,11 @@ export function QuickAskComposer({
         reader.readAsDataURL(f)
       } else {
         if (attachments.length >= 3) {
-          toast('文本附件最多 3 个', 'error')
+          toast(t('chat.txtMax'), 'error')
           continue
         }
         if (f.size > 50 * 1024) {
-          toast(`附件 ${f.name} 超过 50KB 上限（当前 ${(f.size / 1024).toFixed(0)}KB）——请贴关键片段`, 'error')
+          toast(t('chat.txtTooBig', { name: f.name, size: (f.size / 1024).toFixed(0) }), 'error')
           continue
         }
         const reader = new FileReader()
@@ -167,7 +169,7 @@ export function QuickAskComposer({
             onClick={() => fileRef.current?.click()}
             disabled={!backendRepo || attachments.length >= 3}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-slate-800/70 dark:hover:text-slate-300"
-            title="添加附件（代码/日志/文档文本，≤50KB×3；图片 ≤1.5MB×2）——内容随消息一起发给 AI"
+            title={t('chat.attachTipImg')}
           >
             <Paperclip size={14} />
           </button>
@@ -204,8 +206,8 @@ export function QuickAskComposer({
               }
             }}
             rows={1}
-            placeholder={backendRepo ? '就这张架构地图提问…' : '需要本地后端在线'}
-            title="Enter 发送，Shift+Enter 换行"
+            placeholder={backendRepo ? t('chat.askMapPh') : t('chat.needBackendPh')}
+            title={t('chat.enterSend')}
             disabled={!backendRepo || sending}
             className="w-full flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-[12px] leading-5 text-slate-700 outline-none ring-0 placeholder:text-slate-400 focus:border-0 focus:ring-0 disabled:opacity-50 dark:text-slate-200 dark:placeholder:text-slate-500"
           />
@@ -213,7 +215,7 @@ export function QuickAskComposer({
             <button
               onClick={() => abortRef.current?.abort()}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-red-200 text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:hover:bg-red-950/40"
-              title="停止等待本次回答"
+              title={t('chat.stopWait')}
             >
               <Square size={11} />
             </button>
@@ -227,7 +229,7 @@ export function QuickAskComposer({
                   ? 'bg-blue-600 text-white hover:bg-blue-700'
                   : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600'
               }`}
-              title="发送（Enter）"
+              title={t('chat.sendTip')}
             >
               <Send size={13} />
             </button>

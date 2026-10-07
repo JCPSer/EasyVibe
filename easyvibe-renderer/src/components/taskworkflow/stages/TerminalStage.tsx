@@ -5,12 +5,14 @@
 // afterSeq 锚点 + seq 幂等去重），WS 活着时补拉为空转无副作用。
 import { useEffect, useRef, useState } from 'react'
 import { Terminal, Unplug } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 import { terminalLines, terminalLastSeq, pushTerminalLine } from '@/runtime/terminalBuffer'
 import { sessionOutput } from '@/api/system'
 import { taskDuration } from '../diffParse'
 import type { TaskItem } from '../types'
 
 export function TerminalStage({ sel, repo, onOpenRuns }: { sel: TaskItem; repo?: string | null; onOpenRuns?: (sessionId: string) => void }) {
+  const { t } = useLang()
   const isRunning = sel.status === 'running'
   const sessionId = sel.sessionId ?? ''
   // 终端跟随滚动（用户上翻时暂停跟随）
@@ -54,18 +56,18 @@ export function TerminalStage({ sel, repo, onOpenRuns }: { sel: TaskItem; repo?:
       <div className="mb-2 flex items-center gap-2 text-micro text-slate-400 dark:text-slate-500">
         <Terminal size={11} />
         <span className="font-bold uppercase tracking-wider">
-          {sel.gate === 'p:analysis' ? '需求分析产出中' : sel.gate === 'p:solution' ? '方案设计产出中' : '实时执行'}
+          {sel.gate === 'p:analysis' ? t('task.termAnalysis') : sel.gate === 'p:solution' ? t('task.termSolution') : t('task.termLive')}
         </span>
         <span className="tnum ml-auto flex items-center gap-1.5">
-          <span className="flex h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> LIVE · 已运行 {taskDuration(sel)}
+          <span className="flex h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> {t('task.liveBadge', { dur: taskDuration(sel) })}
         </span>
         {onOpenRuns && sel.sessionId && (
           <button
             onClick={() => onOpenRuns(sel.sessionId!)}
             className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
-            title="跳「运行」页看本会话的完整流水（含历史回放）"
+            title={t('task.fullStreamTip')}
           >
-            完整流水 →
+            {t('task.fullStream')}
           </button>
         )}
       </div>
@@ -78,7 +80,7 @@ export function TerminalStage({ sel, repo, onOpenRuns }: { sel: TaskItem; repo?:
         className="select-text mono min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-5 text-slate-300 dark:text-slate-600"
       >
         {lines.length === 0 ? (
-          <span className="text-slate-500 dark:text-slate-400">等待 agent 输出…（agent 启动可能需要 1-2 分钟）</span>
+          <span className="text-slate-500 dark:text-slate-400">{t('task.termWaiting')}</span>
         ) : (
           lines.map((l) => (
             <div key={l.seq} className={l.stream === 'stderr' || l.line.startsWith('[err]') ? 'text-red-400' : ''}>{l.line}</div>
@@ -86,15 +88,15 @@ export function TerminalStage({ sel, repo, onOpenRuns }: { sel: TaskItem; repo?:
         )}
         {/* WS 断线无回放是已知边界（方案 §6）——但终端现在有 HTTP 补拉兜底，仅极端双通道齐断才不可回放 */}
         <div className="mt-1 flex items-center gap-1 text-slate-600 dark:text-slate-300">
-          <Unplug size={10} /> 实时推送断开时输出延迟约 3 秒（HTTP 兜底补拉）
+          <Unplug size={10} /> {t('task.wsFallback')}
         </div>
       </pre>
       <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
         {sel.gate === 'p:analysis'
-          ? '需求矩阵将写入 .easyvibe/development_docs/1_requirements_matrix/，产出后在此评审'
+          ? t('task.termNoteAnalysis')
           : sel.gate === 'p:solution'
-            ? '方案设计将写入 2_requirements_solutions/，产出后在此评审'
-            : '改动文件列表在任务完成后由 Diff 呈现（实时全量文件流为后置需求）'}
+            ? t('task.termNoteSolution')
+            : t('task.termNoteImplement')}
       </p>
     </div>
   )

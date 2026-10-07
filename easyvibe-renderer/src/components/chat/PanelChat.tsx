@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLang } from '@/runtime/i18n'
 import { QuickAsk } from '@/components/chat/QuickAsk'
 import type { CodeMap } from '@/types/map'
 import type { Selection } from '@/shared/contract/selection'
@@ -23,6 +24,7 @@ export function PanelChat({
   /** 审批出口：跳工作台「任务对话」页裁决 */
   onGoWorkbench?: () => void
 }) {
+  const { t } = useLang()
   const mod =
     selection?.kind === 'module'
       ? (map.modules.find((m) => m.id === selection.id) ?? null)
@@ -46,7 +48,7 @@ export function PanelChat({
       onLocateModule={onLocateModule}
       onGoWorkbench={onGoWorkbench}
       pendingMention={mentionState?.value ?? null}
-      defaultConvTitle={mod ? `模块 · ${mod.name}` : null}
+      defaultConvTitle={mod ? t('chat.panelTitle', { name: mod.name }) : null}
     />
   )
 }

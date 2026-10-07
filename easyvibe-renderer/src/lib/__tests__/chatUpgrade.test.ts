@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { setLang } from '@/runtime/i18n'
 import { buildTaskDraftFromChat } from '@/components/chat/chatUpgrade'
 
 describe('buildTaskDraftFromChat（对话→任务升级纯逻辑）', () => {
+  // 标题/描述经模块级 t 自译（第三批 i18n）——断言中文输出前固定语言
+  beforeEach(() => setLang('zh'))
   it('空对话 / 无用户消息 → null（不产出草稿）', () => {
     expect(buildTaskDraftFromChat([], 'conv-1')).toBeNull()
     expect(buildTaskDraftFromChat([{ role: 'assistant', content: '答', refs: [] }], 'conv-1')).toBeNull()

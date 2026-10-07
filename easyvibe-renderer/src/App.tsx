@@ -1,4 +1,5 @@
 import { ToastHost, toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 
@@ -29,6 +30,7 @@ import { usePatrol } from '@/hooks/usePatrol'
 import { useUiPrefs } from '@/hooks/useUiPrefs'
 import { useSystemNotifications } from '@/hooks/useSystemNotifications'
 export default function App() {
+  const { t } = useLang()
   // 数据源装配域（后端探测 / 仓库管理 / 地图拉取 / 版本锚点）抽为 hook
   const {
     map,
@@ -148,7 +150,7 @@ export default function App() {
         setReloadTick((t) => t + 1) // 全量重同步（覆盖断线期间的变更）
         setQueueResyncTick((t) => t + 1) // I5②：运行会话气泡重拉队列快照（resyncKey 递增）
       },
-      onVersionChange: (prev, v) => toast(`后端已更新（${prev} → ${v}），刷新页面以加载新界面`, 'error'),
+      onVersionChange: (prev, v) => toast(t('app.backendUpdated', { prev, v }), 'error'),
       onGoTasks: () => handlePageChange('tasks'),
     })
     // handlePageChange 仅用于事件回调内的瞬态动作（跳页），不应重启 WS 连接
@@ -164,7 +166,7 @@ export default function App() {
   if (error && !backendRepo) {
     return (
       <div className="flex h-screen items-center justify-center text-[13px] text-red-500">
-        静态数据加载失败（/data/map.json）：{error}
+        {t('app.staticLoadFail', { err: error })}
       </div>
     )
   }
@@ -177,7 +179,7 @@ export default function App() {
   if (!map) {
     return (
       <div className="flex h-screen items-center justify-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
-        <Loader2 size={16} className="animate-spin" /> 正在加载代码地图…
+        <Loader2 size={16} className="animate-spin" /> {t('app.loadingMap')}
       </div>
     )
   }
@@ -268,6 +270,7 @@ export default function App() {
     pendingChatContext,
     onConsumeChatContext: () => setPendingChatContext(null),
     onNavigate: handlePageChange,
+    t,
   })
 
   return (

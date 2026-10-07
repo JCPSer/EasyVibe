@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FolderOpen, Play, Sparkles, X } from 'lucide-react'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
+import { useLang } from '@/runtime/i18n'
+import { getOnboardingCopy } from '@/shared/logic/onboardingCopy'
 
 /** 首启欢迎工作台（调研定稿方案①：AionUi 式"首屏只做一件事"）。
  *  fullScreen 覆盖在应用之上；首启（hasRepo=false）主 CTA 是"添加仓库"，
@@ -16,7 +17,8 @@ export function WelcomePage({
   onClose: () => void
 }) {
   const [adding, setAdding] = useState(false)
-  const { welcome, concepts } = ONBOARDING_COPY
+  const { t } = useLang()
+  const { welcome, concepts } = getOnboardingCopy(t)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -45,7 +47,7 @@ export function WelcomePage({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label="欢迎使用 EasyVibe"
+      aria-label={t('onboarding.ariaWelcome')}
       onClick={onClose}
     >
       <div className="anim-scale-in glass w-full max-w-2xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -53,7 +55,7 @@ export function WelcomePage({
           <p className="flex items-center gap-1.5 text-micro font-bold uppercase tracking-widest text-blue-500">
             <Sparkles size={12} /> {welcome.kicker}
           </p>
-          <button onClick={onClose} className="rounded p-1 text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-500" aria-label="关闭引导">
+          <button onClick={onClose} className="rounded p-1 text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-500" aria-label={t('onboarding.ariaCloseGuide')}>
             <X size={16} />
           </button>
         </div>
@@ -77,7 +79,7 @@ export function WelcomePage({
             className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2.5 text-[13px] font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
           >
             {hasRepo ? <Play size={14} /> : <FolderOpen size={14} />}
-            {adding ? '正在打开选择器…' : hasRepo ? '开始探索' : welcome.ctaPrimary}
+            {adding ? t('onboarding.openingPicker') : hasRepo ? t('onboarding.startExplore') : welcome.ctaPrimary}
           </button>
           {!hasRepo && (
             <button

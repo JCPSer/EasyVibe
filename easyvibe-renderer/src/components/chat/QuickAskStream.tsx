@@ -3,10 +3,11 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, AtSign, BookmarkPlus, Check, Copy, Crosshair, Loader2, MessagesSquare } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { saveView } from '@/api/chat'
 import { AnswerCards } from '@/components/chat/AnswerCards'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
-import { GATE_LABEL, type ChatMessage, type Clarify, type PendingApproval } from './types'
+import { getOnboardingCopy } from '@/shared/logic/onboardingCopy'
+import { gateWording, type ChatMessage, type Clarify, type PendingApproval } from './types'
 import type { CodeMap } from '@/types/map'
 
 export function QuickAskStream({
@@ -32,14 +33,15 @@ export function QuickAskStream({
   const [savedIdx, setSavedIdx] = useState<number | null>(null)
   const [namingIdx, setNamingIdx] = useState<number | null>(null)
   const [viewName, setViewName] = useState('')
+  const { t } = useLang()
   const samplePrompts = useMemo(() => {
-    const sp = ONBOARDING_COPY.samplePrompts
+    const sp = getOnboardingCopy(t).samplePrompts
     const first = map?.modules[0]
     return [
       ...(first ? [sp.withModule.replace('{module}', first.name)] : []),
       ...sp.generic,
     ]
-  }, [map])
+  }, [map, t])
 
   const hasFooter = (m: ChatMessage) => m.role === 'assistant' && (m.refs.length > 0 || /```mermaid/.test(m.content))
   const lastFooterIdx = useMemo(() => {
@@ -53,11 +55,11 @@ export function QuickAskStream({
   const saveAsView = (idx: number) => {
     // 后端未就绪时 repo 为空：保持既有观感（原裸 fetch 会拼出 /repos/null 并落到同一错误文案）
     if (!backendRepo) {
-      toast('存视图失败（需要本地后端在线）', 'error')
+      toast(t('chat.saveViewFail'), 'error')
       return
     }
     const m = messages[idx]
-    const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
+    const q = messages.slice(0, idx).reverse().find((x) => x.role === 'user')?.content ?? t('chat.viewDefault')
     const name = (viewName.trim() || q).slice(0, 40)
     saveView(backendRepo, {
       name,
@@ -70,7 +72,7 @@ export function QuickAskStream({
     })
       .then(async (r) => {
         if (r.status === 409) {
-          if (window.confirm(`已存在同名视图「${name}」。覆盖它？（取消则放弃保存）`)) {
+          if (window.confirm(t('chat.viewExists', { name }))) {
             const again = await saveView(
               backendRepo,
               {
@@ -95,12 +97,12 @@ export function QuickAskStream({
         setNamingIdx(null)
         setTimeout(() => setSavedIdx(null), 2500)
       })
-      .catch(() => toast('存视图失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.saveViewFail'), 'error'))
   }
 
   const answerClarify = (label: string, desc?: string) => {
     setClarify(null)
-    setInput(`选择：${label}${desc ? `（${desc}）` : ''}`)
+    setInput(t('chat.clarifyPrefix', { label }) + (desc ? `（${desc}）` : ''))
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -113,7 +115,7 @@ export function QuickAskStream({
             disabled={loadingMore}
             className="text-cap text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40 dark:text-slate-500 dark:hover:text-slate-300"
           >
-            {loadingMore ? '加载中…' : '↑ 加载更早的消息'}
+            {loadingMore ? t('common.loading') : t('chat.loadEarlier')}
           </button>
         </div>
       )}
@@ -124,8 +126,8 @@ export function QuickAskStream({
             <MessagesSquare size={18} />
           </span>
           <div>
-            <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">基于语义代码地图提问</p>
-            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">回答可存为视图，引用模块可定位到画布</p>
+            <p className="text-[12px] font-semibold text-slate-600 dark:text-slate-300">{t('chat.emptyTitle')}</p>
+            <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">{t('chat.emptySub')}</p>
           </div>
           <div className="flex flex-wrap justify-center gap-1.5">
             {samplePrompts.map((p) => (
@@ -145,7 +147,7 @@ export function QuickAskStream({
         <div key={p.taskId + ':' + (p.gate ?? '')} className="anim-msg-in rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/40">
           <p className="flex items-center gap-1.5 text-cap font-semibold leading-4 text-amber-800 dark:text-amber-200">
             <AlertTriangle size={11} />
-            审批请求 <span className="rounded-full bg-white/80 px-1.5 text-micro font-bold text-amber-600 dark:bg-slate-900/80 dark:text-amber-400">{GATE_LABEL[p.gate ?? ''] ?? p.gate ?? '审批'}</span>
+            {t('chat.approvalRequest')} <span className="rounded-full bg-white/80 px-1.5 text-micro font-bold text-amber-600 dark:bg-slate-900/80 dark:text-amber-400">{gateWording(p.gate)}</span>
           </p>
           <p className="mt-1 text-[12px] leading-5 text-slate-700 dark:text-slate-200">{p.title}</p>
           {onGoWorkbench && (
@@ -153,7 +155,7 @@ export function QuickAskStream({
               onClick={onGoWorkbench}
               className="mt-1.5 flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-micro font-semibold text-amber-700 shadow-sm transition-colors hover:bg-amber-100 dark:bg-slate-900 dark:text-amber-400 dark:hover:bg-amber-900/40"
             >
-              去工作台审批 <ArrowRight size={10} />
+              {t('chat.toWorkbench')} <ArrowRight size={10} />
             </button>
           )}
         </div>
@@ -188,7 +190,7 @@ export function QuickAskStream({
           <div key={m.id ?? i} className="anim-msg-in group/msg border-t border-slate-100 pt-2 dark:border-slate-800">
             <div className="select-text text-[12px] leading-5 text-slate-700 dark:text-slate-200">
               {!m.content.trim() ? (
-                <span className="text-slate-400 dark:text-slate-500">（此条未获得回答）</span>
+                <span className="text-slate-400 dark:text-slate-500">{t('chat.noAnswer')}</span>
               ) : (
                 <AnswerCards content={m.content} />
               )}
@@ -201,7 +203,7 @@ export function QuickAskStream({
                     key={id}
                     onClick={() => onLocateModule(id)}
                     className="flex items-center gap-0.5 font-mono text-micro text-slate-500 transition-colors hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
-                    title="定位到画布"
+                    title={t('chat.locateTip')}
                   >
                     <Crosshair size={9} />
                     {id}
@@ -212,12 +214,12 @@ export function QuickAskStream({
                   <button
                     onClick={() => {
                       void navigator.clipboard?.writeText(m.content).then(
-                        () => toast('已复制该条消息', 'info'),
-                        () => toast('复制失败（剪贴板不可用）', 'error'),
+                        () => toast(t('chat.msgCopied'), 'info'),
+                        () => toast(t('common.copyFail'), 'error'),
                       )
                     }}
                     className={`rounded p-1 text-slate-300 transition-opacity hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-300 ${i === lastFooterIdx ? 'opacity-40' : 'opacity-0 group-hover/msg:opacity-100'}`}
-                    title="复制该条回答"
+                    title={t('chat.copyAnswerTip')}
                   >
                     <Copy size={10} />
                   </button>
@@ -232,7 +234,7 @@ export function QuickAskStream({
                           if (e.key === 'Enter') saveAsView(i)
                           if (e.key === 'Escape') setNamingIdx(null)
                         }}
-                        placeholder="视图名…"
+                        placeholder={t('chat.viewNamePh')}
                         className="w-32 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-cap outline-none dark:border-emerald-800 dark:bg-slate-900 dark:text-slate-200"
                       />
                       <button
@@ -240,21 +242,21 @@ export function QuickAskStream({
                         disabled={!viewName.trim()}
                         className="rounded-full bg-emerald-600 px-2 py-0.5 text-micro font-bold text-white disabled:opacity-40"
                       >
-                        存
+                        {t('chat.saveBtn')}
                       </button>
                     </span>
                   ) : (
                     <button
                       onClick={() => {
-                        const q = messages.slice(0, i).reverse().find((x) => x.role === 'user')?.content ?? '对话视图'
+                        const q = messages.slice(0, i).reverse().find((x) => x.role === 'user')?.content ?? t('chat.viewDefault')
                         setViewName(q.replace(/\s+/g, ' ').slice(0, 24))
                         setNamingIdx(i)
                       }}
                       className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-micro font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
-                      title="把本回答（含流程图）存为可复用视图（.easyvibe/views/）"
+                      title={t('chat.saveViewTip')}
                     >
                       {savedIdx === i ? <Check size={10} /> : <BookmarkPlus size={10} />}
-                      {savedIdx === i ? '已存视图' : '存为视图'}
+                      {savedIdx === i ? t('chat.viewSaved') : t('chat.saveView')}
                     </button>
                   )}
                 </span>
@@ -290,7 +292,7 @@ export function QuickAskStream({
       )}
       {sending && (
         <p className="anim-msg-in flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
-          <Loader2 size={10} className="animate-spin" /> 正在查询地图…
+          <Loader2 size={10} className="animate-spin" /> {t('chat.querying')}
         </p>
       )}
     </div>

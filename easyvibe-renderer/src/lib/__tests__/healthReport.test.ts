@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { setLang } from '@/runtime/i18n'
 import { buildHealthReport } from '@/lib/healthReport'
 import type { CodeMap } from '@/types/map'
 
@@ -56,6 +57,8 @@ const demoMap = {
 } as unknown as CodeMap
 
 describe('buildHealthReport', () => {
+  // 报告文案经模块级 t 自译（第三批 i18n）——断言中文输出前固定语言
+  beforeEach(() => setLang('zh'))
   it('包含架构健康、模块表、问题与逆向依赖章节', () => {
     const md = buildHealthReport(demoMap)
     expect(md).toContain('# 架构健康报告 · demo')

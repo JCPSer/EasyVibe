@@ -60,7 +60,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       }
     }
     if (Object.keys(svc).length === 0) {
-      svc.default = { id: 'default', name: '默认服务', baseUrl: '', model: '', apiKey: '' }
+      svc.default = { id: 'default', name: t('settings.shell.defaultService'), baseUrl: '', model: '', apiKey: '' }
     }
     const sl: Record<string, string> = {}
     for (const [s] of SLOTS) sl[s] = String(merged[`slot.${s}`] ?? 'default')
@@ -93,8 +93,8 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       harness().then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]).then(([h, hw]) => {
       setAbout({
-        backend: h?.data?.version ?? h?.version ?? '未知',
-        harness: hw?.data?.manifest?.version ?? '未安装',
+        backend: h?.data?.version ?? h?.version ?? t('settings.about.unknown'),
+        harness: hw?.data?.manifest?.version ?? t('settings.about.notInstalled'),
       })
     })
   }, [section])
@@ -105,19 +105,19 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
   const errors = useMemo(() => {
     const e: Record<string, string> = {}
     for (const s of Object.values(services)) {
-      if (!s.name.trim()) e[`name:${s.id}`] = '名称不能为空'
-      if (s.baseUrl && !/^https?:\/\//.test(s.baseUrl.trim())) e[`baseUrl:${s.id}`] = '须以 http(s):// 开头'
-      if (Object.values(slots).includes(s.id) && !s.apiKey.trim()) e[`apiKey:${s.id}`] = '被槽位绑定的服务需要 API Key'
+      if (!s.name.trim()) e[`name:${s.id}`] = t('settings.services.errName')
+      if (s.baseUrl && !/^https?:\/\//.test(s.baseUrl.trim())) e[`baseUrl:${s.id}`] = t('settings.services.errBaseUrl')
+      if (Object.values(slots).includes(s.id) && !s.apiKey.trim()) e[`apiKey:${s.id}`] = t('settings.services.errApiKey')
     }
-    if (adv.contextBudget < 1000) e['contextBudget'] = '至少 1K token'
-    if (adv.maxTokens < 256) e['maxTokens'] = '至少 256 token'
-    if (adv.autoPatrolEnabled && adv.autoPatrolHours < 1) e['autoPatrolHours'] = '至少 1 小时'
+    if (adv.contextBudget < 1000) e['contextBudget'] = t('settings.adv.errBudget')
+    if (adv.maxTokens < 256) e['maxTokens'] = t('settings.adv.errTokens')
+    if (adv.autoPatrolEnabled && adv.autoPatrolHours < 1) e['autoPatrolHours'] = t('settings.adv.errHours')
     return e
   }, [services, slots, adv])
 
   const save = async () => {
     if (Object.keys(errors).length > 0) {
-      toast('还有字段未通过校验，请检查标红项', 'error')
+      toast(t('settings.shell.saveBlocked'), 'error')
       return
     }
     setSaving(true)
@@ -141,9 +141,9 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
         putSetting({ scope: 'global', key: 'adv.autoPatrolHours', value: adv.autoPatrolHours }),
       )
       const rs = await Promise.all(puts)
-      if (rs.some((r) => !r.ok)) throw new Error('部分配置写入失败')
+      if (rs.some((r) => !r.ok)) throw new Error(t('settings.agent.writeFail'))
       setSnapshot(JSON.stringify({ services, slots, adv }))
-      toast('配置已保存')
+      toast(t('settings.shell.savedToast'))
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -158,9 +158,9 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
 
   const removeService = async (id: string) => {
     // 审计 P2：槽位占用防护——被绑定的服务禁止删除（否则槽位指向死服务，运行时静默回退 env）
-    const bound = Object.entries(slots).filter(([, v]) => v === id).map(([k]) => SLOTS.find(([s]) => s === k)?.[1] ?? k)
+    const bound = Object.entries(slots).filter(([, v]) => v === id).map(([k]) => t(SLOTS.find(([s]) => s === k)?.[1] ?? k))
     if (bound.length > 0) {
-      toast(`该服务被槽位绑定（${bound.join('、')}）——请先在下方槽位绑定中改用其他服务`, 'error')
+      toast(t('settings.shell.boundRemove', { slots: bound.join('、') }), 'error')
       setConfirmDelete(null)
       return
     }
@@ -173,7 +173,7 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       deleteSetting('global', `llm.service.${id}`),
       deleteSetting('global', `llm.service.${id}.apiKey`),
     ])
-    toast('服务已删除')
+    toast(t('settings.shell.svcDeleted'))
   }
 
   // 审计 P2：测试连接——用当前表单值（未保存也能测）ping 服务端点，结果落 toast
@@ -186,14 +186,14 @@ export function SettingsPanel({ backendRepo, onClose, embedded }: Props) {
       const r = await llmTest({ service_id: id, base_url: s.baseUrl, model: s.model, api_key: s.apiKey })
       const d: { data?: { ok: boolean; latencyMs: number; protocol: string; error?: string } } = r.ok ? await r.json() : null
       if (!d?.data) {
-        toast('测试失败（后端响应异常）', 'error')
+        toast(t('settings.shell.testBadResp'), 'error')
       } else if (d.data.ok) {
-        toast(`连接正常 · ${d.data.latencyMs}ms（${d.data.protocol}）`, 'info')
+        toast(t('settings.shell.testOk', { ms: d.data.latencyMs, protocol: d.data.protocol }), 'info')
       } else {
-        toast(`连接失败：${d.data.error?.slice(0, 120) ?? d.data.protocol}`, 'error')
+        toast(t('settings.shell.testConnFail', { err: d.data.error?.slice(0, 120) ?? d.data.protocol }), 'error')
       }
     } catch {
-      toast('测试失败（需要后端在线）', 'error')
+      toast(t('settings.shell.testOffline'), 'error')
     } finally {
       setTestingSvc(null)
     }

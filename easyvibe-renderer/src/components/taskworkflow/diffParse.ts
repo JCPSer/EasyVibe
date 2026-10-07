@@ -1,6 +1,7 @@
 // TaskWorkflowPage 拆分产物：diff/影响面/时长 纯函数（可单测，无 React 依赖）。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
 import { toMs } from '@/shared/logic/diffStat'
+import { t } from '@/runtime/i18n'
 import type { TaskItem } from './types'
 
 /** diff 全文 → 变更文件列表（`diff --git a/x b/x` 与 `+++ b/x` 双形态） */
@@ -39,13 +40,13 @@ export function parseImpact(diffStat: string | null): { adds: number; dels: numb
   return [{ adds, dels, files: n }]
 }
 
-/** 任务运行时长（createdAt→updatedAt 人类可读） */
-export function taskDuration(t: TaskItem): string {
-  const a = toMs(t.createdAt ?? '')
-  const b = toMs(t.updatedAt ?? '')
+/** 任务运行时长（createdAt→updatedAt 人类可读；经模块级 t 自译） */
+export function taskDuration(task: TaskItem): string {
+  const a = toMs(task.createdAt ?? '')
+  const b = toMs(task.updatedAt ?? '')
   if (!a || !b) return '—'
   const min = Math.floor(Math.max(0, b - a) / 60000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟`
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分`
+  if (min < 1) return t('common.justNow')
+  if (min < 60) return t('common.min', { m: min })
+  return t('common.hourMin', { h: Math.floor(min / 60), m: min % 60 })
 }

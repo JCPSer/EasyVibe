@@ -3,6 +3,7 @@
 // 检查节奏：启动 5s 后首检 + 每小时轮询；并发检查 single-flight 合并（防重）。
 // 插件模块动态 import——浏览器构建不会触碰 Tauri 专属代码。
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { checkAndInstallUpdate, isTauriRuntime, relaunchApp } from '@/runtime/host'
 
 let inFlight: Promise<void> | null = null
@@ -28,8 +29,8 @@ async function doCheck(): Promise<void> {
   try {
     const ready = await checkAndInstallUpdate()
     if (!ready) return
-    toast(`新版本 ${ready.version} 已就绪`, 'info', {
-      label: '重启更新',
+    toast(t('updater.ready', { v: ready.version }), 'info', {
+      label: t('updater.relaunch'),
       onClick: () => void relaunchApp(),
     })
   } catch {

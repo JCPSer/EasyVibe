@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react'
 import { onTaskEvent } from '@/runtime/growthBus'
+import { t } from '@/runtime/i18n'
 import { listTasks } from '@/api/task'
 
 export type Attention = { count: number; sample: string } | null
+
+/** 关卡话术映射（审批门人话标签；枚举值为后端契约，不随语言变） */
+const GATE_WORDING: Record<string, string> = {
+  plan: 'task.gate.plan',
+  analysis: 'task.gate.analysis',
+  solution: 'task.gate.solution',
+  diff: 'task.gate.diff',
+  report: 'task.gate.report',
+}
 
 /**
  * 应用壳徽标/注意力条数据（待审批 + 执行中 + 第一条待审批话术）。
@@ -19,7 +29,6 @@ export function useAttention(backendRepo: string | null) {
       setAttention(null)
       return
     }
-    const GL: Record<string, string> = { plan: '任务书审批', analysis: '需求矩阵评审', solution: '方案评审', diff: 'Diff 审批', report: '审查报告' }
     const load = () =>
       listTasks(backendRepo)
         .then((r) => (r.ok ? r.json() : null))
@@ -30,7 +39,13 @@ export function useAttention(backendRepo: string | null) {
           const waiting = ts.filter((t) => t.status === 'awaiting_approval')
           setAttention(
             waiting.length > 0
-              ? { count: waiting.length, sample: `「${waiting[0].title}」停在${GL[waiting[0].gate ?? ''] ?? '审批'}` }
+              ? {
+                  count: waiting.length,
+                  sample: t('task.attentionSample', {
+                    title: waiting[0].title,
+                    gate: t(GATE_WORDING[waiting[0].gate ?? ''] ?? 'chat.gate.fallback'),
+                  }),
+                }
               : null,
           )
         })

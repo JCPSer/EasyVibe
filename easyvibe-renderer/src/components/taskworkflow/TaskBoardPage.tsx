@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Loader2, X } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { onPatrolFinished, onTaskEvent } from '@/runtime/growthBus'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { stageOf } from '@/components/taskworkflow/taskStage'
@@ -30,12 +31,13 @@ interface BoardTask {
 
 type ColKey = 'backlog' | 'plan' | 'running' | 'review' | 'done'
 
-const COLS: { key: ColKey; label: string }[] = [
-  { key: 'backlog', label: '待启动' },
-  { key: 'plan', label: '分析与方案' },
-  { key: 'running', label: '实施中' },
-  { key: 'review', label: '待你评审' },
-  { key: 'done', label: '已完成' },
+/** 列名只存字典 key（渲染期 t(`task.col.*`) 解析；枚举值为看板列标识，不随语言变） */
+const COLS: { key: ColKey; labelKey: string }[] = [
+  { key: 'backlog', labelKey: 'task.col.backlog' },
+  { key: 'plan', labelKey: 'task.col.plan' },
+  { key: 'running', labelKey: 'task.col.running' },
+  { key: 'review', labelKey: 'task.col.review' },
+  { key: 'done', labelKey: 'task.col.done' },
 ]
 
 /** 列归属（方案 §4.3 口径）：status 优先，failed/rejected/interrupted 归待启动顶部失败组 */
@@ -87,6 +89,8 @@ export function TaskBoardPage({
   onSelectTask: (taskId: string) => void
   onCreateTask: (d: TaskDraft) => void
 }) {
+  const { t: tt } = useLang()
+  const t = tt
   const [tasks, setTasks] = useState<BoardTask[] | null>(null)
   // 列内排序（重审 P2：此前仅会话内有效，刷新无声丢失——现在按仓库持久化到 localStorage）
   const [order, setOrder] = useState<Record<string, number>>({})
@@ -173,25 +177,25 @@ export function TaskBoardPage({
     return false
   }
 
-  const decide = async (t: BoardTask, decision: 'approved' | 'rejected') => {
+  const decide = async (tk: BoardTask, decision: 'approved' | 'rejected') => {
     if (!backendRepo || deciding) return
-    setDeciding(t.id + decision)
+    setDeciding(tk.id + decision)
     try {
-      const r = await decideTask(backendRepo, t.id, {
+      const r = await decideTask(backendRepo, tk.id, {
         decision,
         note: decision === 'rejected' ? rejectNote.trim() : undefined,
-        gate: t.gate,
+        gate: tk.gate,
       })
       const d = await r.json().catch(() => null)
       if (!r.ok) {
-        toast(d?.error ?? '审批失败', 'error')
+        toast(d?.error ?? t('task.approveFailToast'), 'error')
         return
       }
-      if (decision === 'approved' && t.gate === 'diff') {
+      if (decision === 'approved' && tk.gate === 'diff') {
         // diff 关通过只推进 report、卡留列——把真实状态说给用户（复审口径）
-        toast('已通过 Diff 审批，还差终审（审查报告）')
+        toast(t('task.diffApprovedToast'))
       } else {
-        toast(decision === 'approved' ? '已通过' : '已打回')
+        toast(decision === 'approved' ? t('task.approvedToast') : t('task.rejectedToast'))
       }
       setRejecting(null)
       setRejectNote('')
@@ -212,7 +216,7 @@ export function TaskBoardPage({
       // 失败组 → 主体区 = 复制为新任务（方案 §4.3 落点语义）
       if (failed && target === 'backlog') {
         onCreateTask({
-          title: `${t.title}（重提）`,
+          title: `${t.title}${tt('task.reworkSuffix')}`,
           description: t.description ?? t.title,
           modules: t.modules ?? [],
           acceptance: '',
@@ -241,8 +245,8 @@ export function TaskBoardPage({
     // ui-test P2：落到非法列——落下瞬间也要给解释（拖拽中的红环提示可能被错过）
     toast(
       from === 'backlog'
-        ? '待启动的任务不能拖到其他列——等它跑起来再管理'
-        : '只有「待你评审」的任务可以拖拽处分（拖到「已完成」= 通过，「待启动」= 打回）',
+        ? tt('task.dragFromBacklog')
+        : tt('task.dragReviewOnly'),
       'info',
     )
   }
@@ -252,13 +256,13 @@ export function TaskBoardPage({
     const b = toMs(t.updatedAt)
     if (!a || !b) return '—'
     const min = Math.floor(Math.max(0, b - a) / 60000)
-    if (min < 1) return '刚刚'
-    if (min < 60) return `${min} 分钟`
-    return `${Math.floor(min / 60)} 小时 ${min % 60} 分`
+    if (min < 1) return tt('common.justNow')
+    if (min < 60) return tt('common.min', { m: min })
+    return tt('common.hourMin', { h: Math.floor(min / 60), m: min % 60 })
   }
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">{tt('common.pickProject')}</div>
   }
 
   const renderCard = (t: BoardTask, failed = false) => (
@@ -279,7 +283,7 @@ export function TaskBoardPage({
         if ((e.target as HTMLElement).closest('button, input, textarea, a')) return
         onSelectTask(t.id)
       }}
-      title="点击查看该任务的流水线全程"
+      title={tt('task.cardTip')}
       className={`rounded-xl border bg-white dark:bg-slate-900 p-3 transition-shadow ${
         dragId === t.id ? 'opacity-40' : ''
       } ${failed ? 'border-red-200 dark:border-red-900/60 bg-red-50/40 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'} cursor-pointer shadow-sm hover:shadow-md`}
@@ -288,7 +292,7 @@ export function TaskBoardPage({
         <span className="min-w-0 flex-1 text-[12px] font-bold leading-4 text-slate-700 dark:text-slate-200">{t.title}</span>
         {(t.result?.contractViolations?.length ?? 0) > 0 && (
           <span className="tnum shrink-0 rounded-full bg-red-50 dark:bg-red-950/40 px-1.5 py-px text-[9px] font-bold text-red-500">
-            越界 {t.result!.contractViolations!.length}
+            {tt('task.violationsChip', { n: t.result!.contractViolations!.length })}
           </span>
         )}
       </div>
@@ -318,7 +322,7 @@ export function TaskBoardPage({
                 autoFocus
                 value={rejectNote}
                 onChange={(e) => setRejectNote(e.target.value)}
-                placeholder="打回意见（必填）"
+                placeholder={tt('task.rejectPhShort')}
                 className="min-w-0 flex-1 rounded-md border border-red-200 dark:border-red-900/60 bg-red-50/50 px-2 py-1 text-[10px] outline-none focus:border-red-300"
               />
               <button
@@ -326,7 +330,7 @@ export function TaskBoardPage({
                 disabled={!!deciding || !rejectNote.trim()}
                 className="shrink-0 rounded-md bg-red-500 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
               >
-                确认
+                {tt('common.confirm')}
               </button>
               <button onClick={() => setRejecting(null)} className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-[10px] text-slate-400 dark:text-slate-500">
                 <X size={10} />
@@ -335,20 +339,20 @@ export function TaskBoardPage({
           ) : (
             <div className="flex gap-1.5">
               <span className="rounded-full bg-blue-50 dark:bg-blue-950/40 px-1.5 py-px text-[9px] font-bold text-blue-600">
-                {t.gate === 'diff' ? 'Diff 审批' : '审查报告'}
+                {t.gate === 'diff' ? tt('task.gate.diff') : tt('task.gate.report')}
               </span>
               <button
                 onClick={() => decide(t, 'approved')}
                 disabled={!!deciding}
                 className="ml-auto flex items-center gap-0.5 rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
               >
-                <Check size={9} /> 通过
+                <Check size={9} /> {tt('task.approveBtn')}
               </button>
               <button
                 onClick={() => setRejecting(t.id)}
                 className="flex items-center gap-0.5 rounded-md border border-red-200 dark:border-red-900/60 px-2 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
               >
-                <X size={9} /> 打回
+                <X size={9} /> {tt('task.rejectBtn')}
               </button>
             </div>
           )}
@@ -360,7 +364,7 @@ export function TaskBoardPage({
           <button
             onClick={() =>
               onCreateTask({
-                title: `${t.title}（重提）`,
+                title: `${t.title}${tt('task.reworkSuffix')}`,
                 description: t.description ?? t.title,
                 modules: t.modules ?? [],
                 acceptance: '',
@@ -370,9 +374,9 @@ export function TaskBoardPage({
             }
             className="flex items-center gap-0.5 rounded-md border border-red-200 dark:border-red-900/60 px-1.5 py-0.5 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
           >
-            <Copy size={9} /> 复制重提
+            <Copy size={9} /> {tt('task.copyRetry')}
           </button>
-          <span className="ml-auto">或拖到待启动区</span>
+          <span className="ml-auto">{tt('task.dragOr')}</span>
         </div>
       )}
     </div>
@@ -381,20 +385,20 @@ export function TaskBoardPage({
   return (
     <div className="flex h-full flex-col p-4">
       <div className="mb-3 flex items-baseline gap-3">
-        <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">任务编排</h2>
+        <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{tt('task.boardTitle')}</h2>
         <p className="text-[11px] text-slate-400 dark:text-slate-500">
-          列 = 状态；拖到「已完成」= 通过，拖到「待启动」= 打回，失败卡拖到主体区 = 复制重提
+          {tt('task.boardSub')}
         </p>
         <button
           onClick={onOpenWorkflow}
           className="ml-auto rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
         >
-          工作流视图 →
+          {tt('task.workflowView')}
         </button>
       </div>
 
       <div className="flex min-h-0 flex-1 gap-3">
-        {COLS.map(({ key, label }) => (
+        {COLS.map(({ key, labelKey }) => (
           <div
             key={key}
             onDragOver={(e) => {
@@ -426,20 +430,20 @@ export function TaskBoardPage({
             }`}
           >
             <div className="flex items-center gap-1.5 px-1.5 py-1.5">
-              <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300">{label}</span>
+              <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300">{t(labelKey)}</span>
               <span className="tnum rounded-full bg-slate-200/70 px-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">{counts[key]}</span>
               {key === 'running' && counts.running > 0 && <Loader2 size={10} className="animate-spin text-blue-500" />}
               {/* 非法落点即时解释（拖拽中可见，比落下后 toast 更早一步） */}
               {illegalCol === key && dragId && (
                 <span className="ml-auto rounded bg-red-100 px-1.5 py-px text-[9px] font-bold text-red-500">
-                  {(tasks ?? []).find((x) => x.id === dragId)?.status === 'awaiting_approval' ? '仅可拖到「已完成」= 通过' : '该列不可拖入'}
+                  {(tasks ?? []).find((x) => x.id === dragId)?.status === 'awaiting_approval' ? t('task.illegalApproveOnly') : t('task.illegalCol')}
                 </span>
               )}
             </div>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
               {key === 'backlog' && grouped.failedTop.length > 0 && (
                 <div>
-                  <p className="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-red-400">失败·驳回</p>
+                  <p className="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-red-400">{t('task.failedGroup')}</p>
                   {grouped.failedTop.map((t) => renderCard(t, true))}
                   <div className="my-1.5 border-t border-dashed border-slate-200 dark:border-slate-700" />
                 </div>
@@ -448,7 +452,7 @@ export function TaskBoardPage({
               {/* ui-test P2：空列给引导占位（密度与可发现性），不只 backlog 一列 */}
               {grouped[key].length === 0 && !(key === 'backlog' && grouped.failedTop.length > 0) && (
                 <p className="rounded-lg border border-dashed border-slate-200 dark:border-slate-700 px-1 py-6 text-center text-[10px] text-slate-300 dark:text-slate-600">
-                  {key === 'backlog' ? '暂无任务——从地图/问题/建议发起' : '没有任务'}
+                  {key === 'backlog' ? t('task.emptyBacklog') : t('task.emptyCol')}
                 </p>
               )}
             </div>

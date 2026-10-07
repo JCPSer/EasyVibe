@@ -1,6 +1,7 @@
 // 设置面板拆分产物：共享类型 / 分区表 / 样式常量（纯 .ts，无组件导出）。
 // 拆自 SettingsPanel.tsx（2026-10-05 防膨胀）。组件型共享件见 ./controls——
 // 二者分开是为了满足 react-refresh/only-export-components（审查非阻断 #3）。
+// i18n 第三批：用户可见的槽位/范围文案不在此存中文字面量，只存字典 key（渲染期经 t 解析）。
 import { Bot, Info, ShieldCheck, SlidersHorizontal, Terminal } from 'lucide-react'
 
 export interface Service {
@@ -11,10 +12,11 @@ export interface Service {
   apiKey: string
 }
 
+/** 功能槽位 → 字典 key（label/desc 渲染期 t(`settings.slot.*`) 解析）。 */
 export const SLOTS: [string, string, string][] = [
-  ['induction', '地图归纳', '首次归纳与重新归纳'],
-  ['patrol', '巡检', '健康巡检与健康写回'],
-  ['chat', '对话', '入口对话与智能建议'],
+  ['induction', 'settings.slot.induction', 'settings.slot.inductionHint'],
+  ['patrol', 'settings.slot.patrol', 'settings.slot.patrolHint'],
+  ['chat', 'settings.slot.chat', 'settings.slot.chatHint'],
 ]
 
 export const SECTIONS = [
@@ -27,12 +29,13 @@ export const SECTIONS = [
 
 export type SectionId = (typeof SECTIONS)[number]['id']
 
-export const SCOPES: { key: string; label: string; file: string; desc: string }[] = [
-  { key: 'global', label: '通用', file: 'global.md', desc: '全部 agent 上下文（任务流水线、归纳、巡检、入口对话）' },
-  { key: 'analysis', label: '需求分析', file: 'rule_analysis.md', desc: '仅需求分析阶段（阶段 1 需求矩阵 agent）' },
-  { key: 'design', label: '方案设计', file: 'rule_design.md', desc: '仅方案设计阶段（阶段 2 方案设计 agent）' },
-  { key: 'implement', label: '代码开发', file: 'rule_implement.md', desc: '仅代码开发阶段（阶段 3 实施 agent）' },
-  { key: 'review', label: '代码审查', file: 'rule_review.md', desc: '仅代码审查（独立审查 agent 与阶段产物初审）' },
+/** harness 规则生效范围 → 字典 key（label/desc 渲染期 t(`settings.scope.*`) 解析）。 */
+export const SCOPES: { key: string; file: string; labelKey: string; descKey: string }[] = [
+  { key: 'global', file: 'global.md', labelKey: 'settings.scope.global', descKey: 'settings.scope.globalHint' },
+  { key: 'analysis', file: 'rule_analysis.md', labelKey: 'settings.scope.analysis', descKey: 'settings.scope.analysisHint' },
+  { key: 'design', file: 'rule_design.md', labelKey: 'settings.scope.design', descKey: 'settings.scope.designHint' },
+  { key: 'implement', file: 'rule_implement.md', labelKey: 'settings.scope.implement', descKey: 'settings.scope.implementHint' },
+  { key: 'review', file: 'rule_review.md', labelKey: 'settings.scope.review', descKey: 'settings.scope.reviewHint' },
 ]
 
 export interface CustomSlot {

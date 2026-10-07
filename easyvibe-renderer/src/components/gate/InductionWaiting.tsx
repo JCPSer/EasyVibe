@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
+import { useLang } from '@/runtime/i18n'
+import { getOnboardingCopy } from '@/shared/logic/onboardingCopy'
 import { loadTaskIdea, saveTaskIdea } from '@/lib/onboarding'
 import { prefersReducedMotion } from '@/runtime/motion'
 import { inductionPhaseLabel } from '@/shared/logic/inductionProgress'
 import { mapProgress } from '@/api/canvas'
 
 // 首归纳等待页：轮询 progress.json 展示真实阶段与百分比（"正在边推导 80%"而非干转圈）
-export function InductionWaiting({ repo }: { repo: string }) {  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
+export function InductionWaiting({ repo }: { repo: string }) {
+  const { t } = useLang()
+  const copy = getOnboardingCopy(t)
+  const [prog, setProg] = useState<{ phase: string; percent: number; modulesDone: number; modulesTotal: number } | null>(null)
   // 2026-10-04 新手引导：等待期是引导黄金时间（调研 B 节）——三层递进：
   // 真实进度叙事（原有）+ 概念卡片轮播 + 任务想法预填（归纳完成后带入任务对话）
   const [cardIdx, setCardIdx] = useState(0)
@@ -16,8 +20,8 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
   const reduced = prefersReducedMotion()
   useEffect(() => {
     if (reduced) return // 尊重减弱动效：不自动轮播，手动翻页即可
-    const t = window.setInterval(() => setCardIdx((i) => (i + 1) % ONBOARDING_COPY.concepts.length), 20000)
-    return () => window.clearInterval(t)
+    const timer = window.setInterval(() => setCardIdx((i) => (i + 1) % copy.concepts.length), 20000)
+    return () => window.clearInterval(timer)
   }, [reduced])
   useEffect(() => {
     let stale = false
@@ -38,16 +42,16 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
     }
   }, [repo])
 
-  const concept = ONBOARDING_COPY.concepts[cardIdx]
+  const concept = copy.concepts[cardIdx]
   // 阶段名走 v2.2 协议共享词表（旧表 layering/module_scan/emit 永不命中，是存量 bug）；
   // done 是终态：等待页以 map.json 落盘为准出页，收尾瞬间本地补"完成"（词表不收录 done）
-  const phaseLabel = prog ? (prog.phase === 'done' ? '完成' : inductionPhaseLabel(prog.phase)) : ''
+  const phaseLabel = prog ? (prog.phase === 'done' ? t('onboarding.waitDone') : inductionPhaseLabel(prog.phase)) : ''
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-[13px] text-slate-500 dark:text-slate-400">
       {/* 第 1 层：真实进度叙事（永远不让等待页只有 spinner） */}
       <Loader2 size={18} className="animate-spin text-blue-500" />
       <span className="font-semibold text-slate-700 dark:text-slate-200">
-        正在归纳代码地图{prog ? `：${phaseLabel} ${prog.percent}%` : '…'}
+        {prog ? t('onboarding.inducingPhase', { phase: phaseLabel, pct: prog.percent }) : t('onboarding.inducingWait')}
       </span>
       {prog && (
         <div className="h-1.5 w-64 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" role="progressbar" aria-valuenow={prog.percent} aria-valuemin={0} aria-valuemax={100}>
@@ -56,9 +60,9 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
       )}
       <span className="max-w-[420px] text-center text-[11px] leading-4 text-slate-400 dark:text-slate-500">
         {prog && prog.modulesTotal > 0
-          ? `已归纳 ${prog.modulesDone}/${prog.modulesTotal} 个模块`
-          : '后台 agent 执行中（通常数分钟，取决于仓库规模）'}
-        ，完成后地图会自动出现
+          ? t('onboarding.modulesProgress', { done: prog.modulesDone, total: prog.modulesTotal })
+          : t('onboarding.agentRunning')}
+        {t('onboarding.autoAppear')}
       </span>
 
       {/* 第 2 层：概念卡片轮播（每张 ~20s 自动翻，可手动点；key 驱动翻页淡入——评审 G7） */}
@@ -67,11 +71,11 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
         <div className="flex items-center justify-between">
           <p className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{concept.title}</p>
           <div className="flex gap-1">
-            {ONBOARDING_COPY.concepts.map((c, i) => (
+            {copy.concepts.map((c, i) => (
               <button
                 key={c.id}
                 onClick={() => setCardIdx(i)}
-                aria-label={`第 ${i + 1} 张：${c.title}`}
+                aria-label={t('onboarding.cardN', { n: i + 1, title: c.title })}
                 className={`h-1.5 rounded-full transition-all ${i === cardIdx ? 'w-4 bg-blue-500' : 'w-1.5 bg-slate-200 hover:bg-slate-300'}`}
               />
             ))}
@@ -83,12 +87,12 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
 
       {/* 第 3 层：提前参与——任务想法预填（归纳完成后带入任务对话） */}
       <div className="w-full max-w-md">
-        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{ONBOARDING_COPY.waiting.ideaTitle}</p>
+        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{copy.waiting.ideaTitle}</p>
         <div className="mt-1 flex gap-1.5">
           <input
             value={idea}
             onChange={(e) => { setIdea(e.target.value); setIdeaSaved(false) }}
-            placeholder={ONBOARDING_COPY.waiting.ideaPlaceholder}
+            placeholder={copy.waiting.ideaPlaceholder}
             className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[12px] outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
           />
           <button
@@ -96,10 +100,10 @@ export function InductionWaiting({ repo }: { repo: string }) {  const [prog, set
             disabled={!idea.trim()}
             className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
-            {ONBOARDING_COPY.waiting.ideaButton}
+            {copy.waiting.ideaButton}
           </button>
         </div>
-        {ideaSaved && <p className="mt-1 text-[10.5px] text-emerald-600">{ONBOARDING_COPY.waiting.ideaSaved}</p>}
+        {ideaSaved && <p className="mt-1 text-[10.5px] text-emerald-600">{copy.waiting.ideaSaved}</p>}
       </div>
     </div>
   )

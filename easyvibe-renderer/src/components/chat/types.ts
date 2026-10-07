@@ -1,5 +1,6 @@
 // 对话域共享类型（ChatPanel / QuickAsk 数据契约镜像的单一事实源）。
 // 拆自 ChatPanel.tsx / QuickAsk.tsx（2026-10-05 防膨胀）。
+import { t } from '@/runtime/i18n'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
 
@@ -38,7 +39,11 @@ export interface PendingApproval {
   gate: string | null
 }
 
-export const GATE_LABEL: Record<string, string> = { plan: '① 计划审批', diff: '② Diff 审批', report: '③ 审查报告' }
+/** 审批门人话标签（枚举值为后端契约；渲染期经模块级 t 自译，随语言切换刷新） */
+export function gateWording(gate: string | null | undefined): string {
+  if (gate === 'plan' || gate === 'diff' || gate === 'report') return t(`chat.gate.${gate}`)
+  return t('chat.gate.fallback')
+}
 
 export interface ChatRestore {
   summary: string | null

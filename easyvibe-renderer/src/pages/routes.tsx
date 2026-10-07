@@ -59,6 +59,8 @@ export type BuildPagesProps = {
   pendingChatContext: ChatContext | null
   onConsumeChatContext: () => void
   onNavigate: (p: PageId) => void
+  /** 第三批 i18n：字典 t 由 App（useLang）注入，routes 不做 hooks 调用 */
+  t: (key: string, vars?: Record<string, string | number>) => string
 }
 
 /**
@@ -85,14 +87,14 @@ export function buildPages(p: BuildPagesProps): Record<PageId, React.ReactNode> 
               p.guideDismissed ? undefined : (
                 <div className="mx-2 mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 dark:bg-blue-950/40 px-3 py-2">
                   <p className="flex-1 text-[11px] leading-5 text-slate-600 dark:text-slate-300">
-                    <span className="font-semibold text-blue-700">界面已整理：</span>
-                    详情栏页签为 详情/问题；对话在左侧「任务对话」，任务在「任务」，视图与优化建议在顶栏。
+                    <span className="font-semibold text-blue-700">{p.t('canvas.guide.title')}</span>
+                    {p.t('canvas.guide.body')}
                   </p>
                   <button
                     onClick={p.onDismissGuide}
                     className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-blue-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-950/40"
                   >
-                    知道了
+                    {p.t('canvas.guide.ok')}
                   </button>
                 </div>
               )
@@ -194,9 +196,9 @@ export function buildPages(p: BuildPagesProps): Record<PageId, React.ReactNode> 
         onOpenReview={() => p.onNavigate('review')}
       />
     ),
-    'kb-docs': <PlaceholderPage title="文档中心" milestone="M4-4" description="知识库三页为 P3 骨架：从已定样式模式派生。" icon={BookOpen} />,
-    'kb-decisions': <PlaceholderPage title="决策记录" milestone="M4-4" description="这个仓库做过的重要技术决策及其来龙去脉。" icon={ScrollText} />,
-    'kb-apis': <PlaceholderPage title="接口目录" milestone="M4-4" description="全部关键入口（路由/函数/任务）的索引：谁对外提供什么能力。" icon={Plug} />,
+    'kb-docs': <PlaceholderPage title={p.t('kb.docs.title')} milestone="M4-4" description={p.t('kb.docs.desc')} icon={BookOpen} />,
+    'kb-decisions': <PlaceholderPage title={p.t('kb.decisions.title')} milestone="M4-4" description={p.t('kb.decisions.desc')} icon={ScrollText} />,
+    'kb-apis': <PlaceholderPage title={p.t('kb.apis.title')} milestone="M4-4" description={p.t('kb.apis.desc')} icon={Plug} />,
   }
 }
 

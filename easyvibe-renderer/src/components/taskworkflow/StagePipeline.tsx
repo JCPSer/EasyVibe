@@ -1,4 +1,5 @@
 import { CheckCircle2 } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 import { stageOf, STAGES } from '@/components/taskworkflow/taskStage'
 
 // 五阶段管道公共组件（v4 brief §8：两处五阶段渲染漂移的对策——判定只在 taskStage 一处，
@@ -21,6 +22,7 @@ export function StagePipeline({
   /** 点击早期阶段回看（仅 detail 档生效；未来阶段不可点） */
   onSelectStage?: (i: number) => void
 }) {
+  const { t } = useLang()
   const stage = stageOf(status, gate)
   const dotState = (i: number): DotState => {
     if (stage === 'error' || stage === null) return 'todo'
@@ -49,7 +51,7 @@ export function StagePipeline({
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro font-bold ${cls(dotState(i))}`}>
               {dotState(i) === 'done' ? <CheckCircle2 size={10} /> : i + 1}
             </span>
-            <span className={`truncate text-micro ${dotState(i) === 'todo' ? 'text-slate-400 dark:text-slate-500' : 'font-semibold text-slate-600 dark:text-slate-300'}`}>{s.label}</span>
+            <span className={`truncate text-micro ${dotState(i) === 'todo' ? 'text-slate-400 dark:text-slate-500' : 'font-semibold text-slate-600 dark:text-slate-300'}`}>{t(s.labelKey)}</span>
             {i < STAGES.length - 1 && (
               <span className={`h-px flex-1 ${dotState(i) === 'done' ? 'bg-emerald-400' : 'bg-slate-200'}`} />
             )}
@@ -70,15 +72,15 @@ export function StagePipeline({
               type="button"
               disabled={!clickable}
               onClick={() => onSelectStage?.(i)}
-              title={clickable ? `回看「${s.label}」产物` : stage === 'done' ? s.label : '尚未到达此阶段'}
+              title={clickable ? t('task.pipeLookbackTip', { stage: t(s.labelKey) }) : stage === 'done' ? t(s.labelKey) : t('task.pipeNotReached')}
               className={`flex items-center gap-1 rounded-full${ring} ${clickable ? 'cursor-pointer transition-transform hover:scale-105' : 'cursor-default'}`}
             >
               <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-micro font-bold ${cls(dotState(i))}`}>
                 {dotState(i) === 'done' ? <CheckCircle2 size={11} /> : i + 1}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-micro font-semibold text-slate-600 dark:text-slate-300">{s.label}</span>
-                <span className="block truncate text-[9px] text-slate-400 dark:text-slate-500">{stage === 'error' ? '—' : s.hint}</span>
+                <span className="block truncate text-micro font-semibold text-slate-600 dark:text-slate-300">{t(s.labelKey)}</span>
+                <span className="block truncate text-[9px] text-slate-400 dark:text-slate-500">{stage === 'error' ? '—' : t(s.hintKey)}</span>
               </span>
             </button>
             {i < STAGES.length - 1 && (

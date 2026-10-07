@@ -2,6 +2,7 @@
 // 拆自 ChatPanel.tsx / QuickAsk.tsx（2026-10-05 防膨胀）。
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { onTaskEvent } from '@/runtime/growthBus'
 import { chatHistory, conversations as fetchConversations, createConversation, deleteConversation, renameConversation } from '@/api/chat'
 import type { ChatRestore, ConversationSummary, PendingApproval } from './types'
@@ -67,7 +68,7 @@ export function useConversations({
         onCreated?.()
         loadConvs()
       })
-      .catch(() => toast('新建会话失败', 'error'))
+      .catch(() => toast(t('chat.createConvFail'), 'error'))
   }, [backendRepo, loadConvs, setConvId, defaultConvTitle, onCreated])
 
   const renameConv = useCallback(() => {
@@ -78,23 +79,23 @@ export function useConversations({
         setRenaming(false)
         loadConvs()
       })
-      .catch(() => toast('重命名失败', 'error'))
+      .catch(() => toast(t('chat.renameFail'), 'error'))
   }, [backendRepo, convId, renameVal, loadConvs])
 
   const deleteConv = useCallback(() => {
     if (!backendRepo || !convId) return
-    if (!window.confirm('删除该会话？（其消息与关联任务留痕一并删除，不可恢复）')) return
+    if (!window.confirm(t('chat.confirmDeleteConv'))) return
     deleteConversation(backendRepo, convId)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         setConvId(null)
         loadConvs()
       })
-      .catch((e) => toast(String(e).includes('400') ? '每个仓库至少保留一个会话' : '删除失败', 'error'))
+      .catch((e) => toast(String(e).includes('400') ? t('chat.lastConvGuard') : t('chat.deleteFail'), 'error'))
   }, [backendRepo, convId, loadConvs, setConvId])
 
   const currentConv = convs.find((c) => c.id === convId)
-  const displayTitle = currentConv?.title ?? (convId ? '会话' : '默认会话')
+  const displayTitle = currentConv?.title ?? (convId ? t('chat.convFallback') : t('chat.convDefault'))
 
   return {
     convs, convId, setConvId, convQ, convMenuOpen, setConvMenuOpen,

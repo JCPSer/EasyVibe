@@ -6,6 +6,7 @@ import { conversations as fetchConversations, createConversation, renameConversa
 import { listTasks, taskDiff } from '@/api/task'
 import { onTaskEvent } from '@/runtime/growthBus'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import type { TaskDraft } from '@/shared/logic/taskContext'
 import type { CodeMap } from '@/types/map'
 import type { ChatAboutTarget } from '@/shared/contract/chat'
@@ -24,15 +25,6 @@ interface TaskItem {
   gate: string | null
   modules: string[]
   updatedAt?: string
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  running: '执行中',
-  awaiting_approval: '等待审批',
-  done: '已完成',
-  failed: '失败',
-  rejected: '已驳回',
 }
 
 export function WorkbenchPage({
@@ -59,6 +51,16 @@ export function WorkbenchPage({
   /** v0.2：互指提示条跳「任务」页 */
   onNavigate: (page: 'tasks') => void
 }) {
+  const { t } = useLang()
+  // 任务状态人话标签（渲染期经模块级 t 自译；枚举值为后端契约）
+  const STATUS_LABEL: Record<string, string> = {
+    pending: t('task.status.pending'),
+    running: t('task.status.running'),
+    awaiting_approval: t('task.status.awaiting'),
+    done: t('task.status.done'),
+    failed: t('task.status.failed'),
+    rejected: t('task.status.rejected'),
+  }
   const [convs, setConvs] = useState<ConversationSummary[]>([])
   const [activeConv, setActiveConv] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -135,13 +137,13 @@ export function WorkbenchPage({
         setChatDraft({
           convId: d.data.id,
           text: mention
-            ? '请分析这个模块的现状、健康度问题与改进建议。'
-            : `请分析一下架构层「${ctx.refName}」的职责划分、层间依赖与改进建议。`,
+            ? t('chat.askModule')
+            : t('chat.askLayer', { name: ctx.refName }),
           mention,
           nonce: Date.now(),
         })
       })
-      .catch(() => toast('带入上下文失败（新会话未创建）', 'error'))
+      .catch(() => toast(t('chat.ctxFail'), 'error'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChatContext])
 
@@ -156,7 +158,7 @@ export function WorkbenchPage({
         loadConvs()
         setChatDraft({ convId: d.data.id, text: initialIdea.trim(), nonce: Date.now() })
       })
-      .catch(() => toast('带入想法失败（新会话未创建）', 'error'))
+      .catch(() => toast(t('chat.ideaFail'), 'error'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialIdea])
 
@@ -168,7 +170,7 @@ export function WorkbenchPage({
         setActiveConv(d.data.id)
         loadConvs()
       })
-      .catch(() => toast('新建会话失败', 'error'))
+      .catch(() => toast(t('chat.createConvFail'), 'error'))
   }
 
   // 会话管理（重审 P0）：主入口列表的改名/删除——此前 embedded 模式全藏，误建会话无路可退
@@ -176,7 +178,7 @@ export function WorkbenchPage({
     if (!backendRepo || !renameVal.trim()) return
     const r = await renameConversation(backendRepo, cid, renameVal.trim()).catch(() => null)
     if (!r?.ok) {
-      toast('改名失败', 'error')
+      toast(t('chat.renameConvFail'), 'error')
       return
     }
     setRenamingId(null)
@@ -188,7 +190,7 @@ export function WorkbenchPage({
     const r = await deleteConversation(backendRepo, cid).catch(() => null)
     if (!r?.ok) {
       const d = await r?.json().catch(() => null)
-      toast(d?.error ?? '删除失败（最后一个会话需保留）', 'error')
+      toast(d?.error ?? t('chat.deleteConvLast'), 'error')
       return
     }
     setConfirmDelId(null)
@@ -229,7 +231,7 @@ export function WorkbenchPage({
           }),
         ) ?? null
       const key = mod?.id ?? '_other'
-      const cur = byModule.get(key) ?? { name: mod?.name ?? '未映射文件', adds: 0, dels: 0, files: 0 }
+      const cur = byModule.get(key) ?? { name: mod?.name ?? t('chat.unmapped'), adds: 0, dels: 0, files: 0 }
       cur.adds += f.adds
       cur.dels += f.dels
       cur.files += 1
@@ -246,26 +248,26 @@ export function WorkbenchPage({
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 px-3 py-1.5">
         <MessagesSquare size={12} className="shrink-0 text-slate-400 dark:text-slate-500" />
         <p className="min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400">
-          这里以对话孵化任务；任务流程与门禁进度 → 看「任务」页
+          {t('chat.banner')}
         </p>
         <button
           onClick={() => onNavigate('tasks')}
           className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-micro font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600"
         >
-          <ClipboardList size={10} /> 去任务页
+          <ClipboardList size={10} /> {t('chat.goTasks')}
         </button>
       </div>
       <div className="flex min-h-0 flex-1">
       {/* 左栏：会话列表（三态行 + 待审批角标） */}
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">会话</span>
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('chat.convsTitle')}</span>
           <button
             onClick={createConv}
             disabled={!backendRepo}
             className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap font-semibold text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
-            <Plus size={10} /> 新建会话
+            <Plus size={10} /> {t('chat.createConv')}
           </button>
         </div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
@@ -299,7 +301,7 @@ export function WorkbenchPage({
                   />
                 ) : (
                   <span className={`min-w-0 flex-1 truncate text-[12px] ${c.id === activeConv ? 'font-bold text-blue-700' : 'text-slate-600 dark:text-slate-300'}`}>
-                    {c.title ?? '未命名会话'}
+                    {c.title ?? t('chat.untitled')}
                   </span>
                 )}
                 {c.runtime.pendingConfirmations > 0 && (
@@ -314,7 +316,7 @@ export function WorkbenchPage({
                   <button
                     onClick={() => void renameConv(c.id)}
                     className="rounded bg-blue-600 p-0.5 text-white"
-                    title="保存名称"
+                    title={t('chat.saveName')}
                   >
                     <Check size={10} />
                   </button>
@@ -323,11 +325,11 @@ export function WorkbenchPage({
                     <button
                       onClick={() => void deleteConv(c.id)}
                       className="rounded bg-red-500 px-1 py-0.5 text-[9px] font-bold text-white"
-                      title="确认删除该会话（任务留痕不受影响）"
+                      title={t('chat.confirmDelConvRow')}
                     >
-                      确认
+                      {t('common.confirm')}
                     </button>
-                    <button onClick={() => setConfirmDelId(null)} className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600" title="取消">
+                    <button onClick={() => setConfirmDelId(null)} className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:text-slate-600" title={t('common.cancel')}>
                       <X size={10} />
                     </button>
                   </>
@@ -339,14 +341,14 @@ export function WorkbenchPage({
                         setRenameVal(c.title ?? '')
                       }}
                       className="rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-blue-500"
-                      title="重命名"
+                      title={t('chat.rename')}
                     >
                       <Pencil size={10} />
                     </button>
                     <button
                       onClick={() => setConfirmDelId(c.id)}
                       className="rounded p-0.5 text-slate-300 dark:text-slate-600 hover:text-red-500"
-                      title="删除会话"
+                      title={t('chat.deleteConvRowTip')}
                     >
                       <Trash2 size={10} />
                     </button>
@@ -355,7 +357,7 @@ export function WorkbenchPage({
               </span>
             </div>
           ))}
-          {convs.length === 0 && <p className="px-2 py-4 text-center text-[11px] text-slate-400 dark:text-slate-500">还没有会话</p>}
+          {convs.length === 0 && <p className="px-2 py-4 text-center text-[11px] text-slate-400 dark:text-slate-500">{t('chat.noConvsRow')}</p>}
         </div>
       </aside>
 
@@ -390,22 +392,22 @@ export function WorkbenchPage({
       {/* 右栏：影响面（diff 按模块聚合） */}
       <aside className="flex w-64 shrink-0 flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
         <div className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">影响面</span>
-          <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">{diffTaskId ? '来自该会话最近任务的变更' : '任务执行后此处显示模块影响'}</p>
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('chat.impactTitle')}</span>
+          <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">{diffTaskId ? t('chat.impactFrom') : t('chat.impactIdle')}</p>
         </div>
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3">
           {impact.length === 0 && (
             <p className="py-8 text-center text-[11px] leading-5 text-slate-400 dark:text-slate-500">
-              暂无变更数据
+              {t('chat.impactEmpty')}
               <br />
-              <span className="text-micro">从对话「转为任务」开始一次修复</span>
+              <span className="text-micro">{t('chat.impactEmptyHint')}</span>
             </p>
           )}
           {impact.map((im) => (
             <div key={im.name} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2.5">
               <div className="flex items-center justify-between">
                 <span className="truncate text-[12px] font-semibold text-slate-700 dark:text-slate-200">{im.name}</span>
-                <span className="tnum shrink-0 text-micro text-slate-400 dark:text-slate-500">{im.files} 文件</span>
+                <span className="tnum shrink-0 text-micro text-slate-400 dark:text-slate-500">{t('chat.filesCount', { n: im.files })}</span>
               </div>
               <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <span className="bg-emerald-500" style={{ width: `${(im.adds / maxImpact) * 100}%` }} />
@@ -418,7 +420,7 @@ export function WorkbenchPage({
           ))}
           {impact.length > 0 && diffTaskId && (
             <p className="flex items-center gap-1 pt-1 text-micro text-slate-300 dark:text-slate-600">
-              <GitBranch size={9} /> 任务 {diffTaskId.slice(-8)}
+              <GitBranch size={9} /> {t('chat.taskPrefix', { id: diffTaskId.slice(-8) })}
             </p>
           )}
         </div>

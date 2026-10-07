@@ -1,5 +1,6 @@
 // TaskWorkflowPage 拆分产物：任务/审批/产物文档类型与状态标签。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
+import { t } from '@/runtime/i18n'
 
 export interface TaskItem {
   id: string
@@ -39,12 +40,7 @@ export interface DevDoc {
   excerpt: string
 }
 
-export const STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  running: '执行中',
-  awaiting_approval: '等待审批',
-  done: '已完成',
-  failed: '失败',
-  rejected: '已驳回',
-  interrupted: '已中断',
+/** 任务状态人话标签（渲染期经模块级 t 自译；枚举值为后端契约）。 */
+export function statusWording(status: string): string {
+  return t(`task.status.${status}`) === `task.status.${status}` ? status : t(`task.status.${status}`)
 }

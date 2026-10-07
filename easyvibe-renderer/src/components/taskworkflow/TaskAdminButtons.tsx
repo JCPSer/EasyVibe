@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Ban, Hammer, RotateCcw, Trash2, X } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { deleteTask, killTask, remediateTask, retryTask } from '@/components/taskworkflow/taskAdmin'
 
 // 任务管理按钮组（2026-10-03 现状重审 P0 + 复审闭环）：按任务状态自动出现——
@@ -28,6 +29,7 @@ export function TaskAdminButtons({
   /** 删除成功的专门回调——删后选中态要清掉（onDone 无法区分删与停） */
   onDeleted?: () => void
 }) {
+  const { t } = useLang()
   const [confirming, setConfirming] = useState<ConfirmKind | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -40,16 +42,16 @@ export function TaskAdminButtons({
       else if (kind === 'remediate') await remediateTask(repo, taskId)
       else await deleteTask(repo, taskId)
       toast(
-        kind === 'kill' ? '已终止执行'
-          : kind === 'retry' ? '已重新入队'
-          : kind === 'remediate' ? '已带审查意见进入修改复审——完成后自动复审'
-          : '任务已删除',
+        kind === 'kill' ? t('task.killedToast')
+          : kind === 'retry' ? t('task.retriedToast')
+          : kind === 'remediate' ? t('task.remediatedToast')
+          : t('task.deletedToast'),
       )
       setConfirming(null)
       if (kind === 'delete') onDeleted?.()
       onDone?.()
     } catch (e) {
-      toast(e instanceof Error ? e.message : '操作失败', 'error')
+      toast(e instanceof Error ? e.message : t('task.opFail'), 'error')
     } finally {
       setBusy(false)
     }
@@ -71,9 +73,9 @@ export function TaskAdminButtons({
             confirming === 'kill' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-red-500 hover:bg-red-600'
           }`}
         >
-          {busy ? '…' : confirming === 'kill' ? '确认终止' : '确认删除'}
+          {busy ? '…' : confirming === 'kill' ? t('task.killConfirmBtn') : t('task.deleteConfirmBtn')}
         </button>
-        <button onClick={() => setConfirming(null)} className="rounded p-px text-slate-400 dark:text-slate-500 hover:text-slate-600" title="取消">
+        <button onClick={() => setConfirming(null)} className="rounded p-px text-slate-400 dark:text-slate-500 hover:text-slate-600" title={t('common.cancel')}>
           <X size={10} />
         </button>
       </span>
@@ -85,7 +87,7 @@ export function TaskAdminButtons({
       {stoppable && (
         <button
           onClick={() => setConfirming('kill')}
-          title="终止执行（agent 进程被停止，可重试）"
+          title={t('task.killTip')}
           className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-amber-50 dark:hover:bg-amber-950/40 hover:text-amber-600"
         >
           <Ban size={11} />
@@ -95,7 +97,7 @@ export function TaskAdminButtons({
         <button
           onClick={() => void run('remediate')}
           disabled={busy}
-          title="修改并复审：注入打回/审查意见，直达实施阶段重跑，完成后自动复审"
+          title={t('task.remediateAdminTip')}
           className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-violet-50 hover:text-violet-600 disabled:opacity-40"
         >
           <Hammer size={11} />
@@ -105,7 +107,7 @@ export function TaskAdminButtons({
         <button
           onClick={() => void run('retry')}
           disabled={busy}
-          title="就地重试（从失败处重新入队）"
+          title={t('task.retryTip')}
           className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 disabled:opacity-40"
         >
           <RotateCcw size={11} />
@@ -114,7 +116,7 @@ export function TaskAdminButtons({
       {deletable && (
         <button
           onClick={() => setConfirming('delete')}
-          title="删除该任务（running 请先终止）"
+          title={t('task.deleteTip')}
           className="rounded p-0.5 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
         >
           <Trash2 size={11} />

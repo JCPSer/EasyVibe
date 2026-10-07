@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { chatHistory, compactChat, resetChat, sendChat } from '@/api/chat'
 import { decideTask } from '@/api/task'
 import type { TaskDraft } from '@/shared/logic/taskContext'
@@ -181,7 +182,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
           setRejectNote('')
           loadConvs()
         })
-        .catch((e) => toast(`审批操作失败：${String(e).replace(/^Error:\s*/, '').slice(0, 60)}`, 'error'))
+        .catch((e) => toast(t('chat.decideFail', { err: String(e).replace(/^Error:\s*/, '').slice(0, 60) }), 'error'))
     },
     [backendRepo, loadConvs, setPendingApprovals],
   )
@@ -197,7 +198,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
       attachments.length > 0
         ? q +
           '\n\n' +
-          attachments.map((a) => `--- 附件：${a.name}（${(a.size / 1024).toFixed(1)}KB）---\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
+          attachments.map((a) => t('chat.attachHeader', { name: a.name, size: (a.size / 1024).toFixed(1) }) + `\n\`\`\`\n${a.content}\n\`\`\``).join('\n\n')
         : q
     setMessages((prev) => [
       ...prev,
@@ -232,7 +233,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         setClarify(d.data.clarify)
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: d.data.reply.trim() || '（未获得回答——请重试）', refs: d.data.refs },
+          { role: 'assistant', content: d.data.reply.trim() || t('chat.emptyReply'), refs: d.data.refs },
           // auto-compact 留痕（§10a："上下文已压缩：82%→34%"系统消息）
           ...(d.data.compaction ? [{ role: 'system' as const, content: d.data.compaction, refs: [] }] : []),
         ])
@@ -242,9 +243,9 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
       .catch((e) => {
         if (convIdRef.current !== sentConvId) return // 会话已切换：错误也不得追加进新会话
         if (ac.signal.aborted) {
-          setMessages((prev) => [...prev, { role: 'system', content: '已停止生成（后端调用已发出，token 已计费）', refs: [] }])
+          setMessages((prev) => [...prev, { role: 'system', content: t('chat.stopped'), refs: [] }])
         } else {
-          setMessages((prev) => [...prev, { role: 'assistant', content: `（对话服务不可用：${String(e).slice(0, 80)}）`, refs: [] }])
+          setMessages((prev) => [...prev, { role: 'assistant', content: t('chat.unavailable', { err: String(e).slice(0, 80) }), refs: [] }])
         }
       })
       .finally(() => {
@@ -270,7 +271,7 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         }
         setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight }), 50)
       })
-      .catch(() => toast('压缩失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.compressFail'), 'error'))
       .finally(() => setCompacting(false))
   }
 
@@ -286,14 +287,14 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
         setDecided({})
         loadConvs()
       })
-      .catch(() => toast('重置失败（需要本地后端在线）', 'error'))
+      .catch(() => toast(t('chat.resetFail'), 'error'))
   }
 
   // D2 拍板：导出并清空——留痕承诺不自动清，由用户显式"导出归档 → 清空"
   const exportAndClear = () => {
     exportChat()
     setTimeout(() => {
-      if (!window.confirm('已导出。清空当前会话？（清空后不可恢复，视图文件不受影响）')) return
+      if (!window.confirm(t('chat.confirmClear'))) return
       reset()
     }, 400)
   }
@@ -301,13 +302,13 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
   // 导出对话为 Markdown（§12d 兑现之一：对话含 mermaid 图，可直接评审/沉淀）
   const exportChat = () => {
     const md = [
-      `# EasyVibe 对话导出 · ${backendRepo ?? ''}`,
+      t('chat.exportTitle', { repo: backendRepo ?? '' }),
       `> ${new Date().toLocaleString()}`,
       '',
       ...messages.flatMap((m) => {
         if (m.role === 'system') return [`> ${m.content}`, '']
-        if (m.role === 'user') return [`## 问`, '', m.content, '']
-        return [`## 答`, '', m.content, '']
+        if (m.role === 'user') return [`## ${t('chat.exportAsk')}`, '', m.content, '']
+        return [`## ${t('chat.exportAnswer')}`, '', m.content, '']
       }),
     ].join('\n')
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
@@ -326,11 +327,11 @@ export function ChatPanel({ backendRepo, map, onLocateModule, onCreateTask, embe
     const refs = [...new Set(turns.flatMap((m) => m.refs))].slice(0, 5)
     const summary = turns
       .slice(-6)
-      .map((m) => `${m.role === 'user' ? '问' : '答'}：${m.content.slice(0, 120)}`)
+      .map((m) => `${t(m.role === 'user' ? 'chat.summaryAsk' : 'chat.summaryAnswer')}${m.content.slice(0, 120)}`)
       .join('\n')
     onCreateTask({
-      title: `对话：${lastUser.content.slice(0, 16)}`,
-      description: `${lastUser.content}\n\n—— 来自对话的已澄清需求，见上下文中的对话摘要。`,
+      title: t('chat.taskTitle', { text: lastUser.content.slice(0, 16) }),
+      description: t('chat.taskDesc', { text: lastUser.content }),
       modules: refs,
       acceptance: '',
       source: 'manual',

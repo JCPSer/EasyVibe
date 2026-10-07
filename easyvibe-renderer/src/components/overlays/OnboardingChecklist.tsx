@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { CheckCircle2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { CheckKey, OnboardingState } from '@/lib/onboarding'
 import { CHECK_KEYS, checkDoneCount } from '@/lib/onboarding'
-import { ONBOARDING_COPY } from '@/shared/logic/onboardingCopy'
+import { useLang } from '@/runtime/i18n'
+import { getOnboardingCopy } from '@/shared/logic/onboardingCopy'
 
 /** 事件驱动上手指引（调研定稿方案③：Linear 式 checklist）。
  *  完成态由 App 层的真实事件写入（markCheck），本组件纯展示 + 折叠/关闭。
@@ -17,9 +18,10 @@ export function OnboardingChecklist({
   onDismiss: () => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const { t } = useLang()
   const done = checkDoneCount(state)
   const total = CHECK_KEYS.length
-  const { title, items } = ONBOARDING_COPY.checklist
+  const { title, items } = getOnboardingCopy(t).checklist
 
   return (
     // 宽度收敛在右栏（w-64）以内：2026-10-04 实弹——w-72 溢出压住任务对话输入框的发送按钮
@@ -64,7 +66,7 @@ export function OnboardingChecklist({
                     onClick={() => onGo(k)}
                     className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-micro font-semibold text-slate-400 dark:text-slate-500 opacity-0 transition-opacity hover:border-blue-300 hover:text-blue-600 group-hover:opacity-100"
                   >
-                    带我去
+                    {t('onboarding.takeMe')}
                   </button>
                 )}
               </li>
@@ -73,8 +75,8 @@ export function OnboardingChecklist({
         </ul>
       )}
       <div className="flex justify-end border-t border-slate-50 px-2 py-1">
-        <button onClick={onDismiss} className="flex items-center gap-0.5 text-micro text-slate-300 dark:text-slate-600 hover:text-slate-500" title="关闭（可从顶栏 ? 重新打开）">
-          <X size={10} /> 收起不再提示
+        <button onClick={onDismiss} className="flex items-center gap-0.5 text-micro text-slate-300 dark:text-slate-600 hover:text-slate-500" title={t('onboarding.dismissTip')}>
+          <X size={10} /> {t('onboarding.dismissChecklist')}
         </button>
       </div>
     </div>

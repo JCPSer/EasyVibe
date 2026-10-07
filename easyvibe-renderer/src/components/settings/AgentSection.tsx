@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { agentDetect, agentStatus as fetchAgentStatus, agentTest } from '@/api/system'
 import { deleteSetting, putSetting } from '@/api/settings'
 import { field } from './common'
 import { Field } from './controls'
 
 export function AgentSection() {
+    const { t } = useLang()
     interface AgentPreset { id: string; label: string; defaultArgs: string[]; type: string; stability: string }
     interface AgentStatus {
       detected: { command: string; path: string; version: string | null }[]
@@ -63,8 +65,8 @@ export function AgentSection() {
           puts.push(val.trim() ? put(key, splitArgs(val)) : deleteSetting('global', key))
         }
         const rs = await Promise.all(puts)
-        if (rs.some((x) => !x.ok)) throw new Error('部分配置写入失败')
-        toast('已保存——对进行中的任务不生效，下一次执行起用新配置')
+        if (rs.some((x) => !x.ok)) throw new Error(t('settings.agent.writeFail'))
+        toast(t('settings.agent.agentSaved'))
         await loadAgent()
       } catch (e) {
         toast(String(e), 'error')
@@ -79,8 +81,8 @@ export function AgentSection() {
       try {
         const r = await agentTest()
         const d = await r.json().catch(() => null)
-        if (!r.ok) throw new Error(d?.error ?? '测试失败')
-        toast(d.data.ok ? `协议兼容，${d.data.latencyMs}ms` : `不兼容：${d.data.protocol}`, d.data.ok ? 'info' : 'error')
+        if (!r.ok) throw new Error(d?.error ?? t('settings.agent.testFail'))
+        toast(d.data.ok ? t('settings.agent.lastTestOk', { ms: d.data.latencyMs }) : t('settings.agent.lastTestFail', { protocol: d.data.protocol }), d.data.ok ? 'info' : 'error')
         await loadAgent()
       } catch (e) {
         toast(String(e), 'error')
@@ -94,9 +96,9 @@ export function AgentSection() {
       setAgentBusy('detect')
       try {
         const r = await agentDetect()
-        if (!r.ok) throw new Error('探测失败')
+        if (!r.ok) throw new Error(t('settings.agent.detectFail'))
         await loadAgent()
-        toast('探测完成')
+        toast(t('settings.agent.detectDone'))
       } catch (e) {
         toast(String(e), 'error')
       } finally {
@@ -110,13 +112,13 @@ export function AgentSection() {
   return (
     <div className="space-y-4">
       <p className="text-cap text-slate-400 dark:text-slate-500">
-        归纳 / 巡检 / 任务由本地 CLI agent 执行——配置在 spawn 时现读，保存后对下一次执行生效
+        {t('settings.agent.intro')}
       </p>
 
       {/* 状态卡：探测结果 + 生效配置 + 测试连接 */}
       <div className="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-cap font-semibold text-slate-500 dark:text-slate-400">探测结果</span>
+          <span className="text-cap font-semibold text-slate-500 dark:text-slate-400">{t('settings.agent.detectResult')}</span>
           {(agentStatus?.presets ?? []).map((p) => {
             const det = agentStatus?.detected.find((x) => x.command === p.id)
             return (
@@ -125,9 +127,9 @@ export function AgentSection() {
                 className={`rounded-full px-2 py-0.5 text-micro font-semibold ${
                   det ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600' : 'bg-slate-50 dark:bg-slate-950/70 text-slate-400 dark:text-slate-500'
                 }`}
-                title={det?.path ?? '未在 PATH 与常见安装位找到'}
+                title={det?.path ?? t('settings.agent.notFoundTip')}
               >
-                {det ? `● ${p.label} ${det.version ?? ''}`.trim() : `○ ${p.label} 未安装`}
+                {det ? `● ${t('settings.agent.versionInstalled', { label: p.label, version: det.version ?? '' })}`.trim() : `○ ${t('settings.agent.notInstalledLabel', { label: p.label })}`}
               </span>
             )
           })}
@@ -136,20 +138,25 @@ export function AgentSection() {
             disabled={agentBusy !== null}
             className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-micro font-semibold text-slate-400 dark:text-slate-500 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
           >
-            <RotateCcw size={10} className={agentBusy === 'detect' ? 'animate-spin' : ''} /> 重新探测
+            <RotateCcw size={10} className={agentBusy === 'detect' ? 'animate-spin' : ''} /> {t('settings.agent.detect')}
           </button>
         </div>
         <p className="text-micro leading-4 text-slate-400 dark:text-slate-500">
-          生效：<code className="mono">{agentStatus?.effective.command ?? '…'}</code>
-          {agentStatus && <span>（{({ settings: '来自设置', env: '来自环境变量', default: '默认' } as Record<string, string>)[agentStatus.effective.source] ?? agentStatus.effective.source}）</span>}
-          {agentStatus && !agentStatus.effective.found && <span className="font-semibold text-red-500"> · 未找到可执行文件</span>}
+          {t('settings.agent.effectivePrefix')}<code className="mono">{agentStatus?.effective.command ?? '…'}</code>
+          {agentStatus && (
+            <span>（{(() => {
+              const srcKey = ({ settings: 'settings.agent.srcSettings', env: 'settings.agent.srcEnv', default: 'settings.agent.srcDefault' } as Record<string, string>)[agentStatus.effective.source]
+              return srcKey ? t(srcKey) : agentStatus.effective.source
+            })()}）</span>
+          )}
+          {agentStatus && !agentStatus.effective.found && <span className="font-semibold text-red-500"> · {t('settings.agent.exeNotFound')}</span>}
         </p>
         {agentStatus?.lastTest && (
           <p className={`flex items-center gap-1 text-micro font-semibold ${agentStatus.lastTest.ok ? 'text-emerald-600' : 'text-red-500'}`}>
             <ShieldCheck size={10} />
             {agentStatus.lastTest.ok
-              ? `协议兼容 · ${agentStatus.lastTest.latencyMs}ms`
-              : `不兼容：${agentStatus.lastTest.protocol}`}
+              ? t('settings.agent.lastTestOk', { ms: agentStatus.lastTest.latencyMs })
+              : t('settings.agent.lastTestFail', { protocol: agentStatus.lastTest.protocol })}
           </p>
         )}
         <div className="flex items-center gap-2 pt-1">
@@ -157,16 +164,16 @@ export function AgentSection() {
             onClick={() => void testAgent()}
             disabled={agentBusy !== null}
             className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-micro font-bold text-white hover:bg-blue-700 disabled:opacity-40"
-            title="用当前已保存的配置发起一次最小真实调用（约 1-30 秒），验证协议兼容"
+            title={t('settings.agent.testTip')}
           >
             {agentBusy === 'test' ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} 测试连接
           </button>
-          <span className="text-micro text-slate-300 dark:text-slate-600">测试作用于已保存的配置（先保存再测）</span>
+          <span className="text-micro text-slate-300 dark:text-slate-600">{t('settings.agent.testHint')}</span>
         </div>
       </div>
 
       {/* 预设 */}
-      <Field label="预设" hint="选定后命令与参数自动填充，仍可微调；微调后预设记为自定义">
+      <Field label={t('settings.agent.preset')} hint={t('settings.agent.presetHint')}>
         <div className="flex flex-wrap gap-1.5">
           {(agentStatus?.presets ?? []).map((p) => (
             <button
@@ -180,8 +187,8 @@ export function AgentSection() {
             >
               {p.label}
               {p.stability === 'experimental' && (
-                <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1 text-[9px] font-bold text-amber-600" title="无流式，完成后输出全文；参数为初值，可用测试连接验证">
-                  实验
+                <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1 text-[9px] font-bold text-amber-600" title={t('settings.agent.experimentalTip')}>
+                  {t('settings.agent.experimental')}
                 </span>
               )}
             </button>
@@ -189,32 +196,32 @@ export function AgentSection() {
         </div>
       </Field>
 
-      <Field label="命令" hint="命令名或绝对路径；未找到时任务会失败并给出原因">
+      <Field label={t('settings.agent.cmd')} hint={t('settings.agent.cmdHint')}>
         <input
           className={`${field} mono`}
           value={agentEdit?.command ?? ''}
           onChange={(e) => setAgentEdit((p) => p && { ...p, command: e.target.value, preset: 'custom' })}
         />
       </Field>
-      <Field label="全局参数" hint="空白分隔">
+      <Field label={t('settings.agent.argsGlobal')} hint={t('settings.agent.argsGlobalHint')}>
         <input
           className={`${field} mono`}
           value={agentEdit?.argsGlobal ?? ''}
           onChange={(e) => setAgentEdit((p) => p && { ...p, argsGlobal: e.target.value, preset: 'custom' })}
         />
       </Field>
-      <Field label="任务槽参数（可选）" hint="留空 = 跟随全局；设置后任务执行整体使用本参数">
+      <Field label={t('settings.agent.argsTask')} hint={t('settings.agent.argsTaskHint')}>
         <input
           className={`${field} mono`}
-          placeholder="（留空 = 跟随全局）"
+          placeholder={t('settings.agent.argsPh')}
           value={agentEdit?.argsTask ?? ''}
           onChange={(e) => setAgentEdit((p) => p && { ...p, argsTask: e.target.value })}
         />
       </Field>
-      <Field label="审查槽参数（可选）" hint="留空 = 跟随全局；可给审查换便宜模型">
+      <Field label={t('settings.agent.argsReview')} hint={t('settings.agent.argsReviewHint')}>
         <input
           className={`${field} mono`}
-          placeholder="（留空 = 跟随全局）"
+          placeholder={t('settings.agent.argsPh')}
           value={agentEdit?.argsReview ?? ''}
           onChange={(e) => setAgentEdit((p) => p && { ...p, argsReview: e.target.value })}
         />
@@ -234,7 +241,7 @@ export function AgentSection() {
           </button>
         )}
         <span className="ml-auto text-micro text-slate-300 dark:text-slate-600">
-          协议：{agentStatus?.effective.type === 'claude' ? 'stream-json 流式' : 'plain 纯文本（完成后输出）'}
+          {t('settings.agent.protocolLabel')}{agentStatus?.effective.type === 'claude' ? t('settings.agent.protocolStream') : t('settings.agent.protocolPlain')}
         </span>
       </div>
     </div>

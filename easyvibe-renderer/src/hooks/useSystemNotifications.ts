@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { onQueueChanged, onSessionEvent } from '@/runtime/growthBus'
 import { sysNotify } from '@/runtime/notify'
+import { t } from '@/runtime/i18n'
 
 /**
  * 系统级通知：窗口失焦/后台时送达通知中心（toast 只有前台可见）。
@@ -11,7 +12,7 @@ export function useSystemNotifications(backendRepo: string | null) {
     () =>
       onSessionEvent((e) => {
         if (e.repo !== backendRepo || e.status !== 'failed') return
-        void sysNotify('EasyVibe · 会话失败', `会话 ${e.sessionId} 执行失败——回来看看原因`)
+        void sysNotify(t('hooks.notify.sessionFailedTitle'), t('hooks.notify.sessionFailedBody', { id: e.sessionId }))
       }),
     [backendRepo],
   )
@@ -19,7 +20,7 @@ export function useSystemNotifications(backendRepo: string | null) {
     () =>
       onQueueChanged((e) => {
         if (e.repo !== backendRepo || e.type !== 'drained' || !e.started) return
-        void sysNotify('EasyVibe · 排队任务已开始', e.job?.label ?? '')
+        void sysNotify(t('hooks.notify.queueStartedTitle'), e.job?.label ?? '')
       }),
     [backendRepo],
   )
