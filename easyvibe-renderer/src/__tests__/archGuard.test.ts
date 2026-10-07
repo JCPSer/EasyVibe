@@ -73,6 +73,7 @@ const SHARED_FILES = [
   'shared/logic/depsAnalysis.ts', 'shared/logic/diffStat.ts', 'shared/logic/growthMerge.ts',
   'shared/logic/inductionProgress.ts', 'shared/logic/layout.ts', 'shared/logic/onboardingCopy.ts',
   'shared/logic/taskContext.ts',
+  'shared/logic/__tests__/layout.test.ts',
   'shared/primitives/MarkdownMessage.tsx',
 ]
 const CHAT_FILES = [

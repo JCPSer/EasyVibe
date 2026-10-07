@@ -57,23 +57,35 @@ export function layoutMap(map: CodeMap, expanded?: Map<string, ExpandedMeta>): L
   let y = 0
   for (const layer of layers) {
     const mods = map.modules.filter((m) => m.layer === layer.id)
-    // 打包：展开的模块独占一行，普通模块按行填充（每行最多 5 列）
+    // 打包：展开的模块独占一行；普通模块分段均衡分行——
+    // 段内行数 = ceil(n/5)，各行尽量等长（前若干行多 1 个），避免出现 5+1 这种头重脚轻排布
+    const MAX_COLS = 5
     const rows: { items: { mod: Module; expanded: boolean }[] }[] = []
     let cur: { mod: Module; expanded: boolean }[] = []
-    let curCols = 0
+    const flush = () => {
+      if (!cur.length) return
+      const n = cur.length
+      const rowCount = Math.ceil(n / MAX_COLS)
+      const base = Math.floor(n / rowCount)
+      const extra = n % rowCount
+      let off = 0
+      for (let r = 0; r < rowCount; r++) {
+        const size = base + (r < extra ? 1 : 0)
+        rows.push({ items: cur.slice(off, off + size) })
+        off += size
+      }
+      cur = []
+    }
     for (const mod of mods) {
       const isExp = expanded?.has(mod.id) ?? false
       if (isExp) {
-        if (cur.length) { rows.push({ items: cur }); cur = [] }
+        flush()
         rows.push({ items: [{ mod, expanded: true }] })
-        curCols = 0
       } else {
-        if (curCols >= 5) { rows.push({ items: cur }); cur = []; curCols = 0 }
         cur.push({ mod, expanded: false })
-        curCols += 1
       }
     }
-    if (cur.length) rows.push({ items: cur })
+    flush()
 
     let bandH = BAND_PAD_TOP + BAND_PAD_BOTTOM
     let innerY = y + BAND_PAD_TOP
