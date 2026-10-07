@@ -41,7 +41,6 @@ glob 口径：与 `.easyvibe/map/easyvibe_map_cli.py::glob_match` 同源——`*
 import argparse
 import json
 import os
-import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,9 +48,26 @@ DEFAULT_MAP = os.path.join(REPO, ".easyvibe", "map", "map.json")
 EMIT_ORDER = os.path.join(REPO, ".easyvibe", "map", "emit_order.json")
 FIXTURE = os.path.join(REPO, "scripts", "tests", "fixtures", "map_post_split.json")
 
-RETIRED = "renderer-core"
-GRIDS = ("renderer-runtime", "renderer-api", "renderer-shared", "ui-kit")
-CAPS = {"renderer-runtime": 4, "renderer-api": 2, "renderer-shared": 4, "ui-kit": 5}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import map_policy  # noqa: E402
+import _arch_synthetic as A  # noqa: E402
+
+def load_renderer_cfg(root):
+    """从 policy 读 renderer 粒度配置（grids / caps / 退役 id）。缺字段 → fail-closed 字符串。"""
+    try:
+        g = map_policy.granularity(map_policy.load_policy(root), "renderer")
+        return {"grids": tuple(g["grids"]), "caps": dict(g["caps"]),
+                "retired": tuple(g.get("retired_ids", []))}, None
+    except (map_policy.PolicyMissing, KeyError, TypeError, ValueError) as e:
+        return None, "policy.granularity.renderer 缺字段（fail-closed）: %s" % e
+
+
+# c-arch-12 / 审查 P2：grids/caps/退役 id 的规范值只在 policy.granularity.renderer。
+# 此处**不留**硬编码回退值：policy 缺失 ⇒ GRIDS 空 / RETIRED None ⇒ G0 必红（fail-closed）。
+_CFG, _CFG_ERR = load_renderer_cfg(REPO)
+GRIDS = tuple(_CFG["grids"]) if _CFG else ()
+CAPS = dict(_CFG["caps"]) if _CFG else {}
+RETIRED = (_CFG["retired"][0] if _CFG and _CFG["retired"] else None)
 TOOLCHAIN = "map-toolchain"
 
 HOST_PROBE = "easyvibe-renderer/src/runtime/host.ts"
@@ -76,32 +92,9 @@ ANTI_ENGULF_PROBES = ("easyvibe-renderer/src/host-adapter/register.ts",)
 
 
 # ------------------------------------------------------------------ glob
-def glob_match(path, pattern):
-    """与 .easyvibe/map/easyvibe_map_cli.py::glob_match 同源语义（逐字复制，CI 无 live 依赖）。
-
-    `**` 跨分隔符；`*` 不跨；`?` 单字符非分隔符。path/pattern 均按 posix 分隔符处理。
-    """
-    path = str(path).replace("\\", "/")
-    pattern = str(pattern).replace("\\", "/")
-    rx = ""
-    i = 0
-    while i < len(pattern):
-        c = pattern[i]
-        if c == "*":
-            if pattern[i:i + 2] == "**":
-                rx += ".*"
-                i += 2
-                if i < len(pattern) and pattern[i] == "/":
-                    i += 1
-                continue
-            else:
-                rx += "[^/]*"
-        elif c == "?":
-            rx += "[^/]"
-        else:
-            rx += re.escape(c)
-        i += 1
-    return re.match("^" + rx + "$", path) is not None
+# c-arch-12 / 审查 P2：glob 语义只有一份实现（scripts/map_policy.py::glob_match）。
+# 本模块此前持有一份逐字副本，现改为直接别名，避免「去重事实副本」的任务反而增副本。
+glob_match = map_policy.glob_match
 
 
 # ------------------------------------------------------------------ helpers
@@ -118,6 +111,8 @@ def _split_ids(map_obj):
 
 
 def _is_post_split(map_obj):
+    if not GRIDS or RETIRED is None:
+        return False  # policy 缺失：不认任何图为「拆分后」，由 G0 报红（fail-closed）
     ids = _split_ids(map_obj)
     return RETIRED not in ids and set(GRIDS) <= ids
 
@@ -144,6 +139,8 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
     modules = [m for m in _modules(map_obj) if isinstance(m, dict)]
     by_id = {m.get("id"): [str(g) for g in (m.get("files") or [])] for m in modules}
     checks = {}
+    if _CFG_ERR:
+        problems.append("G0 %s" % _CFG_ERR)
 
     # ---- G0 退役模块不得回归
     if RETIRED in by_id:
@@ -248,6 +245,37 @@ def evaluate(map_obj, emit_status, emit_obj, root, map_label=""):
 
 
 # ------------------------------------------------------------------ --check
+def policy_probe_problems(root):
+    """R8②「探针归属 ⊆ policy」：policy 网格必须把每个探针归到守卫期望的格。
+
+    四格探针须恰被其期望格命中；工具链探针须归 map-toolchain；反吞探针不得被任何四格命中。
+    policy 丢格 / 改 glob → 直接红。
+    """
+    problems = []
+    try:
+        mm = map_policy.modules_map(map_policy.load_policy(root))
+    except map_policy.PolicyMissing as e:
+        return ["G5 policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    by_id = {mid: v["files"] for mid, v in mm.items()}
+
+    def hits(probe, grids):
+        return sorted(g for g in grids for gl in by_id.get(g, []) if glob_match(probe, gl))
+
+    for probe, expect in PROBES:
+        h = hits(probe, GRIDS)
+        if h != [expect]:
+            problems.append("G5 policy 中探针 %s 期望归 [%s]，实际 %s" % (probe, expect, h))
+    for probe in TOOLCHAIN_PROBES:
+        if hits(probe, GRIDS):
+            problems.append("G5 policy 中工具链探针 %s 被四格命中: %s" % (probe, hits(probe, GRIDS)))
+        if TOOLCHAIN not in hits(probe, (TOOLCHAIN,)):
+            problems.append("G5 policy 中工具链探针 %s 未被 %s 命中" % (probe, TOOLCHAIN))
+    for probe in ANTI_ENGULF_PROBES:
+        if hits(probe, GRIDS):
+            problems.append("G5 policy 中反吞探针 %s 被四格命中: %s" % (probe, hits(probe, GRIDS)))
+    return problems
+
+
 def cmd_check(map_path):
     try:
         map_obj = load_json(map_path)
@@ -257,6 +285,8 @@ def cmd_check(map_path):
         return 1
     emit_status, emit_obj = load_emit_order(EMIT_ORDER)
     problems, skips, checks = evaluate(map_obj, emit_status, emit_obj, REPO, map_path)
+    # R8②「探针归属 ⊆ policy」
+    problems = policy_probe_problems(REPO) + problems
     ids = sorted(i for i in _split_ids(map_obj) if i)
     report = {
         "ok": not problems,
@@ -272,18 +302,8 @@ def cmd_check(map_path):
 
 # ------------------------------------------------------------------ --selfcheck
 def _green_map():
-    """合成「拆分后」绿图：四格 + map-toolchain + console-ui（含 lib/**、hooks/**）。"""
-    return {"modules": [
-        {"id": "map-toolchain", "files": ["run/**", "scripts/**", "easyvibe-renderer/scripts/**"]},
-        {"id": "renderer-runtime", "files": ["easyvibe-renderer/src/runtime/**"]},
-        {"id": "renderer-api", "files": ["easyvibe-renderer/src/api/**"]},
-        {"id": "renderer-shared", "files": ["easyvibe-renderer/src/shared/**", "easyvibe-renderer/src/types/**"]},
-        {"id": "ui-kit", "files": ["easyvibe-renderer/src/components/ui/**",
-                                   "easyvibe-renderer/src/lib/utils.ts",
-                                   "easyvibe-renderer/src/hooks/use-mobile.ts"]},
-        {"id": "console-ui", "files": ["easyvibe-renderer/src/App.tsx", "easyvibe-renderer/src/pages/**",
-                                       "easyvibe-renderer/src/lib/**", "easyvibe-renderer/src/hooks/**"]},
-    ]}
+    """合成「拆分后」四格绿图（手写构件取自 scripts/_arch_synthetic.py，glob 单副本）。"""
+    return A.renderer_green_map()
 
 
 def cmd_selfcheck():

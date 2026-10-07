@@ -2,13 +2,13 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-07T16:33:15+08:00",
+    "generated_at": "2026-10-07T16:53:10+08:00",
     "stats": {
       "files_total": 400,
       "files_covered": 400,
       "coverage_ratio": 1.0,
-      "edges_derived": 62,
-      "edges_inferred": 0,
+      "edges_derived": 54,
+      "edges_inferred": 8,
       "retried_modules": 0
     }
   },
@@ -90,10 +90,6 @@
         "concerns": [
           {
             "id": "c-map-toolchain-1",
-            "severity": "high"
-          },
-          {
-            "id": "c-map-toolchain-2",
             "severity": "high"
           }
         ]
@@ -436,6 +432,10 @@
         "concerns": [
           {
             "id": "c-renderer-runtime-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-renderer-runtime-4",
             "severity": "high"
           }
         ]
@@ -945,7 +945,7 @@
       "from": "renderer-runtime",
       "to": "server-api",
       "type": "api",
-      "strength": "strong"
+      "strength": "normal"
     },
     {
       "id": "e35",
@@ -1157,11 +1157,6 @@
     "complexity": "high",
     "churn": "high",
     "decay_flags": [],
-    "concerns": [
-      {
-        "id": "c-arch-9",
-        "severity": "high"
-      }
-    ]
+    "concerns": []
   }
 }

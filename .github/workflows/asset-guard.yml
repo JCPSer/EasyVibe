@@ -42,15 +42,32 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，22 模块 / 62 边，c-arch-10 服务边界收敛后：
-      # 新增装配格 assembly 及其 7 条「装配必需」出边；DV=0、跨层 SCC=0）；
-      # 旧快照 map_post_migration.json（14 模块 / 31 边，含受控 DV=1）仅由 --selfcheck 的 H2 负例自证使用；
-      # 绿例（H1）改用与 EXPECT_EDGES 同代的 map_post_split.json（DV=0，DV_MAX 归零后的合法全绿样本）。
+      # c-arch-12：期望边数不再写死在这里 —— 守卫从受版本控制的 scripts/map_edge_policy.json
+      # 同源读取（live 入口读 policy.edges.expect_count）；fixture↔policy 的「同代」由下方
+      # verify_arch_facts step 以集合级 + 边投影 sha256 红绿裁定。此处的 --map fixture 走
+      # A–F/H 结构判据（fixture 是历史快照，默认不绑边数）。
+      # 旧快照 map_post_migration.json（含受控 DV=1）仅由 --selfcheck 的 H2 负例自证使用。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 62
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
+
+      # c-arch-12 / R9：架构事实「同代」红绿判据（本命题核心，CI 版本）。
+      # policy（唯一受版本控制事实源）↔ 受版本控制 fixture：模块 id 集合 / 逐格 files 集合 /
+      # 逐格 layer / layers id+order / 边数 / 边投影 sha256 / 退役边 id / 退役 concern 全等；
+      # 改 policy 不重生成 fixture ⇒ 必红。漂移注入 inj1–inj5 由 --selfcheck 自证。
+      - name: 架构事实同代判据（policy ↔ fixture，集合级）
+        run: python3 scripts/verify_arch_facts.py --check --fixture scripts/tests/fixtures/map_post_split.json
+
+      - name: 架构事实同代判据自检（漂移注入必红）
+        run: python3 scripts/verify_arch_facts.py --selfcheck
+
+      # 注意（审查 P0）：`scripts/gen_map_fixture.py --check` 的「重生成 == 已提交」字节判据
+      # 依赖 live map（.easyvibe/map/map.json，被 gitignore），干净检出上不存在 ⇒ 不接入 CI。
+      # CI 的「同代」红绿由上方 verify_arch_facts（policy ↔ 已提交 fixture，集合级 + 边投影
+      # sha256，无 live 依赖）承担：改 policy 不重生成 fixture ⇒ 必红，已足够。
+      # gen_map_fixture 仅作本地/归纳期工具：重生成 fixture 后，用同一条 verify_arch_facts 复核。
 
       # c-arch-1 边界/领域分离验收：同样不依赖被 gitignore 的 live map
       - name: 边界/领域分离验收（对受版本控制 fixture + 源码文件集）

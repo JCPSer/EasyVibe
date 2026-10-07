@@ -2,9 +2,10 @@
 """地图无环验收（R6）：跨层环 / 构建期边 / 不变量，一键可判、可复跑、可趋势。
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
-                         CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
-                         与 EXPECT_EDGES 同代：c-arch-10 服务边界收敛后的 22 模块 / 62 边快照；
-                         新增装配格 assembly 及其 7 条「装配必需」出边）。
+                         CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制、
+                         由 `scripts/gen_map_fixture.py` 从同一 policy 清单派生；同代关系由
+                         `scripts/verify_arch_facts.py` 红绿裁定——模块数 / 边数以
+                         `policy.modules` / `policy.edges.expect_count` 为唯一真值，本文件不复述）。
                          fixture 是**结构投影**：只保留本文件与 verify_arch_split 断言的字段
                          （模块 id/name/layer/files/dependencies/health 与 concern 的 id+severity、
                          边的 id/from/to/type/strength/DV），prose（review_note / concern 正文 /
@@ -15,14 +16,17 @@
 
 断言：
   A. 构建期产物托管/内嵌关系不得入 edges（读 scripts/map_edge_policy.json）
-  B. 已退役边 id 不得出现（读同目录 emit_order.json，若存在）
-  C. desktop-shell.dependencies == ["server-api","map-toolchain"]
+  B. 已退役边 id 不得出现（读 policy.edges.retired_ids —— 真值入受控面，不再读 gitignore 内 emit_order.json）
+  C. desktop-shell.dependencies == policy.gates.expect_shell_deps
   D. INV-1：所有模块 dependencies == 其出边目标集
   E. SCC(>1) == 0（Tarjan，同前端口径）
-  F. direction_violation 计数 == 0（c-arch-5 闭环后棘轮归零，任何新增逆边即红）
-  G. 边数 == 期望（live 图默认 54；`--map <fixture>` 时**默认不绑定**——fixture 是历史
-     快照，需断言时显式传 `--expect-edges <n>`）
-  H. health.concerns 不含 c-arch-2（环已闭环）
+  F. direction_violation 计数 <= policy.gates.dv_max（棘轮，只降不升）
+  G. 边数 == 期望（live 图默认读 policy.edges.expect_count；`--map <fixture>` 时**默认不绑定**
+     ——fixture 是历史快照，需断言时显式传 `--expect-edges <n>`）
+  H. 顶层与该模块 health.concerns 均不含 policy.gates.retired_concerns（已闭环 concern 不得复现）
+
+事实源：本文件的期望值**全部**来自 scripts/map_edge_policy.json（受版本控制）；
+本文件不含任何边数/退役边/DV/壳依赖/concern 的硬编码副本。policy 缺字段即 fail-closed（红）。
 
 本文件不得出现任何受管契约名 / env 名（由 scripts/verify_assets.py --forbid-literals 自守卫）。
 """
@@ -34,16 +38,27 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 62
-DV_MAX = 0
-EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
-RETIRED_CONCERN = "c-arch-2"
 FIXTURE_DIR = os.path.join("scripts", "tests", "fixtures")
 
 
-def check_map(m, root, map_path, expect_edges=EXPECT_EDGES):
+def _policy_facts(root):
+    """从 policy 一次性取出本守卫所需的全部期望值（fail-closed）。"""
+    policy = map_policy.load_policy(root)
+    return {
+        "dv_max": map_policy.dv_max(policy),
+        "shell_deps": map_policy.expect_shell_deps(policy),
+        "retired_concerns": map_policy.retired_concerns(policy),
+        "retired_edges": map_policy.retired_edge_ids(policy),
+    }
+
+
+def check_map(m, root, map_path, expect_edges=None):
     problems = []
     policy = map_policy.load_policy(root)
+    try:
+        facts = _policy_facts(root)
+    except map_policy.PolicyMissing as e:
+        return ["P policy 缺少字段（fail-closed）: %s" % e.dotted_key]
     modules = m.get("modules", [])
     edges = m.get("edges", [])
     mods = {x["id"]: x for x in modules}
@@ -55,20 +70,16 @@ def check_map(m, root, map_path, expect_edges=EXPECT_EDGES):
     # A 构建期关系不得成边
     for eid, frm, to in map_policy.policy_violations(edges, policy):
         problems.append("A 构建期产物托管关系入了 edges: %s %s→%s" % (eid, frm, to))
-    # B 退役边 id 不得出现
-    if map_path:
-        mo = os.path.join(os.path.dirname(os.path.abspath(map_path)), "emit_order.json")
-        if os.path.isfile(mo):
-            retired = json.load(open(mo, encoding="utf-8")).get("retired_edge_ids", [])
-            present = {e.get("id") for e in edges}
-            for rid in retired:
-                if rid in present:
-                    problems.append("B 退役边 id 仍在图内: %s" % rid)
+    # B 退役边 id 不得出现（policy 为唯一真值）
+    present = {e.get("id") for e in edges}
+    for rid in sorted(facts["retired_edges"]):
+        if rid in present:
+            problems.append("B 退役边 id 仍在图内: %s" % rid)
     # C 壳依赖口径
     if "desktop-shell" in mods:
         shell_deps = mods["desktop-shell"].get("dependencies", [])
-        if shell_deps != EXPECT_SHELL_DEPS:
-            problems.append("C desktop-shell.dependencies=%s != %s" % (shell_deps, EXPECT_SHELL_DEPS))
+        if shell_deps != facts["shell_deps"]:
+            problems.append("C desktop-shell.dependencies=%s != %s" % (shell_deps, facts["shell_deps"]))
     # D INV-1
     for mid in ids:
         want = derived.get(mid, [])
@@ -80,15 +91,20 @@ def check_map(m, root, map_path, expect_edges=EXPECT_EDGES):
         problems.append("E SCC(>1): %s" % g)
     # F DV 棘轮
     dv = sum(1 for e in edges if e.get("direction_violation"))
-    if dv > DV_MAX:
-        problems.append("F direction_violation %d > %d" % (dv, DV_MAX))
+    if dv > facts["dv_max"]:
+        problems.append("F direction_violation %d > %d" % (dv, facts["dv_max"]))
     # G 边数
     if expect_edges is not None and len(edges) != expect_edges:
         problems.append("G edges=%d != %d" % (len(edges), expect_edges))
-    # H c-arch-2 闭环
+    # H 已闭环 concern 不得复现（顶层 + 逐模块）
+    retired_concerns = facts["retired_concerns"]
     for c in m.get("health", {}).get("concerns", []):
-        if c.get("id") == RETIRED_CONCERN:
-            problems.append("H 未闭环 concern: %s" % RETIRED_CONCERN)
+        if c.get("id") in retired_concerns:
+            problems.append("H 未闭环 concern: %s" % c.get("id"))
+    for x in modules:
+        for c in (x.get("health") or {}).get("concerns", []):
+            if c.get("id") in retired_concerns:
+                problems.append("H 未闭环 concern: %s@%s" % (c.get("id"), x.get("id")))
     return problems
 
 
@@ -103,7 +119,7 @@ def summarize(m, problems):
     }
 
 
-def run_check(root, path, expect_edges=EXPECT_EDGES, quiet=False):
+def run_check(root, path, expect_edges=None, quiet=False):
     m = json.load(open(path, encoding="utf-8"))
     problems = check_map(m, root, path, expect_edges)
     summary = summarize(m, problems)
@@ -118,12 +134,12 @@ def selfcheck(root):
     # H2 负例载体：c-arch-2 期的「删后态」快照（仍含受控 DV=1 的环结构），用来复现注入退役边
     # 即红（策略 A + 跨层 SCC E）——它的 DV 不参与 H1 的绿例判定。
     post = json.load(open(os.path.join(root, FIXTURE_DIR, "map_post_migration.json"), encoding="utf-8"))
-    # H1 绿例载体：**当前代**删后态快照（c-arch-5 后 DV=0）。DV_MAX 归零后，旧 c-arch-2 快照
-    # 自身携带 DV=1，已不再是合法的「全绿」样本，故绿例改用与 EXPECT_EDGES 同代的 map_post_split。
+    # H1 绿例载体：**当前代**删后态快照（c-arch-5 后 DV=0）。DV 棘轮归零后，旧 c-arch-2 快照
+    # 自身携带 DV=1，已不再是合法的「全绿」样本，故绿例改用与 policy 同代的 map_post_split。
     post_cur_path = os.path.join(root, FIXTURE_DIR, "map_post_split.json")
     post_cur = json.load(open(post_cur_path, encoding="utf-8"))
 
-    # fixture 自证不绑定 live 边数（EXPECT_EDGES 随地图生长而变，fixture 是历史快照）
+    # fixture 自证不绑定 live 边数（policy.edges.expect_count 随地图生长而变，fixture 是历史快照）
     s0 = summarize(pre, check_map(pre, root, None, None))
     results.append(("H0 删前态 fixture → 必红", not s0["ok"], "; ".join(s0["problems"][:2])))
 
@@ -164,7 +180,7 @@ def main():
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--map", default=None)
     ap.add_argument("--expect-edges", type=int, default=None,
-                    help="显式期望边数（对 fixture 亦生效）；缺省时仅 live map 绑定 EXPECT_EDGES，"
+                    help="显式期望边数（对 fixture 亦生效）；缺省时 live map 绑定 policy.edges.expect_count，"
                          "fixture 是历史快照故不绑定（与 selfcheck 同口径）")
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     args = ap.parse_args()
@@ -179,7 +195,17 @@ def main():
         return 1
     # 边数（G）是 live 图的棘轮：fixture 只做 A–F/H 结构判据，除非调用方显式传 --expect-edges。
     # 否则 live 图生长一次就要改一个与该 fixture 无关的常量，CI 必假红（见审查 P0）。
-    expect_edges = args.expect_edges if args.expect_edges is not None else (EXPECT_EDGES if live else None)
+    if args.expect_edges is not None:
+        expect_edges = args.expect_edges
+    elif live:
+        try:
+            expect_edges = map_policy.expect_edges(map_policy.load_policy(root))
+        except map_policy.PolicyMissing as e:
+            print(json.dumps({"ok": False, "problems": ["policy 缺字段: %s" % e.dotted_key]},
+                             ensure_ascii=False))
+            return 1
+    else:
+        expect_edges = None
     summary = run_check(root, path, expect_edges)
     return 0 if summary["ok"] else 1
 

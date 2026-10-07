@@ -40,13 +40,34 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MAP = os.path.join(REPO, ".easyvibe", "map", "map.json")
 EMIT_ORDER = os.path.join(REPO, ".easyvibe", "map", "emit_order.json")
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import map_policy  # noqa: E402
+import _arch_synthetic as A  # noqa: E402
+
 RENDERER_SRC = "easyvibe-renderer/src"
-ADAPTER_PREFIX = "easyvibe-renderer/src/host-adapter/"
+ADAPTER_PREFIX = A.HOST_ADAPTER_PREFIX
 REGISTER_FILE = "easyvibe-renderer/src/host-adapter/register.ts"
 BOOT_FILE = "easyvibe-renderer/src/host-adapter/boot.tsx"
 PORT_FILE = "easyvibe-renderer/src/runtime/host.ts"
-INDEX_HTML = "easyvibe-renderer/index.html"
+INDEX_HTML = A.INDEX_HTML
 HOST_SPEC_RE = re.compile(r"^@tauri-apps/")
+
+
+def policy_probe_problems(root):
+    """R8②「探针归属 ⊆ policy」：policy 网格里 index.html 必须归 host-adapter、不被 console-ui 命中。"""
+    problems = []
+    try:
+        mm = map_policy.modules_map(map_policy.load_policy(root))
+        g = map_policy.granularity(map_policy.load_policy(root), "host")
+    except map_policy.PolicyMissing as e:
+        return ["B4 policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    owners = sorted(mid for mid, v in mm.items()
+                    if any(map_policy.glob_match(INDEX_HTML, gl) for gl in v["files"]))
+    want = sorted({v for v in (g.get("probe_owner") or {}).values()})
+    if want != ["host-adapter"] or owners != ["host-adapter"]:
+        problems.append("B4 policy 中 %s 期望归 ['host-adapter']，实际 %s（probe_owner=%s）"
+                        % (INDEX_HTML, owners, g.get("probe_owner")))
+    return problems
 
 # 静态 `from '…'` / 动态 `import('…')` / 副作用裸 `import '…'` 三形态全收
 SPEC_RE = re.compile(r"(?:from\s+|import\s*\(\s*|import\s+)(['\"])([^'\"]+)\1")
@@ -244,7 +265,9 @@ def run_check(root, map_path):
         except (OSError, ValueError):
             emit_obj = None
     p4 = check_b4(map_obj, emit_obj)
-    problems = p1 + p2 + p3 + p4
+    # R8②「探针归属 ⊆ policy」：index.html 在 policy 网格中必须归 host-adapter
+    p5 = policy_probe_problems(root)
+    problems = p1 + p2 + p3 + p4 + p5
     report = {
         "ok": not problems,
         "map": os.path.relpath(map_path, root) if os.path.isabs(map_path) else map_path,

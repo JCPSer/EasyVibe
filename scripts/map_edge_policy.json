@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "rule": "build-time artifact hosting/embedding MUST NOT be a dependency edge",
   "must_drop": [
     {
@@ -15,7 +15,353 @@
     }
   ],
   "observe": [
-    {"from": "server-api", "to": "map-toolchain", "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"},
-    {"from": "desktop-shell", "to": "map-toolchain", "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"}
-  ]
+    {
+      "from": "server-api",
+      "to": "map-toolchain",
+      "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"
+    },
+    {
+      "from": "desktop-shell",
+      "to": "map-toolchain",
+      "reason": "build.rs reads scripts/assets.json（构建期配置清单，未闭合环）"
+    }
+  ],
+  "note": "架构事实的单一受版本控制落点（c-arch-12 / c-map-toolchain-2）。layers/modules 为规范（normative）网格：live map、emit_order.json、emit_order_modules.json、parts/*.files 与 fixture 均为其派生物；edges/gates/granularity 为守卫/CI/归纳期同源读取的棘轮与白名单。字段只写短名与 glob，禁点名受管资产（verify_assets.py --forbid-literals 自守）。",
+  "layers": [
+    {
+      "id": "app-entry",
+      "name": "应用装配层",
+      "order": 0,
+      "description": "桌面壳进程装配：托管后端 sidecar 与静态界面，管理窗口、单实例与自更新生命周期"
+    },
+    {
+      "id": "presentation",
+      "name": "交互呈现层",
+      "order": 1,
+      "description": "React 地图界面：画布可视化、对话与任务工作台、装配壳与设置分区"
+    },
+    {
+      "id": "presentation-support",
+      "name": "呈现支撑层",
+      "order": 2,
+      "description": "渲染进程地基：宿主能力端口、WS/REST 传输层、跨域纯逻辑契约与设计基元"
+    },
+    {
+      "id": "application",
+      "name": "应用服务层",
+      "order": 3,
+      "description": "axum REST/WS 边界、应用服务编排、启动装配、任务阶段状态机与外提领域模块（git/watcher 管线）"
+    },
+    {
+      "id": "application-support",
+      "name": "应用支撑层",
+      "order": 4,
+      "description": "application 层共享的事件出口与会话队列状态机，结构性切断服务层与任务引擎的环"
+    },
+    {
+      "id": "domain",
+      "name": "领域能力层",
+      "order": 5,
+      "description": "地图归纳/保鲜/增量合成与 agent 会话运行时两大领域能力"
+    },
+    {
+      "id": "data",
+      "name": "数据持久层",
+      "order": 6,
+      "description": "SQLite 迁移与按聚合域拆分的仓储，为地图/任务/会话/审批/设置提供状态持久化"
+    },
+    {
+      "id": "foundation",
+      "name": "基础契约层",
+      "order": 7,
+      "description": "零内部依赖的基础件：错误与密钥原语、事件名常量、REST/WS 契约类型"
+    },
+    {
+      "id": "tooling",
+      "name": "工具链层",
+      "order": 8,
+      "description": "地图归纳 CLI 参考实现与受管资产生成/校验脚本，只服务开发与打包，不进产品运行时"
+    }
+  ],
+  "modules": [
+    {
+      "id": "map-toolchain",
+      "name": "地图工具链",
+      "layer": "tooling",
+      "emit_order": 0,
+      "files": [
+        "run/**",
+        "scripts/**",
+        "easyvibe-renderer/scripts/**"
+      ]
+    },
+    {
+      "id": "contract-foundation",
+      "name": "基础契约",
+      "layer": "foundation",
+      "emit_order": 1,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-common/**",
+        "easyvibe-backend/crates/easyvibe-api-types/**"
+      ]
+    },
+    {
+      "id": "persistence",
+      "name": "数据持久层",
+      "layer": "data",
+      "emit_order": 2,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-db/**"
+      ]
+    },
+    {
+      "id": "map-domain",
+      "name": "地图领域",
+      "layer": "domain",
+      "emit_order": 3,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-map/**"
+      ]
+    },
+    {
+      "id": "agent-runtime",
+      "name": "Agent 运行时",
+      "layer": "domain",
+      "emit_order": 4,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-ai-agent/**",
+        "easyvibe-backend/crates/easyvibe-session/**"
+      ]
+    },
+    {
+      "id": "event-bus",
+      "name": "事件总线与会话队列",
+      "layer": "application-support",
+      "emit_order": 5,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-event-bus/**"
+      ]
+    },
+    {
+      "id": "task-engine",
+      "name": "任务执行引擎",
+      "layer": "application",
+      "emit_order": 6,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec.rs",
+        "easyvibe-backend/crates/easyvibe-app/src/task_exec/**"
+      ]
+    },
+    {
+      "id": "assembly",
+      "name": "启动装配与静态托管",
+      "layer": "application",
+      "emit_order": 7,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-app/src/assembly/**"
+      ]
+    },
+    {
+      "id": "server-api",
+      "name": "服务边界与编排",
+      "layer": "application",
+      "emit_order": 8,
+      "files": [
+        "easyvibe-backend/Cargo.toml",
+        "easyvibe-backend/crates/easyvibe-app/**"
+      ]
+    },
+    {
+      "id": "easyvibe-git",
+      "name": "Git 工作树领域",
+      "layer": "application",
+      "emit_order": 9,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-git/**"
+      ]
+    },
+    {
+      "id": "easyvibe-pipeline",
+      "name": "仓库 watcher 管线",
+      "layer": "application",
+      "emit_order": 10,
+      "files": [
+        "easyvibe-backend/crates/easyvibe-pipeline/**"
+      ]
+    },
+    {
+      "id": "renderer-shared",
+      "name": "渲染共享契约",
+      "layer": "presentation-support",
+      "emit_order": 11,
+      "files": [
+        "easyvibe-renderer/src/shared/**",
+        "easyvibe-renderer/src/types/**"
+      ]
+    },
+    {
+      "id": "renderer-runtime",
+      "name": "渲染运行时",
+      "layer": "presentation-support",
+      "emit_order": 12,
+      "files": [
+        "easyvibe-renderer/src/runtime/**"
+      ]
+    },
+    {
+      "id": "renderer-api",
+      "name": "渲染接口层",
+      "layer": "presentation-support",
+      "emit_order": 13,
+      "files": [
+        "easyvibe-renderer/src/api/**"
+      ]
+    },
+    {
+      "id": "ui-kit",
+      "name": "设计基元库",
+      "layer": "presentation",
+      "emit_order": 14,
+      "files": [
+        "easyvibe-renderer/src/components/ui/**",
+        "easyvibe-renderer/src/lib/utils.ts",
+        "easyvibe-renderer/src/hooks/use-mobile.ts"
+      ]
+    },
+    {
+      "id": "host-adapter",
+      "name": "宿主能力适配与引导",
+      "layer": "app-entry",
+      "emit_order": 15,
+      "files": [
+        "easyvibe-renderer/src/host-adapter/**",
+        "easyvibe-renderer/index.html"
+      ]
+    },
+    {
+      "id": "console-ui",
+      "name": "应用壳与页面装配",
+      "layer": "presentation",
+      "emit_order": 16,
+      "files": [
+        "easyvibe-renderer/src/App.tsx",
+        "easyvibe-renderer/src/main.tsx",
+        "easyvibe-renderer/src/pages/**",
+        "easyvibe-renderer/src/hooks/**",
+        "easyvibe-renderer/src/lib/**",
+        "easyvibe-renderer/src/__tests__/**",
+        "easyvibe-renderer/vite.config.ts",
+        "easyvibe-renderer/vitest.config.ts",
+        "easyvibe-renderer/eslint.config.js",
+        "easyvibe-renderer/tailwind.config.js",
+        "easyvibe-renderer/postcss.config.js",
+        "easyvibe-renderer/src/components/shell/**",
+        "easyvibe-renderer/src/components/gate/**",
+        "easyvibe-renderer/src/components/overlays/**",
+        "easyvibe-renderer/src/components/git/**",
+        "easyvibe-renderer/src/components/__tests__/**"
+      ]
+    },
+    {
+      "id": "settings-ui",
+      "name": "设置面板与分区",
+      "layer": "presentation",
+      "emit_order": 17,
+      "files": [
+        "easyvibe-renderer/src/components/settings/**"
+      ]
+    },
+    {
+      "id": "chat-ui",
+      "name": "对话与工作台",
+      "layer": "presentation",
+      "emit_order": 18,
+      "files": [
+        "easyvibe-renderer/src/components/chat/**"
+      ]
+    },
+    {
+      "id": "task-ui",
+      "name": "任务工作流 UI",
+      "layer": "presentation",
+      "emit_order": 19,
+      "files": [
+        "easyvibe-renderer/src/components/taskworkflow/**"
+      ]
+    },
+    {
+      "id": "map-canvas",
+      "name": "地图画布",
+      "layer": "presentation",
+      "emit_order": 20,
+      "files": [
+        "easyvibe-renderer/src/components/canvas/**"
+      ]
+    },
+    {
+      "id": "desktop-shell",
+      "name": "桌面壳",
+      "layer": "app-entry",
+      "emit_order": 21,
+      "files": [
+        "easyvibe-desktop/**"
+      ]
+    }
+  ],
+  "edges": {
+    "expect_count": 62,
+    "sha256": "b636c18a46a1da6c9d80465a9627eeae83cd5fd848bd2b4be8f073ad1d7a4d5e",
+    "retired_ids": [
+      "e31"
+    ]
+  },
+  "gates": {
+    "dv_max": 0,
+    "scc_max": 0,
+    "expect_shell_deps": [
+      "server-api",
+      "map-toolchain"
+    ],
+    "retired_concerns": [
+      "c-arch-2",
+      "c-arch-12",
+      "c-map-toolchain-2"
+    ]
+  },
+  "granularity": {
+    "console": {
+      "grid": "settings-ui",
+      "caps": {
+        "settings-ui": 1
+      },
+      "allowed_import_prefixes": [
+        "@/runtime/",
+        "@/api/",
+        "@/components/ui/"
+      ],
+      "retired_ids": []
+    },
+    "renderer": {
+      "grids": [
+        "renderer-runtime",
+        "renderer-api",
+        "renderer-shared",
+        "ui-kit"
+      ],
+      "caps": {
+        "renderer-runtime": 4,
+        "renderer-api": 2,
+        "renderer-shared": 4,
+        "ui-kit": 5
+      },
+      "retired_ids": [
+        "renderer-core"
+      ]
+    },
+    "host": {
+      "probe_owner": {
+        "easyvibe-renderer/index.html": "host-adapter"
+      }
+    }
+  }
 }

@@ -25,10 +25,12 @@ SCHEMA = os.environ.get('SCHEMA_PATH', os.path.join(REPO, 'easyvibe-map-schema-v
 # R3/R4：构建期关系判据与图判据的唯一实现（scripts/map_policy.py，受版本控制）
 sys.path.insert(0, os.path.join(REPO, 'scripts'))
 import map_policy  # noqa: E402
+# c-arch-12：同代判据（policy ↔ 产物）的唯一实现（GATE-1 复用，零重复）
+sys.path.insert(0, os.path.join(REPO, 'scripts'))
+import verify_arch_facts  # noqa: E402
 
-# R4 关口 C：direction_violation 棘轮基线（只降不升）。c-arch-5 结构性消除后归零：
-# 宿主能力端口化使「order1/2 → app-entry」逆边在结构上不再需要，故生成期即拒绝任何 DV。
-DV_BASELINE = 0
+# R4 关口 C 的 DV 棘轮基线（只降不升）与关口 B 的 SCC 上限、退役边 id 一律来自
+# scripts/map_edge_policy.json（c-arch-12：归纳期与守卫期同源读取，不再在本文件硬编码）。
 
 MODULE_KEYS = {'id', 'last_analyzed_at', 'name', 'layer', 'responsibility', 'files',
                'key_entries', 'dependencies', 'health', 'notes'}
@@ -347,7 +349,13 @@ def cmd_append_log():
 # ---------------------------------------------------------------- finalize
 def assemble():
     order = json.load(open(ORDER, encoding='utf-8'))
-    retired = set(order.get('retired_edge_ids', []))
+    # R6/c-arch-12：退役边 id 的唯一真值来自 policy（不再读 untracked emit_order.json）
+    try:
+        retired = set(map_policy.retired_edge_ids(map_policy.load_policy(REPO)))
+    except map_policy.PolicyMissing as e:
+        print(json.dumps({'ok': False, 'stage': 'policy',
+                          'problems': ['policy missing: %s' % e.dotted_key]}, ensure_ascii=False))
+        sys.exit(1)
     modules = []
     edges = []
     eid = 0
@@ -414,22 +422,43 @@ def replay_from_log():
     return layers, modules, edges, health
 
 def check_gates(layers, modules, edges):
-    """R4 关口 A/B/C（fail-closed）。返回问题列表，空 = 通过。"""
+    """R4 关口 A/B/C（fail-closed，期望值同源于 policy）。返回问题列表，空 = 通过。"""
     problems = []
     policy = map_policy.load_policy(REPO)
+    try:
+        scc_max = map_policy.scc_max(policy)
+        dv_baseline = map_policy.dv_max(policy)
+    except map_policy.PolicyMissing as e:
+        return ['P policy missing: %s' % e.dotted_key]
     # 关口 A：构建期产物托管/内嵌关系不得成为依赖边（R3）
     for eid, frm, to in map_policy.policy_violations(edges, policy):
         problems.append('A build-time relation leaked as edge: %s %s->%s' % (eid, frm, to))
-    # 关口 B：跨层 SCC 即 fail（只锁跨层；同层互引不阻断）
+    # 关口 B：跨层 SCC 即 fail（只锁跨层；同层互引不阻断）；上限读 policy.gates.scc_max
     layer_order = {l['id']: l['order'] for l in layers}
     mod_order = {m['id']: layer_order.get(m['layer']) for m in modules}
-    for g in map_policy.cross_layer_scc([m['id'] for m in modules], edges, mod_order):
-        problems.append('B cross-layer cycle: %s' % g)
-    # 关口 C：direction_violation 计数棘轮（只降不升）
+    xscc = map_policy.cross_layer_scc([m['id'] for m in modules], edges, mod_order)
+    if len(xscc) > scc_max:
+        problems.append('B cross-layer cycle: %s' % xscc)
+    # 关口 C：direction_violation 计数棘轮（只降不升）；基线读 policy.gates.dv_max
     dv = sum(1 for e in edges if e.get('direction_violation'))
-    if dv > DV_BASELINE:
-        problems.append('C direction_violation %d > baseline %d' % (dv, DV_BASELINE))
+    if dv > dv_baseline:
+        problems.append('C direction_violation %d > baseline %d' % (dv, dv_baseline))
     return problems
+
+
+def gate_same_generation(policy, layers, modules, edges, health):
+    """GATE-1（R5/c-arch-12）：policy ↔ 产物 的集合级同代判据（复用 verify_arch_facts 唯一实现）。
+
+    任一集合级不符即返回问题（调用方 fail-closed 拒绝落盘）。不判顺序/prose，避免无意义假红。
+    """
+    product = {
+        'modules': [{'id': m['id'], 'layer': m['layer'], 'files': m['files'],
+                     'health': m.get('health') or {}} for m in modules],
+        'edges': edges,
+        'layers': [{'id': l['id'], 'order': l['order']} for l in layers],
+        'health': health or {},
+    }
+    return verify_arch_facts.policy_vs_map(policy, product, 'finalize')
 
 
 def cmd_finalize():
@@ -480,6 +509,13 @@ def cmd_finalize():
     if gate_problems:
         set_progress('failed', percent=95, error='; '.join(gate_problems[:5]))
         print(json.dumps({'ok': False, 'stage': 'gate', 'problems': gate_problems}, ensure_ascii=False))
+        sys.exit(1)
+    # c-arch-12 GATE-1：policy ↔ 产物 集合级同代（fail-closed，任一真漂移即拒绝落盘）
+    samegen = gate_same_generation(map_policy.load_policy(REPO), layers, modules, edges, ah)
+    if samegen:
+        set_progress('failed', percent=95, error='; '.join(samegen[:5]))
+        print(json.dumps({'ok': False, 'stage': 'same-generation', 'problems': samegen},
+                         ensure_ascii=False))
         sys.exit(1)
     # replay compare
     rl, rm, re_, rh = replay_from_log()
@@ -685,10 +721,41 @@ def cmd_coverage():
                       'coverage_ratio': round(ratio, 4), 'uncovered': uncovered[:50]},
                      ensure_ascii=False))
 
+def cmd_gate_selfcheck():
+    """R5/c-arch-12 GATE-1 自证：现网产物必绿；删格/改 glob/改边数注入必红（不写盘）。"""
+    policy = map_policy.load_policy(REPO)
+    layers, modules, edges = assemble()
+    ahp = os.path.join(PARTS, '_arch_health.json')
+    ah = json.load(open(ahp, encoding='utf-8')) if os.path.exists(ahp) else {}
+    results = []
+
+    def add(name, problems, expect_red):
+        red = bool(problems)
+        results.append((name, red == expect_red, "; ".join(problems[:1])))
+
+    add("GATE-1 正例（policy ↔ 现网产物）→ 必绿",
+        gate_same_generation(policy, layers, modules, edges, ah), False)
+    m2 = json.loads(json.dumps(modules))[:-1]                      # 删一格
+    add("GATE-1 删一格 → 必红", gate_same_generation(policy, layers, m2, edges, ah), True)
+    m3 = json.loads(json.dumps(modules))
+    m3[0]['files'] = list(m3[0]['files']) + ['__drift__/**']        # 改一格 glob
+    add("GATE-1 改一格 glob → 必红", gate_same_generation(policy, layers, m3, edges, ah), True)
+    add("GATE-1 少一条边 → 必红",
+        gate_same_generation(policy, layers, modules, edges[:-1], ah), True)
+    ok = True
+    for name, passed, detail in results:
+        ok = ok and passed
+        print("  %s %s  %s" % ("PASS" if passed else "FAIL", name, detail))
+    print("GATE-1 自证 %s" % ("全 PASS" if ok else "有 FAIL"))
+    return 0 if ok else 1
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__); sys.exit(2)
     cmd = sys.argv[1]
+    if cmd == 'finalize' and '--selfcheck' in sys.argv[2:]:
+        sys.exit(cmd_gate_selfcheck())
     {'init': cmd_init, 'emit-module': cmd_emit_module, 'emit-edges': cmd_emit_edges,
      'append-log': cmd_append_log, 'finalize': cmd_finalize, 'normalize-edges': cmd_normalize_edges,
      'self-check': cmd_self_check, 'coverage': cmd_coverage}[cmd]()

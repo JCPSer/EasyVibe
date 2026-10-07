@@ -55,8 +55,9 @@ GRID = "settings-ui"
 CONSOLE = "console-ui"
 SETTINGS_GLOB = "easyvibe-renderer/src/components/settings/**"
 PROBE = "easyvibe-renderer/src/components/settings/SettingsPanel.tsx"
-CAP = 1
 
+# C3 粒度上限与 C5 依赖白名单的规范值只在 scripts/map_edge_policy.json::granularity.console
+# （c-arch-12 同源读取，fail-closed）：此处**不留**任何硬编码默认值，避免第二份事实。
 # C3b 反吞探针：必须归 console-ui（页面装配 / 装配壳），不得被 settings-ui 吞走
 ANTI_PROBES = (
     "easyvibe-renderer/src/components/shell/AppShell.tsx",
@@ -64,36 +65,57 @@ ANTI_PROBES = (
     "easyvibe-renderer/src/pages/GitPage.tsx",
 )
 
-# C5 依赖白名单：settings-ui 的 import 只许落在这些前缀（相对路径与外部包另判）
-ALLOWED_IMPORT_PREFIXES = ("@/runtime/", "@/api/", "@/components/ui/")
 IMPORT_RE = re.compile(r"""(?:^|\n)\s*import\s+(?:type\s+)?(?:[^'"\n]*?\sfrom\s+)?['"]([^'"]+)['"]""")
 REQUIRE_RE = re.compile(r"""require\(\s*['"]([^'"]+)['"]\s*\)""")
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import map_policy  # noqa: E402
+import _arch_synthetic as A  # noqa: E402
+
+
+def load_console_cfg(root):
+    """从 policy 读 console 粒度配置（caps / 白名单 / 退役 id）。缺字段 → fail-closed 字符串。"""
+    try:
+        g = map_policy.granularity(map_policy.load_policy(root), "console")
+        return {"cap": int(g["caps"][GRID]),
+                "prefixes": tuple(g["allowed_import_prefixes"]),
+                "retired": set(g.get("retired_ids", []))}, None
+    except (map_policy.PolicyMissing, KeyError, TypeError, ValueError) as e:
+        return None, "policy.granularity.console 缺字段（fail-closed）: %s" % e
+
+
+def policy_probe_problems(root):
+    """R8②「探针归属 ⊆ policy」：探针在其 policy 网格中的归属必须与守卫期望一致。
+
+    policy 丢格 / 改 glob → 直接红（不再要求守卫等到运行时地图同错）。
+    """
+    problems = []
+    try:
+        mm = map_policy.modules_map(map_policy.load_policy(root))
+    except map_policy.PolicyMissing as e:
+        return ["C7 policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    owners = {}
+    for mid, v in mm.items():
+        for g in v["files"]:
+            owners.setdefault(mid, []).append(g)
+
+    def own(probe):
+        return sorted(mid for mid, gls in owners.items() if any(glob_match(probe, g) for g in gls))
+
+    o = own(PROBE)
+    if o != [GRID]:
+        problems.append("C7 policy 中探针 %s 期望归 [%s]，实际 %s" % (PROBE, GRID, o))
+    for p in ANTI_PROBES:
+        op = own(p)
+        if op != [CONSOLE]:
+            problems.append("C7 policy 中反吞探针 %s 期望归 [%s]，实际 %s" % (p, CONSOLE, op))
+    return problems
+
 
 # ------------------------------------------------------------------ glob
-def glob_match(path, pattern):
-    """与 .easyvibe/map/easyvibe_map_cli.py::glob_match 同源语义（逐字复制，CI 无 live 依赖）。"""
-    path = str(path).replace("\\", "/")
-    pattern = str(pattern).replace("\\", "/")
-    rx = ""
-    i = 0
-    while i < len(pattern):
-        c = pattern[i]
-        if c == "*":
-            if pattern[i:i + 2] == "**":
-                rx += ".*"
-                i += 2
-                if i < len(pattern) and pattern[i] == "/":
-                    i += 1
-                continue
-            else:
-                rx += "[^/]*"
-        elif c == "?":
-            rx += "[^/]"
-        else:
-            rx += re.escape(c)
-        i += 1
-    return re.match("^" + rx + "$", path) is not None
+# c-arch-12 / 审查 P2：glob 语义只有一份实现（scripts/map_policy.py::glob_match）。
+# 本模块此前持有一份逐字副本，现改为直接别名，避免「去重事实副本」的任务反而增副本。
+glob_match = map_policy.glob_match
 
 
 # ------------------------------------------------------------------ helpers
@@ -133,13 +155,16 @@ def _iter_settings_files(root, globs):
     return sorted(out)
 
 
-def c5_scan(root, globs, overrides=None):
+def c5_scan(root, globs, overrides=None, prefixes=None):
     """返回 (problems, scanned)。对 settings-ui 归属源码做 import 白名单复核。
 
     overrides：只读注入面 {posix 相对路径: 文本}；命中即以内存文本替代磁盘内容
     （--selfcheck 的负例靠它注入越界 import，不落盘、不污染仓库）。
+    prefixes：白名单前缀（必传，来自 policy.granularity.console）；空即 fail-closed 红。
     """
     problems = []
+    if not prefixes:
+        return ["C5 settings-ui import 白名单为空（policy 缺失，fail-closed）"], []
     if not globs:
         return ["C5 settings-ui 无 glob，无法裁决依赖白名单"], []
     files = _iter_settings_files(root, globs)
@@ -162,7 +187,7 @@ def c5_scan(root, globs, overrides=None):
             if s.startswith("."):
                 continue  # 相对路径允许
             if s.startswith("@/"):
-                if not s.startswith(ALLOWED_IMPORT_PREFIXES):
+                if not s.startswith(prefixes):
                     problems.append("C5 %s 越界 import: %s" % (rel, s))
                 continue
             # 其余视为外部包（react / lucide-react / @scope/pkg）
@@ -187,6 +212,12 @@ def evaluate(map_obj, root, map_label="", overrides=None):
     problems, checks = [], []
     by_id = _by_id(map_obj)
     ids = set(by_id)
+    # c-arch-12：粒度 caps / 白名单从 policy 同源读取（缺字段 → fail-closed）
+    cfg, cfg_err = load_console_cfg(root)
+    if cfg_err:
+        problems.append("C0 %s" % cfg_err)
+        # fail-closed 哨兵：cap=-1 使 C3 必红、prefixes=() 使任何 @/ import 必红（无硬编码回退）
+        cfg = {"cap": -1, "prefixes": ()}
 
     # ---- 探针存在性（fail-closed）
     probe_abs = os.path.join(root, PROBE)
@@ -222,10 +253,10 @@ def evaluate(map_obj, root, map_label="", overrides=None):
     if SETTINGS_GLOB in console_globs:
         problems.append("C2 console-ui.files 仍含 %s（重复覆盖 → coverage 假绿）" % SETTINGS_GLOB)
 
-    # ---- C3 粒度上限
-    if GRID in ids and len(by_id[GRID]) > CAP:
+    # ---- C3 粒度上限（上限读 policy.granularity.console.caps）
+    if GRID in ids and len(by_id[GRID]) > cfg["cap"]:
         problems.append("C3 %s 的 files glob 数 %d 超上限 %d（防再吞 shell/overlays/gate）"
-                        % (GRID, len(by_id[GRID]), CAP))
+                        % (GRID, len(by_id[GRID]), cfg["cap"]))
 
     # ---- C3b 反吞探针（双向）
     if not anti_missing and GRID in ids and CONSOLE in ids:
@@ -238,7 +269,7 @@ def evaluate(map_obj, root, map_label="", overrides=None):
 
     # ---- C5 窄依赖白名单
     if GRID in ids:
-        c5_problems, _files = c5_scan(root, by_id[GRID], overrides)
+        c5_problems, _files = c5_scan(root, by_id[GRID], overrides, prefixes=cfg["prefixes"])
         problems += c5_problems
 
     # ---- C6 同层环判据（图边侧）：settings-ui 不得指向 console-ui
@@ -262,6 +293,8 @@ def cmd_check(map_path):
                           "problems": ["地图加载失败（fail-closed）: %s" % e]}, ensure_ascii=False, indent=2))
         return 1
     problems, checks = evaluate(map_obj, REPO, map_path)
+    # R8②「探针归属 ⊆ policy」：policy 网格必须把探针归到与守卫期望一致的格
+    problems = policy_probe_problems(REPO) + problems
     report = {
         "ok": not problems,
         "map": os.path.relpath(map_path, REPO) if os.path.isabs(map_path) else map_path,
@@ -275,17 +308,8 @@ def cmd_check(map_path):
 
 # ------------------------------------------------------------------ --selfcheck
 def _green_map():
-    """合成「拆分后」绿图：settings-ui 独立 + console-ui（含 shell/overlays/pages 装配壳）。"""
-    return {"modules": [
-        {"id": "map-toolchain", "files": ["scripts/**"]},
-        {"id": "renderer-runtime", "files": ["easyvibe-renderer/src/runtime/**"]},
-        {"id": "renderer-api", "files": ["easyvibe-renderer/src/api/**"]},
-        {"id": "ui-kit", "files": ["easyvibe-renderer/src/components/ui/**"]},
-        {"id": CONSOLE, "files": ["easyvibe-renderer/src/pages/**",
-                                  "easyvibe-renderer/src/components/shell/**",
-                                  "easyvibe-renderer/src/components/overlays/**"]},
-        {"id": GRID, "files": [SETTINGS_GLOB]},
-    ]}
+    """合成「拆分后」绿图（手写构件取自 scripts/_arch_synthetic.py，glob 单副本）。"""
+    return A.console_green_map()
 
 
 def cmd_selfcheck():
