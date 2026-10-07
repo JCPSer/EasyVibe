@@ -208,6 +208,76 @@ async fn show_commit_parses_header_and_numstat() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// diff 抽屉 e2e：修改 / 未跟踪 / 二进制 / 暂存 / 截断 / 不存在 / 注入防护
+#[tokio::test]
+async fn file_diff_covers_untracked_binary_staged_truncation() {
+    let dir = std::env::temp_dir().join(format!("ev-file-diff-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let git_sync = |args: &[&str]| {
+        assert!(std::process::Command::new("git").args(args).current_dir(&dir).status().unwrap().success())
+    };
+    git_sync(&["init", "-q"]);
+    git_sync(&["config", "user.email", "t@t"]);
+    git_sync(&["config", "user.name", "t"]);
+    std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+    git_sync(&["add", "."]);
+    git_sync(&["commit", "-qm", "init"]);
+
+    // ① 修改已跟踪文件 → unstaged 统一 diff
+    std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+    let d = diff(&dir, "a.txt", false).await.unwrap();
+    assert!(!d.untracked && !d.binary && !d.empty && !d.truncated);
+    assert!(d.text.contains("--- a/a.txt"), "文件头: {:?}", d.text);
+    assert!(d.text.contains("+++ b/a.txt"));
+    assert!(d.text.contains("+TWO"));
+    assert!(d.text.contains("-two"));
+    assert!(d.text.contains("@@ "), "hunk 头: {:?}", d.text);
+    assert_eq!(d.total_lines, d.text.lines().count() as i64);
+
+    // ② staged diff：未暂存时为空；--cached 后带出 index vs HEAD 差异
+    let empty = diff(&dir, "a.txt", true).await.unwrap();
+    assert!(empty.empty, "未暂存文件的 staged diff 应为空: {:?}", empty.text);
+    git_sync(&["add", "a.txt"]);
+    let staged = diff(&dir, "a.txt", true).await.unwrap();
+    assert!(!staged.empty && staged.text.contains("+three"));
+    let unstaged_after_add = diff(&dir, "a.txt", false).await.unwrap();
+    assert!(unstaged_after_add.empty, "全部暂存后 unstaged 为空");
+    git_sync(&["reset", "-q", "--", "a.txt"]);
+
+    // ③ 未跟踪新文件 → 合成整文件新增 diff
+    std::fs::write(dir.join("new.txt"), "n1\nn2\n").unwrap();
+    let u = diff(&dir, "new.txt", false).await.unwrap();
+    assert!(u.untracked && !u.binary && !u.empty);
+    assert!(u.text.contains("--- /dev/null"));
+    assert!(u.text.contains("+++ b/new.txt"));
+    assert!(u.text.contains("+n1") && u.text.contains("+n2"));
+    assert_eq!(u.total_lines, 5, "3 头 + 2 内容行: {:?}", u.text);
+
+    // ④ 二进制文件 → binary 标记，无文本
+    std::fs::write(dir.join("bin.dat"), [0u8, 159, 146, 150, 0, 1, 2]).unwrap();
+    git_sync(&["add", "-f", "bin.dat"]);
+    git_sync(&["commit", "-qm", "add bin"]);
+    std::fs::write(dir.join("bin.dat"), [0u8, 159, 146, 150, 9, 9, 9]).unwrap();
+    let b = diff(&dir, "bin.dat", false).await.unwrap();
+    assert!(b.binary && b.text.is_empty());
+
+    // ⑤ 大 diff 截断保护
+    let big: String = (0..DIFF_MAX_LINES as i64 + 500).map(|i| format!("line{i}\n")).collect();
+    std::fs::write(dir.join("a.txt"), big).unwrap();
+    let t = diff(&dir, "a.txt", false).await.unwrap();
+    assert!(t.truncated, "超过 {DIFF_MAX_LINES} 行必须截断");
+    assert!(t.total_lines > DIFF_MAX_LINES as i64, "完整行数应超过上限: {}", t.total_lines);
+    assert_eq!(t.text.lines().count(), DIFF_MAX_LINES);
+
+    // ⑥ 文件不存在 → NotFound；路径注入 → BadRequest
+    assert!(matches!(diff(&dir, "gone.txt", false).await, Err(e) if e.to_string().contains("不存在")));
+    assert!(diff(&dir, "../etc/passwd", false).await.is_err());
+    assert!(diff(&dir, "-c", false).await.is_err(), "`-` 开头路径必须拒绝");
+    assert!(diff(&dir, "", false).await.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test]
 async fn non_git_repo_errs() {
     let dir = std::env::temp_dir().join("ev-not-git-status");

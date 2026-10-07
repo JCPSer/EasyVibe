@@ -6,6 +6,8 @@ export const gitStatus = (repo: string) => apiFetch(`${repoBase(repo)}/git/statu
 export const gitLog = (repo: string, limit = 30) => apiFetch(`${repoBase(repo)}/git/log?limit=${limit}`)
 export const gitCommit = (repo: string, hash: string) =>
   apiFetch(`${repoBase(repo)}/git/commit?hash=${encodeURIComponent(hash)}`)
+export const gitDiff = (repo: string, file: string, staged = false) =>
+  apiFetch(`${repoBase(repo)}/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`)
 export const commitMessage = (repo: string, body: unknown) =>
   apiFetch(`${repoBase(repo)}/git/commit-message`, jsonInit('POST', body))
 export const postCommit = (repo: string, body: unknown) =>

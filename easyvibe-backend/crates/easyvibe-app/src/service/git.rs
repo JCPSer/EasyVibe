@@ -72,6 +72,13 @@ pub(crate) async fn git_commit_detail(st: &AppState, id: &str, hash: &str) -> Re
     to_value(easyvibe_git::show_commit(&repo.root, hash).await?)
 }
 
+/// 单文件差异（diff 抽屉）：staged=false 工作区 vs 暂存区，staged=true 暂存区 vs HEAD。
+/// 路径防注入在 easyvibe_git::diff 内（validate_rel_path + 禁 `-` 开头）。
+pub(crate) async fn git_diff(st: &AppState, id: &str, path: &str, staged: bool) -> Result<Value, ApiError> {
+    let repo = find_repo(st, id).await?;
+    to_value(easyvibe_git::diff(&repo.root, path, staged).await?)
+}
+
 pub(crate) async fn git_commit(st: &AppState, id: &str, message: &str) -> Result<CommitResult, ApiError> {
     let repo = find_repo(st, id).await?;
     let short_hash = easyvibe_git::commit_all(&repo.root, message).await?;

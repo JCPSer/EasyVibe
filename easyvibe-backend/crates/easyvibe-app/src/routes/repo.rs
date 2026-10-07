@@ -26,6 +26,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/repos/{id}/git/log", get(get_git_log))
         .route("/repos/{id}/git/commit", get(get_git_commit))
         .route("/repos/{id}/git/commit", post(post_git_commit))
+        .route("/repos/{id}/git/diff", get(get_git_diff))
         .route("/repos/{id}/git/pull", post(post_git_pull))
         .route("/repos/{id}/git/push", post(post_git_push))
         .route("/repos/{id}/git/discard", post(post_git_discard))
@@ -93,6 +94,18 @@ pub(crate) async fn get_git_commit(
     let hash = q.get("hash").ok_or_else(|| ApiError::BadRequest("缺少 hash 参数".into()))?;
     let detail = git_service::git_commit_detail(&st, &id, hash).await?;
     Ok(Json(ApiResponse::ok(detail)).into_response())
+}
+
+/// 单文件差异（diff 抽屉）：?file=<relpath> 必填，&staged=true 时对比暂存区 vs HEAD。
+pub(crate) async fn get_git_diff(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let file = q.get("file").ok_or_else(|| ApiError::BadRequest("缺少 file 参数".into()))?;
+    let staged = q.get("staged").map(|v| v == "true").unwrap_or(false);
+    let data = git_service::git_diff(&st, &id, file, staged).await?;
+    Ok(Json(ApiResponse::ok(data)).into_response())
 }
 
 pub(crate) async fn post_git_commit(

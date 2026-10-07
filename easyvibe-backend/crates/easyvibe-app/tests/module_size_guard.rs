@@ -205,6 +205,7 @@ const FROZEN_ROUTES: &[&str] = &[
     "/repos/{id}/freshness",
     "/repos/{id}/git/commit",
     "/repos/{id}/git/commit-message",
+    "/repos/{id}/git/diff",
     "/repos/{id}/git/discard",
     "/repos/{id}/git/log",
     "/repos/{id}/git/pull",
@@ -262,6 +263,7 @@ const FROZEN_DOMAIN_ROUTES: &[(&str, &[&str])] = &[
             "/repos/{id}/git/status",
             "/repos/{id}/git/log",
             "/repos/{id}/git/commit",
+            "/repos/{id}/git/diff",
             "/repos/{id}/git/pull",
             "/repos/{id}/git/push",
             "/repos/{id}/git/discard",
@@ -403,7 +405,7 @@ fn domain_routes_union_matches_global_frozen_list() {
         union, frozen,
         "域表并集与全局 FROZEN_ROUTES 漂移——两处清单必须恒等（防双轨维护）"
     );
-    assert_eq!(union.len(), 64, "route 总数应为 64（含 /ws）");
+    assert_eq!(union.len(), 65, "route 总数应为 65（含 /ws）");
 }
 
 /// 断言组 C（防假绿·关键）：每个域模块自注册非空（≥1）。

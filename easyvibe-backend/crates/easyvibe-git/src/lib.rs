@@ -11,8 +11,8 @@ pub mod ops;
 pub mod parse;
 
 pub use exec::{git, git_opt, GIT_TIMEOUT};
-pub use model::{CommitDetail, CommitFileStat, GitFile, GitLogRow, GitStatus};
-pub use ops::{commit_all, discard, discard_all, log, pull, push, show_commit, status};
+pub use model::{CommitDetail, CommitFileStat, FileDiff, GitFile, GitLogRow, GitStatus};
+pub use ops::{commit_all, diff, discard, discard_all, log, pull, push, show_commit, status, DIFF_MAX_LINES};
 pub use parse::{parse_log, parse_numstat, parse_porcelain, validate_rel_path};
 
 #[cfg(test)]

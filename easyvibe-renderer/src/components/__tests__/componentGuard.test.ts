@@ -70,7 +70,7 @@ const sorted = (a: string[]) => [...a].sort()
 
 // ---------------- 子目录守卫（2026-10-06 扩至 6 域：canvas/shell/overlays + chat/settings/taskworkflow） ----------------
 // 以下文件集为**双向全等快照**：增删文件必须同步改表（防「换个地址复活」）。
-const GUARDED_SUBDIRS = ['canvas', 'shell', 'overlays', 'chat', 'settings', 'taskworkflow']
+const GUARDED_SUBDIRS = ['canvas', 'shell', 'overlays', 'chat', 'settings', 'taskworkflow', 'git']
 
 const SUBDIR_FILES: Record<string, string[]> = {
   canvas: [
@@ -114,11 +114,15 @@ const SUBDIR_FILES: Record<string, string[]> = {
     'taskworkflow/stages/DoneStage.tsx', 'taskworkflow/stages/ErrorStage.tsx',
     'taskworkflow/stages/ReportStage.tsx', 'taskworkflow/stages/TerminalStage.tsx',
   ],
+  // git 域（diff 抽屉批次新增）：Git 页 diff 抽屉 + 改动来源条 + 纯渲染逻辑 + 共享类型。
+  git: [
+    'git/DiffDrawer.tsx', 'git/SourceStrip.tsx', 'git/diffView.ts', 'git/types.ts',
+  ],
 }
 
 // `src/components/` 顶层允许出现的子目录全集——新增目录不登记即失败，杜绝"换个地址复活"。
 const KNOWN_SUBDIRS = [
-  '__tests__', 'canvas', 'chat', 'gate', 'overlays', 'settings', 'shell', 'taskworkflow', 'ui',
+  '__tests__', 'canvas', 'chat', 'gate', 'git', 'overlays', 'settings', 'shell', 'taskworkflow', 'ui',
 ]
 // 相对 `src/components/` 的子目录文件（键形如 `canvas/BandNode.tsx`）。
 const SUBDIR_FILES_FLAT = GUARDED_SUBDIRS.flatMap((d) => SUBDIR_FILES[d])
@@ -186,7 +190,7 @@ describe('防膨胀守卫 · 断言组 3：反向/横向 import 禁止', () => {
   })
 })
 
-describe('防膨胀守卫 · 断言组 4：域子目录（canvas / shell / overlays / chat / settings / taskworkflow）', () => {
+describe('防膨胀守卫 · 断言组 4：域子目录（canvas / shell / overlays / chat / settings / taskworkflow / git）', () => {
   it('守卫子目录文件集快照双向全等（新增/删除文件必须显式登记，防换个地址复活）', () => {
     for (const dir of GUARDED_SUBDIRS) {
       expect(sorted(lsRecursive(dir)), `components/${dir}/**`).toEqual(sorted(SUBDIR_FILES[dir]))

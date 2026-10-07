@@ -4,6 +4,7 @@ import {
   ScanSearch, ShieldCheck, Sparkles, Trash2,
 } from 'lucide-react'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { absTime, aggregateByModule, moduleOfFile, parseDiffStat, relTime, toMs } from '@/shared/logic/diffStat'
 import { healthColor } from '@/shared/logic/layout'
 import { onPatrolFinished } from '@/runtime/growthBus'
@@ -11,6 +12,9 @@ import { gitStatus, gitLog, commitMessage, postCommit, discard, gitSync, gitComm
 import { freshness as freshnessApi, healthHistory, patrol } from '@/api/canvas'
 import { listTasks } from '@/api/task'
 import { patrolRuns } from '@/api/repos'
+import { DiffDrawer } from '@/components/git/DiffDrawer'
+import { SourceStrip } from '@/components/git/SourceStrip'
+import type { GitFile, TaskLite } from '@/components/git/types'
 import type { CodeMap } from '@/types/map'
 
 // M4-4 Git 工作树（按 ui-mockups/Git工作树原型-v3.png 施工）：
@@ -18,14 +22,6 @@ import type { CodeMap } from '@/types/map'
 // 改动来源归因（任务 diffStat 启发式）、提交说明 AI 生成 + EasyVibe-Task footer 留痕、
 // 架构演进对照图（健康分趋势 × 提交时点）、最近提交模块 chips。
 // 后端：git.rs 六端点 + git/commit-message（LLM 生成说明）。
-
-interface GitFile {
-  status: string // M / A / D / R / ?
-  path: string
-  orig: string | null
-  adds: number | null
-  dels: number | null
-}
 
 interface GitStatus {
   branch: string
@@ -43,12 +39,6 @@ interface GitLogRow {
   at: number
   subject: string
   files: string[]
-}
-
-interface TaskLite {
-  id: string
-  title: string
-  result?: { diffStat?: string } | null
 }
 
 interface HealthPoint {
@@ -91,6 +81,9 @@ export function GitPage({
   const [busy, setBusy] = useState<'pull' | 'push' | null>(null)
   const [patrolAfter, setPatrolAfter] = useState(true)
   const [patroling, setPatroling] = useState(false)
+  // diff 抽屉：点击变更文件后展示该文件统一差异（DiffDrawer 自加载）
+  const [diffFile, setDiffFile] = useState<GitFile | null>(null)
+  const { t } = useLang()
 
   const load = useCallback(() => {
     if (!backendRepo) return
@@ -270,6 +263,8 @@ export function GitPage({
     } finally {
       setConfirmDiscard(null)
       setConfirmDiscardAll(false)
+      // 撤销的文件若正开着 diff 抽屉，一并关闭（内容已不存在）
+      setDiffFile((cur) => (cur && (path === '*' || cur.path === path) ? null : cur))
       load()
     }
   }
@@ -462,7 +457,12 @@ export function GitPage({
                         const a = attribOf(f.path)
                         const st = ST_META[f.status] ?? ST_META['?']
                         return (
-                          <div key={f.path} className="group flex items-center gap-2.5 py-[7px] pl-8 pr-4 hover:bg-slate-50/60 dark:bg-slate-900/60">
+                          <div
+                            key={f.path}
+                            onClick={() => setDiffFile(f)}
+                            title={t('git.diff.viewTip')}
+                            className="group flex cursor-pointer items-center gap-2.5 py-[7px] pl-8 pr-4 hover:bg-slate-50/60 dark:bg-slate-900/60"
+                          >
                             <span className={`flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[5px] text-micro font-extrabold ${st.cls}`}>
                               {st.label}
                             </span>
@@ -483,7 +483,10 @@ export function GitPage({
                             </span>
                             {confirmDiscard === f.path ? (
                               <button
-                                onClick={() => doDiscard(f.path)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  doDiscard(f.path)
+                                }}
                                 onMouseLeave={() => setConfirmDiscard(null)}
                                 className="tnum shrink-0 rounded bg-red-500 px-1.5 py-0.5 text-micro font-bold text-white"
                               >
@@ -491,7 +494,10 @@ export function GitPage({
                               </button>
                             ) : (
                               <button
-                                onClick={() => setConfirmDiscard(f.path)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConfirmDiscard(f.path)
+                                }}
                                 className="shrink-0 rounded p-0.5 text-slate-200 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500 group-hover:text-slate-300"
                                 title="撤销改动"
                               >
@@ -569,52 +575,11 @@ export function GitPage({
           </div>
         </div>
       </div>
-    </div>
-  )
-}
 
-/** 改动来源 insight 条：任务归因 / 巡检写回 / 手动（未归因） */
-function SourceStrip({
-  files,
-  attribOf,
-  onOpenChanges,
-}: {
-  files: GitFile[]
-  attribOf: (path: string) => { kind: 'task'; task: TaskLite } | { kind: 'ev' } | { kind: 'manual' }
-  onOpenChanges: () => void
-}) {
-  const src = useMemo(() => {
-    const task = new Map<string, { task: TaskLite; n: number }>()
-    let ev = 0
-    let manual = 0
-    for (const f of files) {
-      const a = attribOf(f.path)
-      if (a.kind === 'task') {
-        const cur = task.get(a.task.id) ?? { task: a.task, n: 0 }
-        cur.n += 1
-        task.set(a.task.id, cur)
-      } else if (a.kind === 'ev') ev += 1
-      else manual += 1
-    }
-    return { tasks: [...task.values()].sort((a, b) => b.n - a.n), ev, manual }
-  }, [files, attribOf])
-
-  if (src.tasks.length === 0 && src.ev === 0) return null
-
-  return (
-    <div className="mx-4 mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-violet-100 bg-violet-50/50 px-3.5 py-2 text-cap text-violet-700">
-      <Sparkles size={11} className="shrink-0" />
-      <span className="font-semibold">改动来源：</span>
-      {src.tasks.slice(0, 2).map(({ task, n }) => (
-        <span key={task.id}>
-          <b>任务「{task.title.slice(0, 12)}」</b>（{n} 个文件）
-        </span>
-      ))}
-      {src.ev > 0 && <span>巡检健康写回（{src.ev} 个）</span>}
-      {src.manual > 0 && <span className="text-violet-400">手动修改（{src.manual} 个 · 未归因）</span>}
-      <button onClick={onOpenChanges} className="ml-auto font-semibold text-blue-600 hover:underline">
-        查看任务 →
-      </button>
+      {/* diff 抽屉：点击变更文件滑出（Esc / ✕ / 点遮罩关闭） */}
+      {diffFile && backendRepo && (
+        <DiffDrawer backendRepo={backendRepo} file={diffFile} onClose={() => setDiffFile(null)} />
+      )}
     </div>
   )
 }

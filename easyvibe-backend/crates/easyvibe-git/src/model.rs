@@ -50,3 +50,21 @@ pub struct CommitDetail {
     pub body: String,
     pub files: Vec<CommitFileStat>,
 }
+
+/// 单文件统一差异（Git 页 diff 抽屉的数据形状；text 为统一 diff 文本或整文件内容）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    /// 未跟踪新文件：text 为整文件内容（前端按全量新增渲染）
+    pub untracked: bool,
+    /// 二进制文件无法文本化展示
+    pub binary: bool,
+    /// 请求的范围内没有任何差异（如仅暂存的文件请求 unstaged diff）
+    pub empty: bool,
+    /// 差异超过 DIFF_MAX_LINES，text 已截断
+    pub truncated: bool,
+    /// 截断前完整差异行数（未截断 = text 行数）
+    pub total_lines: i64,
+    pub text: String,
+}
