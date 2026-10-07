@@ -56,7 +56,15 @@ const resolveRel = (fileRel: string, spec: string): string | null => {
 const RUNTIME_FILES = [
   'runtime/__tests__/i18n.test.ts',
   'runtime/__tests__/terminalBuffer.test.ts',
-  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/host.ts', 'runtime/i18n.ts', 'runtime/motion.ts',
+  // i18n 取词契约 + 按域分片词表（c-arch-11）：契约入口 + dict/<domain>.ts，随磁盘递归全等。
+  'runtime/i18n/index.ts',
+  'runtime/i18n/dict/pages.ts', 'runtime/i18n/dict/canvas.ts', 'runtime/i18n/dict/task.ts',
+  'runtime/i18n/dict/settings.ts', 'runtime/i18n/dict/chat.ts', 'runtime/i18n/dict/shell.ts',
+  'runtime/i18n/dict/onboarding.ts', 'runtime/i18n/dict/views.ts', 'runtime/i18n/dict/report.ts',
+  'runtime/i18n/dict/hooks.ts', 'runtime/i18n/dict/common.ts', 'runtime/i18n/dict/top.ts',
+  'runtime/i18n/dict/deps.ts', 'runtime/i18n/dict/git.ts', 'runtime/i18n/dict/attention.ts',
+  'runtime/i18n/dict/misc.ts',
+  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/host.ts', 'runtime/motion.ts',
   'runtime/notify.ts', 'runtime/sessionQueue.ts', 'runtime/terminalBuffer.ts', 'runtime/toast.tsx',
   'runtime/useRepoActivity.ts', 'runtime/ws.ts',
 ]

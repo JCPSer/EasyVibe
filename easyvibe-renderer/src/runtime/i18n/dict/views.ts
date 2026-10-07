@@ -1,0 +1,61 @@
+// i18n-shard: views
+// 词表分片（纯数据、零运行时逻辑）——由 ../index.ts 聚合；取词契约见 ../index.ts。
+// zh 为基准（as const）；en 由 Record<keyof typeof zh, string> 编译期对齐，key 集合与 zh 全等。
+
+export const zh = {
+  // views.*：我的视图面板（顶栏抽屉）
+  'views.loadFail': '视图列表加载失败——需要本地后端在线',
+  'views.deleteFail': '删除视图失败',
+  'views.renamed': '已改名',
+  'views.renameFail': '改名失败',
+  'views.staleRefs': '视图有 {n} 个模块引用已失效（地图已更新）：{list}——已按现存模块打开',
+  'views.allStale': '视图引用的模块已全部失效（建议删除重建）',
+  'views.loading': '加载视图…',
+  'views.empty1': '还没有保存的视图。',
+  'views.empty2': '在「对话」页签提问后，点回答下方的',
+  'views.empty3': '"存为视图"即可创建可复用的模块集合。',
+  'views.countLine': '共 {n} 个视图 · 引用式存储（.easyvibe/views/，随仓库走）',
+  'views.pureMermaid': '纯图视图',
+  'views.modulesCount': '{n} 个模块',
+  'views.mermaidAttached': '附：对话生成的流程图',
+  'views.zoom': '放大查看',
+  'views.openTip': '在画布中定位该视图的模块',
+  'views.open': '打开视图',
+  'views.located': '已定位',
+  'views.downloadTip': '下载视图文件（含流程图，资产可外带）',
+  'views.renameTip': '重命名视图',
+  'views.deleteTip': '删除该视图文件',
+  'views.delete': '删除',
+  'views.delConfirm': '确认删除',
+  'views.saveName': '保存新名称',
+  'views.close': '关闭',
+} as const
+
+export const en: Record<keyof typeof zh, string> = {
+  // views.*：我的视图面板（顶栏抽屉）
+  'views.loadFail': 'Failed to load views — local backend must be online',
+  'views.deleteFail': 'Failed to delete view',
+  'views.renamed': 'Renamed',
+  'views.renameFail': 'Rename failed',
+  'views.staleRefs': 'View has {n} module references that are no longer valid (map updated): {list} — opened with surviving modules',
+  'views.allStale': 'All module references in this view are stale (delete and recreate it)',
+  'views.loading': 'Loading views…',
+  'views.empty1': 'No saved views yet.',
+  'views.empty2': 'Ask a question in the "Chat" tab, then click',
+  'views.empty3': '"Save as View" below the answer to create a reusable module set.',
+  'views.countLine': '{n} views · reference-based storage (.easyvibe/views/, travels with the repo)',
+  'views.pureMermaid': 'Diagram-only view',
+  'views.modulesCount': '{n} modules',
+  'views.mermaidAttached': 'Attached: flow diagram generated from the chat',
+  'views.zoom': 'Zoom in',
+  'views.openTip': 'Locate this view modules on the canvas',
+  'views.open': 'Open View',
+  'views.located': 'Located',
+  'views.downloadTip': 'Download the view file (with diagrams — assets are portable)',
+  'views.renameTip': 'Rename view',
+  'views.deleteTip': 'Delete this view file',
+  'views.delete': 'Delete',
+  'views.delConfirm': 'Confirm Delete',
+  'views.saveName': 'Save new name',
+  'views.close': 'Close',
+}

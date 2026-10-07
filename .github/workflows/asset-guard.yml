@@ -110,6 +110,16 @@ jobs:
       - name: console 粒度守卫自检（反例必红）
         run: python3 scripts/check_console_granularity.py --selfcheck
 
+      # c-arch-11 / c-renderer-runtime-3：i18n「取词契约 / 词表数据」分离守卫。
+      # 判据 P0–P5（旧单文件不得回并＝同形遮蔽 fail-closed / 契约入口 ≤200 行且零词条字面量 /
+      # 各分片 ≤1000 行 / 片内 zh=en 且命名空间已登记 / 跨片 key 无重复·命名空间互斥·入口聚合≡分片 /
+      # t 签名仍为 key: string）。本仓 CI 不跑 vitest（见文件头），故用纯 python3 载体。
+      - name: i18n 分片守卫（契约与词表分离，防地基随翻译膨胀）
+        run: python3 scripts/check_i18n_sharding.py --check
+
+      - name: i18n 分片守卫自检（反例必红）
+        run: python3 scripts/check_i18n_sharding.py --selfcheck
+
       # c-arch-5 全新守卫：宿主能力边界（端口 + app-entry 适配模块 + 同层引导入口）。
       # 命题「全库唯一 direction_violation 被结构性消除」的 CI 可见本体——B1 唯一落点 /
       # B2 无逆边（order1/2 不得指向 app-entry）+ DV==0 / B3 加载链无竞态且无反向 import /

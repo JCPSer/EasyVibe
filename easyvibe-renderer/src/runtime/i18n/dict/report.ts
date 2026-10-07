@@ -1,0 +1,61 @@
+// i18n-shard: report
+// 词表分片（纯数据、零运行时逻辑）——由 ../index.ts 聚合；取词契约见 ../index.ts。
+// zh 为基准（as const）；en 由 Record<keyof typeof zh, string> 编译期对齐，key 集合与 zh 全等。
+
+export const zh = {
+  // report.*：架构健康报告导出（lib/healthReport，模块级 t 自译）
+  'report.title': '# 架构健康报告 · {repo}',
+  'report.generatedAt': '地图生成时间：{t}',
+  'report.lastPatrol': '上次巡检：{t}',
+  'report.coverage': '文件覆盖：{covered} / {total}（{pct}）',
+  'report.archTitle': '## 架构健康（独立评估，模块全绿 ≠ 架构健康）',
+  'report.score': '- **综合健康分：{n}**',
+  'report.couplingLine': '- 耦合度：{c}　复杂度：{x}{churnPart}',
+  'report.churnPart': '　变更频率：{churn}',
+  'report.decayFlags': '腐化标记：{flags}',
+  'report.reviewNote': '总评：{note}',
+  'report.archConcerns': '### 架构级重点关注',
+  'report.severityCritical': '严重',
+  'report.severityHigh': '高',
+  'report.suggestion': '建议：{s}',
+  'report.modulesTitle': '## 模块健康一览（按分数升序）',
+  'report.tableHeader': '| 模块 | 层 | 分数 | 耦合 | 复杂度 | 腐化标记 |',
+  'report.moduleConcernsTitle': '## 模块级问题与建议',
+  'report.moduleScore': '### {name}（{score} 分）',
+  'report.violationsTitle': '## 逆向依赖（分层违规信号）',
+  'report.violationLine': '- {from} → {to}（{type}{labelPart}）',
+  'report.labelPart': '：{label}',
+  'report.level.low': '低',
+  'report.level.medium': '中',
+  'report.level.high': '高',
+  'report.level.critical': '严重',
+} as const
+
+export const en: Record<keyof typeof zh, string> = {
+  // report.*：架构健康报告导出（lib/healthReport，模块级 t 自译）
+  'report.title': '# Architecture Health Report · {repo}',
+  'report.generatedAt': 'Map generated at: {t}',
+  'report.lastPatrol': 'Last patrol: {t}',
+  'report.coverage': 'File coverage: {covered} / {total} ({pct})',
+  'report.archTitle': '## Architecture Health (independent assessment — all-green modules ≠ healthy architecture)',
+  'report.score': '- **Overall health score: {n}**',
+  'report.couplingLine': '- Coupling: {c}　Complexity: {x}{churnPart}',
+  'report.churnPart': '　Churn: {churn}',
+  'report.decayFlags': 'Decay flags: {flags}',
+  'report.reviewNote': 'Overall review: {note}',
+  'report.archConcerns': '### Architecture-level Concerns',
+  'report.severityCritical': 'Critical',
+  'report.severityHigh': 'High',
+  'report.suggestion': 'Suggestion: {s}',
+  'report.modulesTitle': '## Module Health (ascending by score)',
+  'report.tableHeader': '| Module | Layer | Score | Coupling | Complexity | Decay Flags |',
+  'report.moduleConcernsTitle': '## Module-level Issues & Suggestions',
+  'report.moduleScore': '### {name} (score {score})',
+  'report.violationsTitle': '## Reverse Dependencies (layering violation signal)',
+  'report.violationLine': '- {from} → {to} ({type}{labelPart})',
+  'report.labelPart': ': {label}',
+  'report.level.low': 'Low',
+  'report.level.medium': 'Medium',
+  'report.level.high': 'High',
+  'report.level.critical': 'Critical',
+}
