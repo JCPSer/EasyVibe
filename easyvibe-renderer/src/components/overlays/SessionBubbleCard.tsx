@@ -3,7 +3,7 @@
 import { X } from 'lucide-react'
 import { absTime, toMs } from '@/shared/logic/diffStat'
 import { formatElapsed } from '@/runtime/sessionQueue'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 
 export interface SessionActive {
   sessionId: string

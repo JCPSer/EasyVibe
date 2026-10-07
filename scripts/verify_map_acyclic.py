@@ -3,7 +3,7 @@
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
                          CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
-                         与 EXPECT_EDGES 同代：c-arch-5 宿主能力端口化后的 21 模块 / 53 边快照）。
+                         与 EXPECT_EDGES 同代：c-arch-5 宿主能力端口化 + i18n 归属外迁后的 21 模块 / 54 边快照）。
                          fixture 是**结构投影**：只保留本文件与 verify_arch_split 断言的字段
                          （模块 id/name/layer/files/dependencies/health 与 concern 的 id+severity、
                          边的 id/from/to/type/strength/DV），prose（review_note / concern 正文 /
@@ -19,7 +19,7 @@
   D. INV-1：所有模块 dependencies == 其出边目标集
   E. SCC(>1) == 0（Tarjan，同前端口径）
   F. direction_violation 计数 == 0（c-arch-5 闭环后棘轮归零，任何新增逆边即红）
-  G. 边数 == 期望（live 图默认 52；`--map <fixture>` 时**默认不绑定**——fixture 是历史
+  G. 边数 == 期望（live 图默认 54；`--map <fixture>` 时**默认不绑定**——fixture 是历史
      快照，需断言时显式传 `--expect-edges <n>`）
   H. health.concerns 不含 c-arch-2（环已闭环）
 
@@ -33,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 53
+EXPECT_EDGES = 54
 DV_MAX = 0
 EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
 RETIRED_CONCERN = "c-arch-2"

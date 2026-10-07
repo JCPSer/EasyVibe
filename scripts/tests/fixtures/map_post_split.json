@@ -2,12 +2,12 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-06T19:59:14+08:00",
+    "generated_at": "2026-10-07T08:14:05+08:00",
     "stats": {
-      "files_total": 362,
-      "files_covered": 362,
+      "files_total": 371,
+      "files_covered": 371,
       "coverage_ratio": 1.0,
-      "edges_derived": 53,
+      "edges_derived": 54,
       "edges_inferred": 0,
       "retried_modules": 0
     }
@@ -29,7 +29,7 @@
       "id": "presentation-support",
       "name": "呈现支撑层",
       "order": 2,
-      "description": "渲染进程地基：宿主能力门面、WS/REST 传输层、跨域纯逻辑契约与设计基元"
+      "description": "渲染进程地基：宿主能力端口、WS/REST 传输层、跨域纯逻辑契约与设计基元"
     },
     {
       "id": "application",
@@ -80,14 +80,20 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 80,
+        "score": 84,
         "coupling": "low",
-        "complexity": "medium",
+        "complexity": "high",
         "churn": "medium",
-        "decay_flags": [],
+        "decay_flags": [
+          "dead_script"
+        ],
         "concerns": [
           {
             "id": "c-map-toolchain-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-map-toolchain-2",
             "severity": "high"
           }
         ]
@@ -103,14 +109,18 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 86,
+        "score": 87,
         "coupling": "high",
         "complexity": "low",
         "churn": "low",
         "decay_flags": [],
         "concerns": [
           {
-            "id": "c-contract-foundation-1",
+            "id": "c-contract-foundation-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-contract-foundation-3",
             "severity": "high"
           }
         ]
@@ -130,9 +140,18 @@
         "score": 82,
         "coupling": "medium",
         "complexity": "medium",
-        "churn": "medium",
+        "churn": "high",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-persistence-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-persistence-3",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -146,14 +165,18 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 85,
+        "score": 84,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "low",
         "decay_flags": [],
         "concerns": [
           {
-            "id": "c-map-domain-1",
+            "id": "c-map-domain-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-map-domain-3",
             "severity": "high"
           }
         ]
@@ -164,8 +187,8 @@
       "name": "Agent 运行时",
       "layer": "domain",
       "files": [
-        "easyvibe-backend/crates/easyvibe-session/**",
-        "easyvibe-backend/crates/easyvibe-ai-agent/**"
+        "easyvibe-backend/crates/easyvibe-ai-agent/**",
+        "easyvibe-backend/crates/easyvibe-session/**"
       ],
       "dependencies": [
         "contract-foundation",
@@ -173,7 +196,7 @@
         "map-domain"
       ],
       "health": {
-        "score": 78,
+        "score": 79,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
@@ -181,6 +204,10 @@
         "concerns": [
           {
             "id": "c-agent-runtime-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-agent-runtime-2",
             "severity": "high"
           }
         ]
@@ -197,12 +224,17 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 87,
+        "score": 85,
         "coupling": "medium",
         "complexity": "low",
         "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-event-bus-1",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -215,18 +247,31 @@
       ],
       "dependencies": [
         "contract-foundation",
-        "persistence",
         "map-domain",
         "agent-runtime",
-        "event-bus"
+        "event-bus",
+        "persistence"
       ],
       "health": {
         "score": 80,
         "coupling": "medium",
-        "complexity": "medium",
-        "churn": "medium",
+        "complexity": "high",
+        "churn": "high",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-task-engine-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-task-engine-3",
+            "severity": "high"
+          },
+          {
+            "id": "c-task-engine-4",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -244,12 +289,12 @@
         "agent-runtime",
         "event-bus",
         "task-engine",
-        "map-toolchain",
         "easyvibe-git",
-        "easyvibe-pipeline"
+        "easyvibe-pipeline",
+        "map-toolchain"
       ],
       "health": {
-        "score": 72,
+        "score": 71,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
@@ -259,6 +304,69 @@
         "concerns": [
           {
             "id": "c-server-api-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-server-api-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-server-api-3",
+            "severity": "high"
+          }
+        ]
+      }
+    },
+    {
+      "id": "easyvibe-git",
+      "name": "Git 工作树领域",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-git/**"
+      ],
+      "dependencies": [
+        "contract-foundation"
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "low",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-easyvibe-git-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-easyvibe-git-2",
+            "severity": "high"
+          }
+        ]
+      }
+    },
+    {
+      "id": "easyvibe-pipeline",
+      "name": "仓库 watcher 管线",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-pipeline/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "map-domain",
+        "agent-runtime",
+        "event-bus"
+      ],
+      "health": {
+        "score": 86,
+        "coupling": "medium",
+        "complexity": "low",
+        "churn": "low",
+        "decay_flags": [],
+        "concerns": [
+          {
+            "id": "c-easyvibe-pipeline-1",
             "severity": "high"
           }
         ]
@@ -274,12 +382,21 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 86,
-        "coupling": "low",
+        "score": 87,
+        "coupling": "medium",
         "complexity": "low",
         "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-renderer-shared-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-renderer-shared-2",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -289,14 +406,25 @@
       "files": [
         "easyvibe-renderer/src/runtime/**"
       ],
-      "dependencies": [],
+      "dependencies": [
+        "server-api"
+      ],
       "health": {
-        "score": 80,
+        "score": 84,
         "coupling": "medium",
-        "complexity": "medium",
+        "complexity": "low",
         "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-renderer-runtime-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-renderer-runtime-2",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -310,12 +438,17 @@
         "server-api"
       ],
       "health": {
-        "score": 88,
-        "coupling": "low",
+        "score": 90,
+        "coupling": "medium",
         "complexity": "low",
-        "churn": "medium",
+        "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-renderer-api-1",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -329,14 +462,18 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 80,
+        "score": 82,
         "coupling": "low",
         "complexity": "high",
-        "churn": "low",
+        "churn": "high",
         "decay_flags": [],
         "concerns": [
           {
             "id": "c-ui-kit-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-ui-kit-2",
             "severity": "high"
           }
         ]
@@ -355,12 +492,17 @@
         "renderer-runtime"
       ],
       "health": {
-        "score": 84,
+        "score": 88,
         "coupling": "low",
         "complexity": "low",
         "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-host-adapter-1",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -395,14 +537,20 @@
         "settings-ui"
       ],
       "health": {
-        "score": 76,
-        "coupling": "medium",
+        "score": 72,
+        "coupling": "high",
         "complexity": "high",
         "churn": "high",
-        "decay_flags": [],
+        "decay_flags": [
+          "coupling_high"
+        ],
         "concerns": [
           {
             "id": "c-console-ui-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-console-ui-5",
             "severity": "high"
           }
         ]
@@ -443,7 +591,7 @@
         "task-ui"
       ],
       "health": {
-        "score": 80,
+        "score": 78,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "low",
@@ -451,6 +599,10 @@
         "concerns": [
           {
             "id": "c-chat-ui-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-chat-ui-3",
             "severity": "high"
           }
         ]
@@ -469,12 +621,21 @@
         "renderer-shared"
       ],
       "health": {
-        "score": 82,
-        "coupling": "low",
+        "score": 80,
+        "coupling": "medium",
         "complexity": "medium",
-        "churn": "low",
+        "churn": "medium",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-task-ui-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-task-ui-3",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -492,14 +653,18 @@
         "chat-ui"
       ],
       "health": {
-        "score": 82,
-        "coupling": "low",
+        "score": 80,
+        "coupling": "medium",
         "complexity": "medium",
-        "churn": "low",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
             "id": "c-map-canvas-2",
+            "severity": "high"
+          },
+          {
+            "id": "c-map-canvas-3",
             "severity": "high"
           }
         ]
@@ -517,58 +682,21 @@
         "map-toolchain"
       ],
       "health": {
-        "score": 82,
+        "score": 85,
         "coupling": "low",
         "complexity": "low",
-        "churn": "high",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
             "id": "c-desktop-shell-1",
             "severity": "high"
+          },
+          {
+            "id": "c-desktop-shell-2",
+            "severity": "high"
           }
         ]
-      }
-    },
-    {
-      "id": "easyvibe-git",
-      "name": "Git 工作树领域",
-      "layer": "application",
-      "files": [
-        "easyvibe-backend/crates/easyvibe-git/**"
-      ],
-      "dependencies": [
-        "contract-foundation"
-      ],
-      "health": {
-        "score": 86,
-        "coupling": "low",
-        "complexity": "low",
-        "churn": "low",
-        "decay_flags": [],
-        "concerns": []
-      }
-    },
-    {
-      "id": "easyvibe-pipeline",
-      "name": "仓库 watcher 管线",
-      "layer": "application",
-      "files": [
-        "easyvibe-backend/crates/easyvibe-pipeline/**"
-      ],
-      "dependencies": [
-        "contract-foundation",
-        "map-domain",
-        "agent-runtime",
-        "event-bus"
-      ],
-      "health": {
-        "score": 84,
-        "coupling": "medium",
-        "complexity": "low",
-        "churn": "low",
-        "decay_flags": [],
-        "concerns": []
       }
     }
   ],
@@ -625,30 +753,30 @@
     {
       "id": "e8",
       "from": "task-engine",
-      "to": "persistence",
-      "type": "db",
-      "strength": "strong"
-    },
-    {
-      "id": "e9",
-      "from": "task-engine",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e10",
+      "id": "e9",
       "from": "task-engine",
       "to": "agent-runtime",
       "type": "call",
       "strength": "normal"
     },
     {
-      "id": "e11",
+      "id": "e10",
       "from": "task-engine",
       "to": "event-bus",
       "type": "event",
       "strength": "strong"
+    },
+    {
+      "id": "e11",
+      "from": "task-engine",
+      "to": "persistence",
+      "type": "import",
+      "strength": "weak"
     },
     {
       "id": "e12",
@@ -695,262 +823,280 @@
     {
       "id": "e18",
       "from": "server-api",
-      "to": "map-toolchain",
-      "type": "config",
-      "strength": "normal"
-    },
-    {
-      "id": "e19",
-      "from": "server-api",
       "to": "easyvibe-git",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e20",
+      "id": "e19",
       "from": "server-api",
       "to": "easyvibe-pipeline",
       "type": "call",
       "strength": "normal"
     },
     {
-      "id": "e21",
-      "from": "renderer-api",
-      "to": "server-api",
-      "type": "api",
-      "strength": "strong"
-    },
-    {
-      "id": "e22",
-      "from": "host-adapter",
-      "to": "console-ui",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e23",
-      "from": "host-adapter",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e24",
-      "from": "console-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e25",
-      "from": "console-ui",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e26",
-      "from": "console-ui",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e27",
-      "from": "console-ui",
-      "to": "ui-kit",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e28",
-      "from": "console-ui",
-      "to": "map-canvas",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e29",
-      "from": "console-ui",
-      "to": "chat-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e30",
-      "from": "console-ui",
-      "to": "task-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e32",
-      "from": "console-ui",
-      "to": "settings-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e33",
-      "from": "settings-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e34",
-      "from": "settings-ui",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e35",
-      "from": "settings-ui",
-      "to": "ui-kit",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e36",
-      "from": "chat-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e37",
-      "from": "chat-ui",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e38",
-      "from": "chat-ui",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e39",
-      "from": "chat-ui",
-      "to": "task-ui",
-      "type": "import",
-      "strength": "weak"
-    },
-    {
-      "id": "e40",
-      "from": "task-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e41",
-      "from": "task-ui",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e42",
-      "from": "task-ui",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e43",
-      "from": "map-canvas",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e44",
-      "from": "map-canvas",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e45",
-      "from": "map-canvas",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e46",
-      "from": "map-canvas",
-      "to": "ui-kit",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e47",
-      "from": "map-canvas",
-      "to": "chat-ui",
-      "type": "import",
-      "strength": "weak"
-    },
-    {
-      "id": "e48",
-      "from": "desktop-shell",
-      "to": "server-api",
-      "type": "api",
-      "strength": "strong"
-    },
-    {
-      "id": "e49",
-      "from": "desktop-shell",
+      "id": "e20",
+      "from": "server-api",
       "to": "map-toolchain",
       "type": "config",
-      "strength": "weak"
+      "strength": "normal"
     },
     {
-      "id": "e50",
+      "id": "e21",
       "from": "easyvibe-git",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e51",
+      "id": "e22",
       "from": "easyvibe-pipeline",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e52",
+      "id": "e23",
       "from": "easyvibe-pipeline",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e53",
+      "id": "e24",
       "from": "easyvibe-pipeline",
       "to": "agent-runtime",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e54",
+      "id": "e25",
       "from": "easyvibe-pipeline",
       "to": "event-bus",
+      "type": "event",
+      "strength": "normal"
+    },
+    {
+      "id": "e26",
+      "from": "renderer-runtime",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
+    },
+    {
+      "id": "e27",
+      "from": "renderer-api",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
+    },
+    {
+      "id": "e28",
+      "from": "host-adapter",
+      "to": "console-ui",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e29",
+      "from": "host-adapter",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e30",
+      "from": "console-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e32",
+      "from": "console-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e33",
+      "from": "console-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e34",
+      "from": "console-ui",
+      "to": "ui-kit",
       "type": "import",
       "strength": "normal"
+    },
+    {
+      "id": "e35",
+      "from": "console-ui",
+      "to": "map-canvas",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e36",
+      "from": "console-ui",
+      "to": "chat-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e37",
+      "from": "console-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e38",
+      "from": "console-ui",
+      "to": "settings-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e39",
+      "from": "settings-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e40",
+      "from": "settings-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e41",
+      "from": "settings-ui",
+      "to": "ui-kit",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e42",
+      "from": "chat-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e43",
+      "from": "chat-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e44",
+      "from": "chat-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e45",
+      "from": "chat-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e46",
+      "from": "task-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e47",
+      "from": "task-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e48",
+      "from": "task-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e49",
+      "from": "map-canvas",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e50",
+      "from": "map-canvas",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e51",
+      "from": "map-canvas",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e52",
+      "from": "map-canvas",
+      "to": "ui-kit",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e53",
+      "from": "map-canvas",
+      "to": "chat-ui",
+      "type": "import",
+      "strength": "weak"
+    },
+    {
+      "id": "e54",
+      "from": "desktop-shell",
+      "to": "server-api",
+      "type": "api",
+      "strength": "strong"
+    },
+    {
+      "id": "e55",
+      "from": "desktop-shell",
+      "to": "map-toolchain",
+      "type": "config",
+      "strength": "weak"
     }
   ],
   "health": {
-    "score": 88,
+    "score": 80,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
-    "decay_flags": [],
-    "concerns": []
+    "decay_flags": [
+      "responsibility_overlap"
+    ],
+    "concerns": [
+      {
+        "id": "c-arch-9",
+        "severity": "high"
+      },
+      {
+        "id": "c-arch-10",
+        "severity": "high"
+      }
+    ]
   }
 }

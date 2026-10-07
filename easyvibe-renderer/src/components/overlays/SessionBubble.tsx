@@ -4,7 +4,7 @@ import { onQueueChanged, onSessionEvent, onTaskEvent } from '@/runtime/growthBus
 import { toast } from '@/runtime/toast'
 import { toMs } from '@/shared/logic/diffStat'
 import { formatElapsed, kindFromLabel } from '@/runtime/sessionQueue'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 import { SessionBubbleCard } from './SessionBubbleCard'
 import { sessionsOverview } from '@/api/repos'
 import { listTasks } from '@/api/task'

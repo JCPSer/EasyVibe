@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { TrafficLightsSpacer, FakeTrafficLights } from './WindowControls'
 import { startWindowDrag, toggleWindowMaximize } from '@/runtime/host'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 import {
   GitBranch,
   Map as MapIcon,
@@ -43,7 +43,7 @@ export type PageId =
   | 'kb-apis'
   | 'settings'
 
-// 导航文案经 i18n key 取词（字典见 @/lib/i18n，域 shell.nav）。
+// 导航文案经 i18n key 取词（字典见 @/runtime/i18n，域 shell.nav）。
 const NAV: { groupKey: string; items: { id: PageId; labelKey: string; icon: typeof MapIcon }[] }[] = [
   {
     groupKey: 'shell.nav.group.explore',

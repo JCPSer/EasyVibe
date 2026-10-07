@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, RotateCcw, Save, X } from 'lucide-react'
 import { toast } from '@/runtime/toast'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 import { deleteSetting, harness, listSettings, putSetting } from '@/api/settings'
 import { health, llmTest } from '@/api/system'
 import { SECTIONS, SLOTS, type SectionId, type Service } from './common'

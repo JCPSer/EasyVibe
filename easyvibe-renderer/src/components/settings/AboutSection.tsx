@@ -1,6 +1,6 @@
 // 关于分区：界面语言（切换即时全界面生效）+ 应用后端版本 / Harness 版本 / 数据存储（只读事实）。
 // 拆自 SettingsPanel.tsx（2026-10-05 防膨胀）。
-import { useLang, type Lang } from '@/lib/i18n'
+import { useLang, type Lang } from '@/runtime/i18n'
 import { Select } from '@/components/ui/SelectMenu'
 
 export function AboutSection({ about }: { about: { backend: string; harness: string } | null }) {

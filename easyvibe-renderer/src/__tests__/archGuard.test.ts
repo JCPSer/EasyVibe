@@ -54,8 +54,9 @@ const resolveRel = (fileRel: string, spec: string): string | null => {
 
 // ---------------- 文件集定义（与磁盘实况双向全等，见断言组 4） ----------------
 const RUNTIME_FILES = [
+  'runtime/__tests__/i18n.test.ts',
   'runtime/__tests__/terminalBuffer.test.ts',
-  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/host.ts', 'runtime/motion.ts',
+  'runtime/analytics.ts', 'runtime/env.ts', 'runtime/growthBus.ts', 'runtime/host.ts', 'runtime/i18n.ts', 'runtime/motion.ts',
   'runtime/notify.ts', 'runtime/sessionQueue.ts', 'runtime/terminalBuffer.ts', 'runtime/toast.tsx',
   'runtime/useRepoActivity.ts', 'runtime/ws.ts',
 ]

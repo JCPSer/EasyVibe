@@ -10,7 +10,7 @@
 本脚本把「拆格不再回退」落成一条 CI 可见的可执行判据（秒级、fail-closed）：
 
   --check [--map PATH]  默认读 .easyvibe/map/map.json；CI 传受版本控制的 fixture。
-  --selfcheck           合成输入 N0–N4（不读 live map、不改仓库），逐条自证负例必红/正例必绿。
+  --selfcheck           合成输入 N0–N6（不读 live map、不改仓库、不落盘），逐条自证负例必红/正例必绿。
 
 判据：
   C0 退役态防回归：探针 `src/components/settings/SettingsPanel.tsx` 不得被 `console-ui`
@@ -27,6 +27,12 @@
   C5 窄依赖白名单（Δ4/Q5）：`settings-ui` 归属文件的实际 import 只许落在
      相对路径 `./` ｜ `@/runtime/**` ｜ `@/api/**` ｜ `@/components/ui/**` ｜ 外部包；
      禁 `@/pages/**`、`@/App`、其他业务域（chat/taskworkflow/canvas/shell/overlays/gate）。
+     C5 因果说明：i18n 已落 `@/runtime/**`（上一轮越界环闭环），故 settings-ui 的
+     翻译引用本就在白名单内，无须扩前缀——白名单保持「窄」。
+  C6 同层环判据（图边侧）：`settings-ui` 的出边目标集不得含 `console-ui`（map / fixture
+     两入口同判；该图无 edges 字段时回退读 settings-ui.dependencies）。与 C5 互补：
+     C5 扫**磁盘 import 文本**（防越界前缀）、C6 判**图边**（防同层环）；只改盘不改图 → C6 红，
+     只改图不改盘 → C5 红。
 
 glob 口径：与 `.easyvibe/map/easyvibe_map_cli.py::glob_match` 同源——`**` 跨分隔符、`*` 不跨、
 `?` 单字符非分隔符。为让 CI 无 live 依赖（.easyvibe/ 被 gitignore），此处**逐字复制**该实现。
@@ -127,8 +133,12 @@ def _iter_settings_files(root, globs):
     return sorted(out)
 
 
-def c5_scan(root, globs):
-    """返回 (problems, scanned)。对 settings-ui 归属源码做 import 白名单复核。"""
+def c5_scan(root, globs, overrides=None):
+    """返回 (problems, scanned)。对 settings-ui 归属源码做 import 白名单复核。
+
+    overrides：只读注入面 {posix 相对路径: 文本}；命中即以内存文本替代磁盘内容
+    （--selfcheck 的负例靠它注入越界 import，不落盘、不污染仓库）。
+    """
     problems = []
     if not globs:
         return ["C5 settings-ui 无 glob，无法裁决依赖白名单"], []
@@ -136,13 +146,17 @@ def c5_scan(root, globs):
     files = [f for f in files if f.endswith((".ts", ".tsx"))]
     if not files:
         return ["C5 settings-ui glob 未命中任何源码文件（fail-closed）"], []
+    overrides = overrides or {}
     for rel in files:
-        try:
-            with open(os.path.join(root, rel), encoding="utf-8") as fh:
-                text = fh.read()
-        except (UnicodeDecodeError, OSError) as e:
-            problems.append("C5 读取失败（fail-closed）%s: %s" % (rel, e))
-            continue
+        if rel in overrides:
+            text = overrides[rel]
+        else:
+            try:
+                with open(os.path.join(root, rel), encoding="utf-8") as fh:
+                    text = fh.read()
+            except (UnicodeDecodeError, OSError) as e:
+                problems.append("C5 读取失败（fail-closed）%s: %s" % (rel, e))
+                continue
         specs = IMPORT_RE.findall(text) + REQUIRE_RE.findall(text)
         for s in specs:
             if s.startswith("."):
@@ -156,8 +170,20 @@ def c5_scan(root, globs):
 
 
 # ------------------------------------------------------------------ 判据
-def evaluate(map_obj, root, map_label=""):
-    """施加 C0–C3b + C5，返回 (problems, checks)。空 problems = 绿。"""
+def _settings_targets(map_obj):
+    """settings-ui 的出边目标集：优先读 edges，无 edges 字段时回退读 dependencies。"""
+    edges = map_obj.get("edges") if isinstance(map_obj, dict) else None
+    if isinstance(edges, list) and edges:
+        return [e.get("to") for e in edges
+                if isinstance(e, dict) and e.get("from") == GRID and e.get("to")]
+    for m in _modules(map_obj):
+        if isinstance(m, dict) and m.get("id") == GRID:
+            return [str(t) for t in (m.get("dependencies") or [])]
+    return []
+
+
+def evaluate(map_obj, root, map_label="", overrides=None):
+    """施加 C0–C3b + C5 + C6，返回 (problems, checks)。空 problems = 绿。"""
     problems, checks = [], []
     by_id = _by_id(map_obj)
     ids = set(by_id)
@@ -212,10 +238,16 @@ def evaluate(map_obj, root, map_label=""):
 
     # ---- C5 窄依赖白名单
     if GRID in ids:
-        c5_problems, _files = c5_scan(root, by_id[GRID])
+        c5_problems, _files = c5_scan(root, by_id[GRID], overrides)
         problems += c5_problems
 
-    for cid in ("C0", "C1", "C2", "C3", "C5"):
+    # ---- C6 同层环判据（图边侧）：settings-ui 不得指向 console-ui
+    if GRID in ids:
+        targets = _settings_targets(map_obj)
+        if CONSOLE in targets:
+            problems.append("C6 %s 出边指向 %s（同层环，SCC 复发）" % (GRID, CONSOLE))
+
+    for cid in ("C0", "C1", "C2", "C3", "C5", "C6"):
         checks.append((cid, "FAIL" if any(p.startswith(cid + " ") for p in problems) else "PASS"))
     checks.append(("C3b", "FAIL" if any(p.startswith("C3b ") for p in problems) else "PASS"))
     return problems, dict(checks)
@@ -257,10 +289,10 @@ def _green_map():
 
 
 def cmd_selfcheck():
-    cases = []  # (name, map_obj, expect_red, want_check)
+    cases = []  # (name, map_obj, expect_red, want_check, overrides)
 
-    def add(name, map_obj, expect_red, want_check=None):
-        cases.append((name, map_obj, expect_red, want_check))
+    def add(name, map_obj, expect_red, want_check=None, overrides=None):
+        cases.append((name, map_obj, expect_red, want_check, overrides))
 
     add("N0 合成拆分后图（正例）", _green_map(), False)
 
@@ -285,9 +317,20 @@ def cmd_selfcheck():
             x["files"] = x["files"] + ["easyvibe-renderer/src/components/shell/**"]
     add("N2 settings-ui 再吞 shell/** → C3/C3b 必红", m3, True, "C3")
 
+    # N5 同层环回归（图边侧）：settings-ui 出边指回 console-ui → C6 必红
+    m5 = _green_map()
+    m5["edges"] = [{"id": "ex1", "from": GRID, "to": CONSOLE, "type": "import"}]
+    add("N5 settings-ui 出边指回 console-ui → C6 必红", m5, True, "C6")
+
+    # N6 越界 import 回归（盘侧，只读注入）：settings 源文件改回越界前缀 → C5 必红
+    # 注入文本不落盘：c5_scan 以内存文本替代磁盘内容，仓库/CI 不受污染。
+    add("N6 settings 源文件改回越界前缀 → C5 必红",
+        _green_map(), True, "C5",
+        {PROBE: "import { useLang } from '@/lib/i18n'\nexport const x = useLang\n"})
+
     failed = 0
-    for name, map_obj, expect_red, want_check in cases:
-        problems, checks = evaluate(map_obj, REPO)
+    for name, map_obj, expect_red, want_check, overrides in cases:
+        problems, checks = evaluate(map_obj, REPO, overrides=overrides)
         red = bool(problems)
         ok = red == expect_red
         if ok and want_check:
@@ -336,7 +379,7 @@ def cmd_selfcheck():
             detail += " ← " + problems[0]
         print("%s N4 真值双向断言（判据本身工作）  %s" % ("PASS" if ok else "FAIL", detail))
 
-    print("N0–N4 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
+    print("N0–N6 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
     return 0 if failed == 0 else 1
 
 

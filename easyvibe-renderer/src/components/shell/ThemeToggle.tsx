@@ -1,5 +1,5 @@
 import { Moon, Sun } from 'lucide-react'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 
 /** 主题开关（2026-10-04）：苹果式滑动拨块——亮=太阳 / 暗=月亮，
  *  拨块带滑动过渡与图标交叉淡化；主题本体由 App 持有（html.dark class + localStorage）。 */

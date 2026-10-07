@@ -42,11 +42,11 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，21 模块 / 53 边，c-arch-5 后 DV=0）；
+      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，21 模块 / 54 边，c-arch-5 后 DV=0；i18n 归属外迁后 e42 同层环已摘）；
       # 旧快照 map_post_migration.json（14 模块 / 31 边，含受控 DV=1）仅由 --selfcheck 的 H2 负例自证使用；
       # 绿例（H1）改用与 EXPECT_EDGES 同代的 map_post_split.json（DV=0，DV_MAX 归零后的合法全绿样本）。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 53
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 54
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck

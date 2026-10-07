@@ -15,7 +15,7 @@ vi.stubGlobal('localStorage', {
   },
 })
 
-const { t, setLang, getLang, onLangChange, zhDict, enDict } = await import('@/lib/i18n')
+const { t, setLang, getLang, onLangChange, zhDict, enDict } = await import('@/runtime/i18n')
 
 describe('i18n · 字典完整性', () => {
   it('zh/en key 集合全等', () => {
@@ -90,17 +90,17 @@ describe('i18n · 初始语言检测（已存值 ?? navigator）', () => {
   it('已存值优先', async () => {
     vi.resetModules()
     mem.set('easyvibe.lang', 'en')
-    const m = await import('@/lib/i18n')
+    const m = await import('@/runtime/i18n')
     expect(m.getLang()).toBe('en')
   })
   it('无已存值时按 navigator.language 判定', async () => {
     vi.resetModules()
     mem.clear()
     vi.stubGlobal('navigator', { language: 'zh-CN' })
-    expect((await import('@/lib/i18n')).getLang()).toBe('zh')
+    expect((await import('@/runtime/i18n')).getLang()).toBe('zh')
     vi.resetModules()
     vi.stubGlobal('navigator', { language: 'en-US' })
-    expect((await import('@/lib/i18n')).getLang()).toBe('en')
+    expect((await import('@/runtime/i18n')).getLang()).toBe('en')
   })
   it('默认导出实例与全局状态一致', () => {
     expect(getLang()).toBe('zh')

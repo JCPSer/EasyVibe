@@ -1,7 +1,7 @@
 import { Activity, CircleHelp, FileDown, LayoutGrid, Lightbulb, Settings, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { isWsConnected, onWsConnection } from '@/runtime/growthBus'
-import { useLang } from '@/lib/i18n'
+import { useLang } from '@/runtime/i18n'
 import { ThemeToggle } from './ThemeToggle'
 import { TopCenter } from './TopCenter'
 
