@@ -21,10 +21,14 @@ RENDERER_SHARED = ["easyvibe-renderer/src/shared/**", "easyvibe-renderer/src/typ
 UI_KIT = ["easyvibe-renderer/src/components/ui/**",
           "easyvibe-renderer/src/lib/utils.ts",
           "easyvibe-renderer/src/hooks/use-mobile.ts"]
-UI_KIT_CONSOLE = ["easyvibe-renderer/src/components/ui/**"]
 
-# ---- console 侧 settings 格与装配壳
+# ---- console 侧 settings 格、lib 三类能力格与装配壳
 SETTINGS = ["easyvibe-renderer/src/components/settings/**"]
+# c-arch-14：lib/** 三类非装配能力外提为独立呈现格，各恰 1 条**精确文件 glob**（无通配）。
+# 合成图必须**手写**（不得由 policy 派生），否则判据与被测共享同一错误源。
+HEALTH_REPORT = ["easyvibe-renderer/src/lib/healthReport.ts"]
+ONBOARDING = ["easyvibe-renderer/src/lib/onboarding.ts"]
+UPDATER = ["easyvibe-renderer/src/lib/updater.ts"]
 CONSOLE_ASSEMBLY = ["easyvibe-renderer/src/pages/**",
                     "easyvibe-renderer/src/components/shell/**",
                     "easyvibe-renderer/src/components/overlays/**"]
@@ -41,12 +45,19 @@ HOST_ADAPTER_PREFIX = "easyvibe-renderer/src/host-adapter/"
 
 
 def console_green_map():
-    """console 守卫合成「拆分后」绿图：settings-ui 独立 + console-ui（含装配壳）。"""
+    """console 守卫合成「拆分后」绿图：settings-ui + lib 三类能力格 + console-ui（仅装配壳）。
+
+    ★ console-ui 的 files 不含 `src/lib/**`（c-arch-14 已外提）；ui-kit 用完整三 glob
+    （含 `src/lib/utils.ts`），故 utils.ts 在合成图里唯一归 ui-kit（ΔS5）。
+    """
     return {"modules": [
         {"id": "map-toolchain", "files": list(MAP_TOOLCHAIN_CONSOLE)},
         {"id": "renderer-runtime", "files": list(RENDERER_RUNTIME)},
         {"id": "renderer-api", "files": list(RENDERER_API)},
-        {"id": "ui-kit", "files": list(UI_KIT_CONSOLE)},
+        {"id": "ui-kit", "files": list(UI_KIT)},
+        {"id": "health-report", "files": list(HEALTH_REPORT)},
+        {"id": "onboarding-state", "files": list(ONBOARDING)},
+        {"id": "app-updater", "files": list(UPDATER)},
         {"id": "console-ui", "files": list(CONSOLE_ASSEMBLY)},
         {"id": "settings-ui", "files": list(SETTINGS)},
     ]}

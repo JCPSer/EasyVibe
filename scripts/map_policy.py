@@ -260,8 +260,9 @@ def validate_policy(policy: dict) -> list:
                 "gates.single_file_loc_max", "gates.single_file_loc_caps",
                 "gates.db_direct_total", "gates.db_direct_focus_max",
                 "gates.db_direct_focus_files_max",
-                "granularity.console.grid", "granularity.console.caps",
-                "granularity.console.allowed_import_prefixes",
+                # c-arch-14：console 粒度由单格标量结构泛化为多格结构（grids/caps/逐格前缀）
+                "granularity.console.grids", "granularity.console.caps",
+                "granularity.console.import_prefixes_by_grid",
                 "granularity.renderer.grids", "granularity.renderer.caps",
                 "granularity.host.probe_owner"):
         try:
@@ -271,6 +272,22 @@ def validate_policy(policy: dict) -> list:
     # 粒度白名单/上限/探针归属所点名的格必须真实存在（防悬空格 / 拼写漂移）
     mset = set(mids)
     try:
+        # c-arch-14：console 多格网格三集合必须严格相等且 ⊆ 模块 id 集
+        # （防「加了格忘了 cap / 忘了前缀」的静默形态：任一不等即 fail-closed）
+        cg = require(policy, "granularity.console")
+        c_grids = set(cg.get("grids", []))
+        c_caps = set(cg.get("caps", {}))
+        c_pref = set(cg.get("import_prefixes_by_grid", {}))
+        if c_grids != c_caps:
+            problems.append("F0 granularity.console grids != caps: grids-only=%s caps-only=%s"
+                            % (sorted(c_grids - c_caps), sorted(c_caps - c_grids)))
+        if c_grids != c_pref:
+            problems.append("F0 granularity.console grids != import_prefixes_by_grid: "
+                            "grids-only=%s prefixes-only=%s"
+                            % (sorted(c_grids - c_pref), sorted(c_pref - c_grids)))
+        for mid in c_grids | c_caps | c_pref:
+            if mid not in mset:
+                problems.append("F0 granularity.console 指向未知格: %s" % mid)
         for mid in require(policy, "granularity.console.caps"):
             if mid not in mset:
                 problems.append("F0 granularity.console.caps 指向未知格: %s" % mid)

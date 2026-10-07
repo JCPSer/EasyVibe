@@ -28,10 +28,17 @@ SCAN_FILES = [
 ]
 SCAN_DIRS = ["easyvibe-desktop/src-tauri/src"]
 
+# c-arch-14：lib/** 三类非装配能力外提的呈现格名，同样不得出现在桌面壳（Rust/tauri.conf）。
+_C14_MODULES = [
+    "health-report",
+    "onboarding-state",
+    "app-updater",
+]
 FORBIDDEN = [
     "console-ui", "chat-ui", "task-ui", "map-canvas", "renderer-core",
     "renderer-runtime", "renderer-api", "renderer-shared", "ui-kit", "settings-ui",
     "host-adapter",
+    *_C14_MODULES,
     "easyvibe-renderer", "easyvibe_renderer",
     "@/components", "@/runtime", "@/api", "@/shared", "@/host-adapter",
 ]
@@ -166,6 +173,12 @@ def selfcheck(real_root):
             fh.write(base + 'let _ = "host-adapter";\n')
         h8 = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
         results.append(("S8 注入 host-adapter → 必红", len(h8) > 0, "; ".join(x[2] for x in h8[:2])))
+        # S9 c-arch-14：逐条注入 lib/** 三类能力外提的呈现格名 → 必红（新名不得绕过壳边界）
+        for tok in _C14_MODULES:
+            with open(lib, "w", encoding="utf-8") as fh:
+                fh.write(base + 'let _ = "%s";\n' % tok)
+            hh = [x for x in scan(tmp) if x[0].endswith("lib.rs")]
+            results.append(("S9 注入 %s → 必红" % tok, len(hh) > 0, "; ".join(x[2] for x in hh[:2])))
         with open(lib, "w", encoding="utf-8") as fh:
             fh.write(base)
         # S4 真仓库 → 必绿（仅白名单路径）

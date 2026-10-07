@@ -38,8 +38,11 @@ RE_FETCH = re.compile(r"(?<![\w.])fetch\s*\(")
 RE_APIPATH = re.compile(r"['\"`]/api/")
 RE_WS = re.compile(r"new\s+WebSocket\b")
 
-# presentation 五模块（地图口径 A8a/A8b 的 from 白名单；settings-ui 于 c-console-ui-3 析出）
-PRESENTATION = {"console-ui", "settings-ui", "chat-ui", "task-ui", "map-canvas"}
+# presentation 八模块（地图口径 A8a/A8b 的 from 白名单）：console-ui 于 c-arch-3 收口、
+# settings-ui 于 c-console-ui-3 析出、health-report/onboarding-state/app-updater 于 c-arch-14 析出。
+# A8a/A8b 判的是 **api 型**边：三新格只有 import 型边（落 presentation-support），故不误红。
+PRESENTATION = {"console-ui", "settings-ui", "chat-ui", "task-ui", "map-canvas",
+                "health-report", "onboarding-state", "app-updater"}
 APPLICATION = {"server-api", "task-engine", "event-bus"}
 
 # c-arch-9 收敛后的**登记面结构判据**（独立于磁盘，互补于 check_group 的「键集全等」）：

@@ -229,10 +229,37 @@
       ]
     },
     {
+      "id": "health-report",
+      "name": "健康报告导出",
+      "layer": "presentation",
+      "emit_order": 15,
+      "files": [
+        "easyvibe-renderer/src/lib/healthReport.ts"
+      ]
+    },
+    {
+      "id": "onboarding-state",
+      "name": "新手引导状态层",
+      "layer": "presentation",
+      "emit_order": 16,
+      "files": [
+        "easyvibe-renderer/src/lib/onboarding.ts"
+      ]
+    },
+    {
+      "id": "app-updater",
+      "name": "桌面自更新检查",
+      "layer": "presentation",
+      "emit_order": 17,
+      "files": [
+        "easyvibe-renderer/src/lib/updater.ts"
+      ]
+    },
+    {
       "id": "host-adapter",
       "name": "宿主能力适配与引导",
       "layer": "app-entry",
-      "emit_order": 15,
+      "emit_order": 18,
       "files": [
         "easyvibe-renderer/src/host-adapter/**",
         "easyvibe-renderer/index.html"
@@ -242,13 +269,13 @@
       "id": "console-ui",
       "name": "应用壳与页面装配",
       "layer": "presentation",
-      "emit_order": 16,
+      "emit_order": 19,
       "files": [
         "easyvibe-renderer/src/App.tsx",
         "easyvibe-renderer/src/main.tsx",
         "easyvibe-renderer/src/pages/**",
         "easyvibe-renderer/src/hooks/**",
-        "easyvibe-renderer/src/lib/**",
+        "easyvibe-renderer/src/lib/__tests__/**",
         "easyvibe-renderer/src/__tests__/**",
         "easyvibe-renderer/vite.config.ts",
         "easyvibe-renderer/vitest.config.ts",
@@ -266,7 +293,7 @@
       "id": "settings-ui",
       "name": "设置面板与分区",
       "layer": "presentation",
-      "emit_order": 17,
+      "emit_order": 20,
       "files": [
         "easyvibe-renderer/src/components/settings/**"
       ]
@@ -275,7 +302,7 @@
       "id": "chat-ui",
       "name": "对话与工作台",
       "layer": "presentation",
-      "emit_order": 18,
+      "emit_order": 21,
       "files": [
         "easyvibe-renderer/src/components/chat/**"
       ]
@@ -284,7 +311,7 @@
       "id": "task-ui",
       "name": "任务工作流 UI",
       "layer": "presentation",
-      "emit_order": 19,
+      "emit_order": 22,
       "files": [
         "easyvibe-renderer/src/components/taskworkflow/**"
       ]
@@ -293,7 +320,7 @@
       "id": "map-canvas",
       "name": "地图画布",
       "layer": "presentation",
-      "emit_order": 20,
+      "emit_order": 23,
       "files": [
         "easyvibe-renderer/src/components/canvas/**"
       ]
@@ -302,15 +329,15 @@
       "id": "desktop-shell",
       "name": "桌面壳",
       "layer": "app-entry",
-      "emit_order": 21,
+      "emit_order": 24,
       "files": [
         "easyvibe-desktop/**"
       ]
     }
   ],
   "edges": {
-    "expect_count": 62,
-    "sha256": "b636c18a46a1da6c9d80465a9627eeae83cd5fd848bd2b4be8f073ad1d7a4d5e",
+    "expect_count": 68,
+    "sha256": "80b926b0bbb0ead07e9b695aea7e67b10e09090193c798336113a6fcb0c946c4",
     "retired_ids": [
       "e31"
     ]
@@ -328,7 +355,9 @@
       "c-map-toolchain-2",
       "c-arch-13",
       "c-server-api-3",
-      "c-server-api-4"
+      "c-server-api-4",
+      "c-arch-14",
+      "c-console-ui-5"
     ],
     "server_api_out_edges_max": 9,
     "server_api_out_edges": [
@@ -352,15 +381,33 @@
   },
   "granularity": {
     "console": {
-      "grid": "settings-ui",
-      "caps": {
-        "settings-ui": 1
-      },
-      "allowed_import_prefixes": [
-        "@/runtime/",
-        "@/api/",
-        "@/components/ui/"
+      "grids": [
+        "settings-ui",
+        "health-report",
+        "onboarding-state",
+        "app-updater"
       ],
+      "caps": {
+        "settings-ui": 1,
+        "health-report": 1,
+        "onboarding-state": 1,
+        "app-updater": 1
+      },
+      "import_prefixes_by_grid": {
+        "settings-ui": [
+          "@/runtime/",
+          "@/api/",
+          "@/components/ui/"
+        ],
+        "health-report": [
+          "@/runtime/",
+          "@/types/"
+        ],
+        "onboarding-state": [],
+        "app-updater": [
+          "@/runtime/"
+        ]
+      },
       "retired_ids": []
     },
     "renderer": {
