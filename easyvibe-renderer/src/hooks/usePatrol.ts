@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { enqueue } from '@/runtime/sessionQueue'
 import { patrol } from '@/api/canvas'
 
@@ -20,15 +21,15 @@ export function usePatrol(backendRepo: string | null) {
         if ((e as Response)?.status === 409) {
           const res = await enqueue(backendRepo, 'patrol')
           if (res?.outcome === 'replaced')
-            toast(`已加入队列：巡检将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
-          else if (res?.outcome === 'queued') toast('已加入队列：巡检将在当前会话结束后自动开始')
+            toast(t('hooks.patrol.queuedReplaced', { label: res.replacedLabel ?? t('common.replacedFallback') }))
+          else if (res?.outcome === 'queued') toast(t('hooks.patrol.queued'))
           else if (res?.outcome === 'started') {
             setPatrolling(true)
-            toast('已直接开始巡检')
+            toast(t('hooks.patrol.started'))
           }
           return
         }
-        toast('巡检启动失败（请确认后端在线后重试）。', 'error')
+        toast(t('hooks.patrol.startFailed'), 'error')
       })
   }, [backendRepo, patrolling])
   return { patrolling, setPatrolling, startPatrol }

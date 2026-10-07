@@ -1,4 +1,5 @@
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 
 // 会话排队入队 helper（运行会话气泡 + 单会话排队，2026-10-04）：
 // 409（单会话纪律）的各入口统一走这里——POST /repos/{id}/session-queue 一次原子裁决：
@@ -71,10 +72,10 @@ export async function enqueue(
       return { outcome: 'queued', replacedLabel: null }
     }
     const body = (await r.json().catch(() => null)) as { error?: string } | null
-    toast(`加入队列失败：${body?.error ?? `HTTP ${r.status}`}`, 'error')
+    toast(t('runtime.queue.enqueueFailed', { reason: body?.error ?? `HTTP ${r.status}` }), 'error')
     return null
   } catch {
-    toast('加入队列失败（请确认后端在线后重试）。', 'error')
+    toast(t('runtime.queue.enqueueOffline'), 'error')
     return null
   }
 }

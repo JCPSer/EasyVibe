@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodeMap } from '@/types/map'
 import { toast } from '@/runtime/toast'
+import { t } from '@/runtime/i18n'
 import { enqueue } from '@/runtime/sessionQueue'
 import { isValidGrowthEvent, mergeGrowthEvents, parseGrowthText } from '@/shared/logic/growthMerge'
 import { onGrowthEvent, onPatrolFinished, onQueueChanged, onSessionEvent, setWsCloseListener } from '@/runtime/growthBus'
@@ -156,7 +157,7 @@ export function useGrowthPlayback(
   const startReinduce = useCallback(() => {
     if (!backendRepo || inducing) return
     // R7 清债：重新归纳 = spawn 全仓库 agent（数分钟 + LLM 成本），先确认
-    if (!window.confirm('重新归纳将 spawn agent 全量分析仓库（通常数分钟），期间地图数据会被刷新。继续？')) return
+    if (!window.confirm(t('canvas.induce.confirm'))) return
     setInducing(true)
     reinduce(backendRepo)
       .then((r) => {
@@ -173,18 +174,18 @@ export function useGrowthPlayback(
         if ((e as Response)?.status === 409) {
           const res = await enqueue(backendRepo, 'reinduce')
           if (res?.outcome === 'replaced')
-            toast(`已加入队列：归纳将在当前会话结束后自动开始（已替换排队：${res.replacedLabel ?? '旧任务'}）`)
-          else if (res?.outcome === 'queued') toast('已加入队列：归纳将在当前会话结束后自动开始')
+            toast(t('canvas.induce.queuedReplaced', { label: res.replacedLabel ?? t('common.replacedFallback') }))
+          else if (res?.outcome === 'queued') toast(t('canvas.induce.queued'))
           else if (res?.outcome === 'started') {
             // 竞态消解：入队裁决时已无活动会话，后端直接执行——走与手动相同的 armed 逻辑
             growthFromReinduce.current = true
             setGrowth({ events: [], index: 0, playing: true, done: false })
             setInducing(true)
-            toast('已直接开始归纳')
+            toast(t('canvas.induce.started'))
           }
           return
         }
-        toast('归纳启动失败（请确认后端在线后重试）。', 'error')
+        toast(t('canvas.induce.startFailed'), 'error')
       })
   }, [backendRepo, inducing])
 
@@ -197,7 +198,7 @@ export function useGrowthPlayback(
           growthFromReinduce.current = true
           setGrowth({ events: [], index: 0, playing: true, done: false })
           setInducing(true)
-          toast('排队任务已接续：归纳自动开始')
+          toast(t('canvas.induce.drained'))
         } else if (evt.job.kind === 'patrol') {
           onPatrollingChange(true)
         }

@@ -99,7 +99,7 @@ export function GitPage({
         return r.json()
       })
       .then((d: { data?: GitStatus } | null) => setStatus(d?.data ?? null))
-      .catch(() => setGitError('后端不可达'))
+      .catch(() => setGitError(t('pages.git.backendUnreachable')))
     gitLog(backendRepo, 30)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: GitLogRow[] } | null) => setCommits(d?.data ?? []))
@@ -201,9 +201,9 @@ export function GitPage({
     setPatroling(true)
     try {
       await patrol(backendRepo)
-      toast('巡检已发起（全量 · 可在健康看板看进度）')
+      toast(t('pages.git.toastPatrolStarted'))
     } catch {
-      toast('巡检发起失败', 'error')
+      toast(t('pages.git.toastPatrolFailed'), 'error')
     } finally {
       setPatroling(false)
     }
@@ -220,13 +220,13 @@ export function GitPage({
       const r = await commitMessage(backendRepo, { task_id: dominantTask?.id ?? null, modules: affected, diff_stat: diffStat ?? '' })
       const d = await r.json().catch(() => null)
       if (!r.ok || !d?.data?.message) {
-        toast(d?.error ?? '生成失败', 'error')
+        toast(d?.error ?? t('pages.git.toastGenFailed'), 'error')
         return
       }
       setMessage(d.data.message)
       setFooter(d.data.footer ?? null)
     } catch {
-      toast('生成失败', 'error')
+      toast(t('pages.git.toastGenFailed'), 'error')
     } finally {
       setGenerating(false)
     }
@@ -240,10 +240,10 @@ export function GitPage({
       const r = await postCommit(backendRepo, { message: full })
       const d = await r.json().catch(() => null)
       if (!r.ok) {
-        toast(d?.error ?? '提交失败', 'error')
+        toast(d?.error ?? t('pages.git.toastCommitFailed'), 'error')
         return
       }
-      toast(`已提交 ${d?.data?.shortHash ?? ''}${patrolAfter ? ' · 巡检已排队' : ''}`)
+      toast(t('pages.git.toastCommitted', { hash: d?.data?.shortHash ?? '', patrolPart: patrolAfter ? t('pages.git.toastPatrolQueued') : '' }))
       setMessage('')
       setFooter(null)
       load()
@@ -258,8 +258,8 @@ export function GitPage({
     try {
       const r = await discard(backendRepo, { path })
       const d = await r.json().catch(() => null)
-      if (!r.ok) toast(d?.error ?? '撤销失败', 'error')
-      else toast(path === '*' ? '已撤销全部未提交改动' : `已撤销 ${path}`)
+      if (!r.ok) toast(d?.error ?? t('pages.git.toastDiscardFailed'), 'error')
+      else toast(path === '*' ? t('pages.git.toastDiscardAll') : t('pages.git.toastDiscard', { path }))
     } finally {
       setConfirmDiscard(null)
       setConfirmDiscardAll(false)
@@ -275,8 +275,8 @@ export function GitPage({
     try {
       const r = await gitSync(backendRepo, kind)
       const d = await r.json().catch(() => null)
-      if (!r.ok) toast(d?.error ?? `${kind === 'pull' ? '拉取' : '推送'}失败`, 'error')
-      else toast(kind === 'pull' ? '已拉取（rebase）' : '已推送')
+      if (!r.ok) toast(d?.error ?? t(kind === 'pull' ? 'pages.git.toastPullFailed' : 'pages.git.toastPushFailed'), 'error')
+      else toast(kind === 'pull' ? t('pages.git.toastPulled') : t('pages.git.toastPushed'))
     } finally {
       setBusy(null)
       load()
@@ -284,21 +284,21 @@ export function GitPage({
   }
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">{t('common.pickProject')}</div>
   }
 
   const freshMeta =
-    freshness === 'fresh' ? { color: '#10b981', label: '地图 fresh' } :
-    freshness === 'drifting' ? { color: '#f59e0b', label: '地图漂移中' } :
-    freshness === 'stale' ? { color: '#ef4444', label: '地图已过期' } :
-    { color: '#94a3b8', label: '地图状态未知' }
+    freshness === 'fresh' ? { color: '#10b981', labelKey: 'pages.git.freshness.fresh' } :
+    freshness === 'drifting' ? { color: '#f59e0b', labelKey: 'pages.git.freshness.drifting' } :
+    freshness === 'stale' ? { color: '#ef4444', labelKey: 'pages.git.freshness.stale' } :
+    { color: '#94a3b8', labelKey: 'pages.git.freshness.unknown' }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">Git 工作树</h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">提交前看见架构代价，提交时绑定任务留痕，提交后联动复检。</p>
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{t('pages.git.title')}</h2>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('pages.git.subtitle')}</p>
         </div>
 
         {/* 状态条 */}
@@ -311,18 +311,18 @@ export function GitPage({
             <span className="tnum flex items-center gap-1.5 text-[12px]">
               <span className="flex items-center gap-0.5 font-bold text-emerald-500"><ArrowUpFromLine size={11} />{status.ahead}</span>
               <span className="flex items-center gap-0.5 font-bold text-amber-500"><ArrowDownToLine size={11} />{status.behind}</span>
-              <span className="text-cap text-slate-300 dark:text-slate-600">与 {status.upstream}</span>
+              <span className="text-cap text-slate-300 dark:text-slate-600">{t('pages.git.upstream', { name: status.upstream })}</span>
             </span>
           )}
           <span className="flex gap-1.5">
-            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-amber-600">{totals.M}</b> 修改</span>
-            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-emerald-600">{totals.A + totals['?']}</b> 新增</span>
-            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-red-500">{totals.D}</b> 删除</span>
-            <span className="tnum rounded-full bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-cap font-semibold text-blue-600">影响 <b>{groups.filter((g) => g.id !== '_other').length}</b> 个模块</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-amber-600">{totals.M}</b> {t('pages.git.statModified')}</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-emerald-600">{totals.A + totals['?']}</b> {t('pages.git.statAdded')}</span>
+            <span className="tnum rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-cap font-semibold text-slate-500 dark:text-slate-400"><b className="text-red-500">{totals.D}</b> {t('pages.git.statDeleted')}</span>
+            <span className="tnum rounded-full bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-cap font-semibold text-blue-600">{t('pages.git.statModules', { count: groups.filter((g) => g.id !== '_other').length })}</span>
           </span>
           <span className="flex items-center gap-1.5 rounded-full border border-slate-100 dark:border-slate-800 px-2 py-0.5 text-cap font-semibold" style={{ color: freshMeta.color }}>
             <i className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: freshMeta.color }} />
-            {freshMeta.label}
+            {t(freshMeta.labelKey)}
           </span>
           <span className="ml-auto flex gap-2">
             <button
@@ -330,14 +330,14 @@ export function GitPage({
               disabled={!!busy}
               className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
             >
-              {busy === 'pull' ? <Loader2 size={11} className="animate-spin" /> : `拉取 ↓${status?.behind ?? 0}`}
+              {busy === 'pull' ? <Loader2 size={11} className="animate-spin" /> : t('pages.git.pull', { count: status?.behind ?? 0 })}
             </button>
             <button
               onClick={() => sync('push')}
               disabled={!!busy}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
             >
-              {busy === 'push' ? <Loader2 size={11} className="animate-spin" /> : `推送 ↑${status?.ahead ?? 0}`}
+              {busy === 'push' ? <Loader2 size={11} className="animate-spin" /> : t('pages.git.push', { count: status?.ahead ?? 0 })}
             </button>
           </span>
         </div>
@@ -345,7 +345,7 @@ export function GitPage({
         {gitError && (
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-[12px] text-amber-700">
             <AlertTriangle size={14} className="shrink-0" />
-            Git 状态不可用：{gitError}（该仓库可能不是 git 仓库）
+            {t('pages.git.error', { msg: gitError })}
           </div>
         )}
 
@@ -353,41 +353,41 @@ export function GitPage({
           {/* 左列：未提交变更 · 提交前预检 */}
           <div className="col-span-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
             <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
-              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">未提交变更 · 提交前预检</span>
-              <span className="text-micro text-slate-300 dark:text-slate-600">模块色点 = 当前健康分</span>
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.git.sectionChanges')}</span>
+              <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.sectionHint')}</span>
               <div className="ml-auto flex items-center gap-1.5">
                 <input
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  placeholder="过滤文件…"
+                  placeholder={t('pages.git.filterPlaceholder')}
                   className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-cap text-slate-600 dark:text-slate-300 focus:border-blue-300 focus:outline-none"
                 />
                 {/* 重审 P2：全部撤销（此前误改一堆只能逐个点）——两步确认，红色警示语义 */}
                 {status && status.files.length > 0 &&
                   (confirmDiscardAll ? (
                     <span className="flex items-center gap-1">
-                      <span className="text-[10px] font-bold text-red-500">撤销全部 {status.files.length} 个文件的改动？</span>
+                      <span className="text-[10px] font-bold text-red-500">{t('pages.git.discardAllConfirm', { count: status.files.length })}</span>
                       <button
                         onClick={() => void doDiscard('*')}
                         onMouseLeave={() => setConfirmDiscardAll(false)}
                         className="rounded bg-red-500 px-1.5 py-1 text-micro font-bold text-white hover:bg-red-600"
                       >
-                        确认
+                        {t('pages.git.discardAllOk')}
                       </button>
                     </span>
                   ) : (
                     <button
                       onClick={() => setConfirmDiscardAll(true)}
                       className="flex items-center gap-0.5 rounded-lg border border-red-200 dark:border-red-900/60 px-2 py-1 text-cap font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
-                      title="撤销全部未提交改动（含未跟踪文件，不可恢复）"
+                      title={t('pages.git.discardAllTip')}
                     >
-                      <Trash2 size={10} /> 全部撤销
+                      <Trash2 size={10} /> {t('pages.git.discardAll')}
                     </button>
                   ))}
                 <button
                   onClick={load}
                   className="rounded-lg border border-slate-200 dark:border-slate-700 p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:text-slate-600"
-                  title="刷新"
+                  title={t('pages.git.refreshTip')}
                 >
                   <RefreshCw size={11} />
                 </button>
@@ -404,22 +404,25 @@ export function GitPage({
               <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5">
                 <AlertTriangle size={15} className="shrink-0 text-amber-500" />
                 <p className="min-w-0 flex-1 text-[11px] leading-4 text-amber-700">
-                  <b>红线警示：</b>
-                  {redline.map((g) => `${g.name} 健康分 ${g.score}`).join('、')}
-                  <span className="text-amber-500">（&lt;60），本次改动 +{totals.adds}/−{totals.dels}，提交后腐化风险继续累积。提示，不拦截。</span>
+                  <b>{t('pages.git.redlineTitle')}</b>
+                  <span className="text-amber-500">{t('pages.git.redlineBody', {
+                    items: redline.map((g) => t('pages.git.redlineScore', { name: g.name, score: g.score })).join('、'),
+                    adds: totals.adds,
+                    dels: totals.dels,
+                  })}</span>
                 </p>
                 <button
                   onClick={startPatrol}
                   disabled={patroling}
                   className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-40"
                 >
-                  {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} 全量巡检
+                  {patroling ? <Loader2 size={10} className="animate-spin" /> : <ScanSearch size={10} />} {t('pages.git.patrol')}
                 </button>
                 <button
                   onClick={onOpenReview}
                   className="flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-2.5 py-1 text-cap font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 >
-                  <ShieldCheck size={10} /> 发起评审
+                  <ShieldCheck size={10} /> {t('pages.git.review')}
                 </button>
               </div>
             )}
@@ -444,7 +447,7 @@ export function GitPage({
                     >
                       {score !== null && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: healthColor(score) }} />}
                       <span className="text-[12px] font-bold text-slate-700 dark:text-slate-200">{g.name}</span>
-                      <span className="text-micro text-slate-300 dark:text-slate-600">{g.files.length} 个文件</span>
+                      <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.filesCount', { count: g.files.length })}</span>
                       {score !== null && (
                         <span className="tnum text-cap font-bold" style={{ color: healthColor(score) }}>{score}</span>
                       )}
@@ -471,11 +474,11 @@ export function GitPage({
                             </span>
                             {a.kind === 'task' && (
                               <span className="shrink-0 rounded-full bg-violet-50 px-1.5 py-px text-micro font-semibold text-violet-600">
-                                任务 {a.task.title.slice(0, 8)}
+                                {t('pages.git.taskPrefix', { title: a.task.title.slice(0, 8) })}
                               </span>
                             )}
                             {a.kind === 'ev' && (
-                              <span className="shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-px text-micro font-semibold text-slate-500 dark:text-slate-400">巡检写回</span>
+                              <span className="shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-px text-micro font-semibold text-slate-500 dark:text-slate-400">{t('pages.git.attributionPatrol')}</span>
                             )}
                             <span className="tnum w-[72px] shrink-0 text-right text-micro font-bold">
                               <i className="not-italic text-emerald-600">+{f.adds ?? 0}</i>{' '}
@@ -490,7 +493,7 @@ export function GitPage({
                                 onMouseLeave={() => setConfirmDiscard(null)}
                                 className="tnum shrink-0 rounded bg-red-500 px-1.5 py-0.5 text-micro font-bold text-white"
                               >
-                                确认?
+                                {t('pages.git.discardConfirm')}
                               </button>
                             ) : (
                               <button
@@ -499,7 +502,7 @@ export function GitPage({
                                   setConfirmDiscard(f.path)
                                 }}
                                 className="shrink-0 rounded p-0.5 text-slate-200 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500 group-hover:text-slate-300"
-                                title="撤销改动"
+                                title={t('pages.git.discardTip')}
                               >
                                 <Trash2 size={11} />
                               </button>
@@ -511,50 +514,50 @@ export function GitPage({
                 )
               })}
               {(!status || status.files.length === 0) && !gitError && (
-                <p className="py-10 text-center text-[12px] text-slate-300 dark:text-slate-600">工作树干净，没有未提交的变更。</p>
+                <p className="py-10 text-center text-[12px] text-slate-300 dark:text-slate-600">{t('pages.git.clean')}</p>
               )}
             </div>
 
             <div className="flex gap-4 border-t border-slate-100 dark:border-slate-800 px-4 py-2.5 text-cap text-slate-400 dark:text-slate-500">
-              <span>共影响 <b className="text-slate-600 dark:text-slate-300">{groups.filter((g) => g.id !== '_other').length}</b> 个模块 · <b className="tnum text-slate-600 dark:text-slate-300">+{totals.adds} −{totals.dels}</b></span>
-              <span>未映射文件 <b className="text-slate-600 dark:text-slate-300">{groups.find((g) => g.id === '_other')?.files.length ?? 0}</b> 个</span>
-              <span className="ml-auto">对比基线：<b className="text-slate-600 dark:text-slate-300">HEAD</b></span>
+              <span>{t('pages.git.footerModules', { count: groups.filter((g) => g.id !== '_other').length })} · <b className="tnum text-slate-600 dark:text-slate-300">+{totals.adds} −{totals.dels}</b></span>
+              <span>{t('pages.git.footerUnmapped', { count: groups.find((g) => g.id === '_other')?.files.length ?? 0 })}</span>
+              <span className="ml-auto">{t('pages.git.baseline', { base: 'HEAD' })}</span>
             </div>
 
             {/* 提交框 */}
             <div className="border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2 px-4 pt-2.5">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">提交说明</span>
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{t('pages.git.commitLabel')}</span>
                 <button
                   onClick={generateMessage}
                   disabled={generating || !status || status.files.length === 0}
                   className="flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-micro font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                 >
                   {generating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                  {generating ? '生成中…' : dominantTask ? `从任务上下文生成` : 'AI 生成'}
+                  {generating ? t('pages.git.commitGenerating') : dominantTask ? t('pages.git.commitGenerateTask') : t('pages.git.commitGenerate')}
                 </button>
                 {dominantTask && (
-                  <span className="text-micro text-slate-300 dark:text-slate-600">已关联任务 · footer 随提交写入，历史可反查</span>
+                  <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.commitLinked')}</span>
                 )}
               </div>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="输入提交说明…（如 fix(payment): 修复退款金额计算异常）"
+                placeholder={t('pages.git.commitPlaceholder')}
                 className="h-14 w-full resize-none px-4 pt-2 text-[12px] text-slate-700 dark:text-slate-200 outline-none"
               />
               <div className="flex items-center gap-3 border-t border-slate-50 bg-slate-50/40 dark:bg-slate-900/40 px-4 py-2.5">
                 <span className="text-cap text-slate-400 dark:text-slate-500">
-                  将提交 <b className="tnum text-slate-600 dark:text-slate-300">{status?.files.length ?? 0}</b> 个文件 · 影响模块{' '}
+                  {t('pages.git.commitSummary', { count: status?.files.length ?? 0 })}{' '}
                   <b className="text-blue-600">{groups.filter((g) => g.id !== '_other').slice(0, 3).map((g) => g.name).join('、') || '—'}</b>
                 </span>
                 <label className="ml-auto flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
                   <input type="checkbox" checked={patrolAfter} onChange={(e) => setPatrolAfter(e.target.checked)} className="accent-blue-600" />
-                  提交后触发全量巡检（消耗 LLM token）
+                  {t('pages.git.commitPatrolAfter')}
                 </label>
                 {redline.length > 0 && (
                   <span className="flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-micro font-semibold text-amber-600">
-                    <AlertTriangle size={9} /> 含红线模块 · 仍可提交
+                    <AlertTriangle size={9} /> {t('pages.git.commitRedlineWarn')}
                   </span>
                 )}
                 <button
@@ -562,7 +565,7 @@ export function GitPage({
                   disabled={committing || !message.trim() || !status || status.files.length === 0}
                   className="rounded-lg bg-blue-600 px-4 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700 disabled:opacity-40"
                 >
-                  {committing ? <Loader2 size={11} className="animate-spin" /> : `提交到 ${status?.branch ?? '—'}`}
+                  {committing ? <Loader2 size={11} className="animate-spin" /> : t('pages.git.commitButton', { branch: status?.branch ?? '—' })}
                 </button>
               </div>
             </div>
@@ -596,6 +599,7 @@ function EvolutionChart({
   map: CodeMap | null
   commits: GitLogRow[]
 }) {
+  const { t } = useLang()
   const [series, setSeries] = useState<{ id: string; name: string; color: string; points: { t: number; s: number }[] }[]>([])
   const affected = useMemo(() => groups.filter((g) => g.id !== '_other').slice(0, 2), [groups])
 
@@ -636,8 +640,8 @@ function EvolutionChart({
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
       <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
-        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">架构演进对照</span>
-        <span className="text-micro text-slate-300 dark:text-slate-600">健康分趋势 × 提交时点</span>
+        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.git.chartTitle')}</span>
+        <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.chartHint')}</span>
       </div>
       {series.length > 0 && allT.length > 0 ? (
         <div className="px-3 pb-1 pt-2">
@@ -647,7 +651,7 @@ function EvolutionChart({
               return (
                 <g key={g}>
                   <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y} stroke={g === 60 ? '#fca5a5' : '#f1f5f9'} strokeWidth={1} strokeDasharray={g === 60 ? '4 3' : undefined} />
-                  <text x={PAD.l - 4} y={y + 3} textAnchor="end" fontSize={8} fill={g === 60 ? '#f87171' : '#cbd5e1'} className="tnum">{g === 60 ? '红线60' : g}</text>
+                  <text x={PAD.l - 4} y={y + 3} textAnchor="end" fontSize={8} fill={g === 60 ? '#f87171' : '#cbd5e1'} className="tnum">{g === 60 ? t('pages.git.redline60') : g}</text>
                 </g>
               )
             })}
@@ -677,11 +681,11 @@ function EvolutionChart({
                 {s.name}
               </span>
             ))}
-            <span className="ml-auto flex items-center gap-1 text-micro text-slate-300 dark:text-slate-600">│ 虚线 = 提交时点</span>
+            <span className="ml-auto flex items-center gap-1 text-micro text-slate-300 dark:text-slate-600">{t('pages.git.chartLegend')}</span>
           </div>
         </div>
       ) : (
-        <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">受影响模块暂无巡检历史（跑一次巡检后绘制对照）</p>
+        <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">{t('pages.git.chartEmpty')}</p>
       )}
     </div>
   )
@@ -697,6 +701,7 @@ interface CommitDetail {
 }
 
 function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRow[]; moduleList: { id: string; name: string; files: string[] }[]; backendRepo: string | null }) {
+  const { t } = useLang()
   const [q, setQ] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [detail, setDetail] = useState<CommitDetail | null>(null)
@@ -720,7 +725,7 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
     gitCommit(backendRepo, hash)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { data?: CommitDetail }) => setDetail(d.data ?? null))
-      .catch(() => toast('提交详情加载失败', 'error'))
+      .catch(() => toast(t('pages.git.toastDetailFailed'), 'error'))
       .finally(() => setDetailLoading(false))
   }
 
@@ -739,14 +744,14 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
   return (
     <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
       <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 px-4 py-3">
-        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">最近提交</span>
-        <span className="text-micro text-slate-300 dark:text-slate-600">与任务联动（footer 反查为 P1）</span>
+        <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.git.commitsTitle')}</span>
+        <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.commitsHint')}</span>
       </div>
       <div className="px-4 pt-2.5">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="搜索提交 / 模块 / 作者…"
+          placeholder={t('pages.git.searchPlaceholder')}
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-cap text-slate-600 dark:text-slate-300 focus:border-blue-300 focus:outline-none"
         />
       </div>
@@ -757,13 +762,13 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
           return (
             <div key={c.hash} className={`px-4 py-2.5 ${open ? 'bg-blue-50/40' : 'hover:bg-slate-50/60 dark:bg-slate-900/60'}`}>
               {/* 整行可点：展开提交详情（此前纯展示，用户反馈） */}
-              <button onClick={() => toggle(c.hash)} className="flex w-full items-start gap-2 text-left" title={open ? '收起详情' : '查看提交详情'}>
+              <button onClick={() => toggle(c.hash)} className="flex w-full items-start gap-2 text-left" title={open ? t('pages.git.collapseTip') : t('pages.git.expandTip')}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{c.subject}</p>
                   <p className="mt-0.5 flex items-center gap-1.5 text-micro text-slate-400 dark:text-slate-500">
                     <span className="mono rounded bg-slate-100 dark:bg-slate-800 px-1 py-px text-micro text-slate-500 dark:text-slate-400">{c.short}</span>
                     <span className="truncate">{c.author}</span>
-                    <span className="shrink-0">{relTime(new Date(c.at * 1000).toISOString())}</span>
+                    <span className="shrink-0">{relTime(new Date(c.at * 1000).toISOString(), Date.now(), t)}</span>
                   </p>
                   {mods.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -788,7 +793,7 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
               </button>
               {open && (
                 <div className="ml-1 mt-2 border-l-2 border-blue-100 pl-3">
-                  {detailLoading && <p className="py-1 text-micro text-slate-400 dark:text-slate-500">加载详情…</p>}
+                  {detailLoading && <p className="py-1 text-micro text-slate-400 dark:text-slate-500">{t('pages.git.loadingDetail')}</p>}
                   {!detailLoading && detail && (
                     <>
                       {detail.body && <p className="mb-1.5 whitespace-pre-wrap text-[11px] leading-4 text-slate-500 dark:text-slate-400">{detail.body}</p>}
@@ -801,10 +806,10 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
                               <span className="tnum shrink-0 font-semibold text-red-400">−{f.dels}</span>
                             </div>
                           ))}
-                          {detail.files.length > 12 && <p className="text-micro text-slate-300 dark:text-slate-600">…共 {detail.files.length} 个文件</p>}
+                          {detail.files.length > 12 && <p className="text-micro text-slate-300 dark:text-slate-600">{t('pages.git.moreFiles', { count: detail.files.length })}</p>}
                         </div>
                       ) : (
-                        <p className="text-micro text-slate-400 dark:text-slate-500">无文件变更（merge/空提交）</p>
+                        <p className="text-micro text-slate-400 dark:text-slate-500">{t('pages.git.noFiles')}</p>
                       )}
                     </>
                   )}
@@ -812,9 +817,9 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
                     <button
                       onClick={() => void navigator.clipboard?.writeText(c.hash)}
                       className="flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600"
-                      title="复制完整 hash"
+                      title={t('pages.git.copyTip')}
                     >
-                      <Copy size={9} /> 复制 hash
+                      <Copy size={9} /> {t('pages.git.copy')}
                     </button>
                   </div>
                 </div>
@@ -822,10 +827,10 @@ function CommitHistory({ commits, moduleList, backendRepo }: { commits: GitLogRo
             </div>
           )
         })}
-        {rows.length === 0 && <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">没有匹配的提交。</p>}
+        {rows.length === 0 && <p className="py-8 text-center text-cap text-slate-300 dark:text-slate-600">{t('pages.git.commitsEmpty')}</p>}
       </div>
       <div className="flex border-t border-slate-100 dark:border-slate-800 px-4 py-2 text-micro text-slate-400 dark:text-slate-500">
-        <span>共 <b className="tnum text-slate-600 dark:text-slate-300">{commits.length}</b> 条提交</span>
+        <span>{t('pages.git.commitsTotal', { count: commits.length })}</span>
       </div>
     </div>
   )

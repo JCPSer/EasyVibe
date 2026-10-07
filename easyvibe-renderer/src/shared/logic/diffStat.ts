@@ -101,21 +101,30 @@ export function toMs(iso: string): number | null {
   return null
 }
 
-/** 相对时间："3 分钟前 / 2 小时前 / 5 天前"；无法解析返回原始串 */
-export function relTime(iso: string | null | undefined, now = Date.now()): string {
+/** 相对时间："3 分钟前 / 2 小时前 / 5 天前"；无法解析返回原始串。
+ *  tx：文案翻译注入（英文化第二批）——shared 是 archGuard 叶子，不得 import runtime/i18n，
+ *  由调用方把 t() 注进来；缺省回退中文（存量测试与中文界面行为不变）。tx 返回 key 本身视为缺 key。 */
+export type RelTimeTx = (key: string, vars?: Record<string, string | number>) => string
+
+export function relTime(iso: string | null | undefined, now = Date.now(), tx?: RelTimeTx): string {
   if (!iso) return '—'
   const t = toMs(iso)
   if (t === null) return iso
   const diff = Math.max(0, now - t)
   const min = Math.floor(diff / 60000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟前`
+  const or = (key: string, vars: Record<string, string | number>, fallback: string) => {
+    if (!tx) return fallback
+    const s = tx(key, vars)
+    return s === key ? fallback : s
+  }
+  if (min < 1) return or('time.justNow', {}, '刚刚')
+  if (min < 60) return or('time.minutesAgo', { count: min }, `${min} 分钟前`)
   const hours = Math.floor(min / 60)
-  if (hours < 24) return `${hours} 小时前`
+  if (hours < 24) return or('time.hoursAgo', { count: hours }, `${hours} 小时前`)
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days} 天前`
+  if (days < 30) return or('time.daysAgo', { count: days }, `${days} 天前`)
   const months = Math.floor(days / 30)
-  return `${months} 个月前`
+  return or('time.monthsAgo', { count: months }, `${months} 个月前`)
 }
 
 /** 绝对时间："2026-09-30 09:15"；无法解析返回原始串 */

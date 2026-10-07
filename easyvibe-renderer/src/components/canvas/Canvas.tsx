@@ -25,6 +25,7 @@ import { useSubmaps } from './useSubmaps'
 import { useGrowthPlayback } from './useGrowthPlayback'
 import { useRepoActivity } from '@/runtime/useRepoActivity'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 
 export function Canvas({
   map,
@@ -84,6 +85,7 @@ export function Canvas({
   dark?: boolean
 }) {
   const { tab, setTab, handleTabChange, startPanelDrag } = useCanvasPanelDrag(panelWidth, onPanelWidthChange)
+  const { t } = useLang()
   const [selection, setSelection] = useState<Selection>(null)
   const [filters, setFilters] = useState<Filters>({ violationsOnly: false, issuesOnly: false, solo: false })
   const [expandedIds, setExpandedIds] = useState<string[]>([])
@@ -114,11 +116,11 @@ export function Canvas({
   const inducingAny = inducing || shared.inducing
   const guardReinduce = useCallback(() => {
     if (inducingAny || shared.reinduceQueued) {
-      toast(shared.reinduceQueued ? '归纳已排队：当前会话结束后自动接续' : '归纳进行中，无需重复发起', 'info')
+      toast(shared.reinduceQueued ? t('canvas.induce.alreadyQueued') : t('canvas.induce.alreadyRunning'), 'info')
       return
     }
     startReinduce()
-  }, [inducingAny, shared.reinduceQueued, startReinduce])
+  }, [inducingAny, shared.reinduceQueued, startReinduce, t])
 
   // ── 归纳期间"原位过场"（旧地图留守 + 阶段进度 + agent 实时输出）────────────────
   // 显示条件：本页重归纳空会话窗口（growth 存在但事件未到）/ 他页归纳（shared 有活动或排队且本页无 growth）。
@@ -147,10 +149,10 @@ export function Canvas({
         setOverlayDismissed(true)
         exitGrowth() // 双保险：残留生长会话（推进定时器会停在"正在分析模块：X"卡住）
         setInductionFailed(true)
-        toast('归纳失败，仍显示上一份地图', 'error')
+        toast(t('canvas.induce.failed'), 'error')
         window.setTimeout(() => setInductionFailed(false), 5000)
       }),
-    [backendRepo, exitGrowth],
+    [backendRepo, exitGrowth, t],
   )
 
   // 排队取消：DELETE /session-queue（口径同 RunsPage.cancelQueue）
@@ -158,12 +160,12 @@ export function Canvas({
     if (!backendRepo) return
     cancelSessionQueue(backendRepo)
       .then(async (r) => {
-        if (r.status === 404) toast('没有排队任务', 'error')
-        else if (!r.ok) toast(`取消排队失败（HTTP ${r.status}）`, 'error')
-        else toast('已取消排队')
+        if (r.status === 404) toast(t('shell.bubble.queueNone'), 'error')
+        else if (!r.ok) toast(t('shell.bubble.queueCancelFailed', { status: r.status }), 'error')
+        else toast(t('shell.bubble.queueCancelled'))
       })
-      .catch(() => toast('取消排队失败（请确认后端在线后重试）。', 'error'))
-  }, [backendRepo])
+      .catch(() => toast(t('shell.bubble.queueCancelErr'), 'error'))
+  }, [backendRepo, t])
 
   // 过场显示期间顶部"归纳中…"chip 降显隐藏，避免同屏多处重复指示（全局 SessionBubble 不动）；
   // 退出后多压 320ms，盖住罩层 300ms 淡出，避免 chip 在淡出期间闪回
@@ -416,22 +418,22 @@ export function Canvas({
                   <button
                     onClick={() => setFilters((f) => ({ ...f, solo: false }))}
                     className="flex items-center gap-1 rounded-full border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-cap font-semibold text-indigo-600 hover:bg-indigo-100"
-                    title="退出聚焦（Esc）"
+                    title={t('canvas.filter.exitSoloTip')}
                   >
                     <Focus size={10} />
-                    聚焦：{selModule.name} <span className="text-indigo-400">✕</span>
+                    {t('canvas.filter.focus', { name: selModule.name })} <span className="text-indigo-400">✕</span>
                   </button>
                 )}
                 <FilterButton
                   active={filters.violationsOnly}
                   onClick={() => toggleFilter('violationsOnly')}
-                  label="只看违规"
+                  label={t('canvas.filter.violations')}
                   activeClass="border-red-300 bg-red-50 dark:bg-red-950/40 text-red-600"
                 />
                 <FilterButton
                   active={filters.issuesOnly}
                   onClick={() => toggleFilter('issuesOnly')}
-                  label="问题视图"
+                  label={t('canvas.filter.issues')}
                   activeClass="border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700"
                 />
                 {(filters.violationsOnly || filters.issuesOnly) && (
@@ -439,7 +441,7 @@ export function Canvas({
                     onClick={() => setFilters({ violationsOnly: false, issuesOnly: false, solo: filters.solo })}
                     className="rounded-full px-2 py-1 text-cap text-slate-400 dark:text-slate-500 hover:text-slate-600"
                   >
-                    重置
+                    {t('canvas.filter.reset')}
                   </button>
                 )}
               </div>
@@ -459,8 +461,8 @@ export function Canvas({
               {mergedMap.modules.find((m) => m.id === tipEdge.to)?.name ?? tipEdge.to}
             </p>
             <p className="mt-0.5 text-micro text-slate-400 dark:text-slate-500">
-              {tipEdge.type} · {tipEdge.label ?? '1 处引用'}
-              {tipEdge.direction_violation && <span className="text-red-500"> · ⚠ 逆向</span>}
+              {tipEdge.type} · {tipEdge.label ?? t('canvas.edgeTip.refCount', { count: 1 })}
+              {tipEdge.direction_violation && <span className="text-red-500">{t('canvas.edgeTip.reverse')}</span>}
             </p>
             {tipEdge.direction_violation && onInspectEdge && (
               <button
@@ -470,7 +472,7 @@ export function Canvas({
                 }}
                 className="mt-2 rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-1 text-micro font-bold text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/40"
               >
-                详情 →
+                {t('canvas.edgeTip.detail')}
               </button>
             )}
           </div>
@@ -481,7 +483,7 @@ export function Canvas({
           <div className="px-5 py-3">
             <div className="pointer-events-auto inline-block rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-2.5 shadow-sm backdrop-blur">
               <div className="flex items-center gap-2">
-                <span className="text-micro font-bold uppercase tracking-widest text-blue-600">架构地图</span>
+                <span className="text-micro font-bold uppercase tracking-widest text-blue-600">{t('canvas.header.kicker')}</span>
                 <span className="text-micro text-slate-300 dark:text-slate-600">|</span>
                 <h1 className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{map.meta.repo}</h1>
                 {/* M4-1.5 叙事重排（陪审团）：健康分立为画布内主视觉——先给诊断，再给地图 */}
@@ -491,18 +493,18 @@ export function Canvas({
                     onPanelOpenChange(true)
                   }}
                   className="ml-3 flex items-center gap-1.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/70 pl-1.5 pr-2 py-0.5 hover:border-blue-200 hover:bg-blue-50/60"
-                  title="架构健康综合评分（点击在右栏查看全部问题）"
+                  title={t('canvas.header.healthTip')}
                 >
                   <span className="tnum text-[20px] font-black leading-6" style={{ color: healthColor(map.health.score) }}>
                     {map.health.score}
                   </span>
                   <span className="flex flex-col items-start leading-none">
-                    <span className="text-micro font-semibold text-slate-400 dark:text-slate-500">架构健康</span>
+                    <span className="text-micro font-semibold text-slate-400 dark:text-slate-500">{t('canvas.header.healthLabel')}</span>
                     {/* 评审 Y7：阈值与 healthColor/Legend 对齐——<60 红（Error）、60-74 amber（Warning），此前 70 分吃红色误报 */}
                     {map.health.score < 60 ? (
-                      <span className="mt-0.5 text-micro font-semibold text-red-500">有问题 · 查看 →</span>
+                      <span className="mt-0.5 text-micro font-semibold text-red-500">{t('canvas.header.healthBad')}</span>
                     ) : map.health.score < 75 ? (
-                      <span className="mt-0.5 text-micro font-semibold text-amber-500">有改进空间 · 查看 →</span>
+                      <span className="mt-0.5 text-micro font-semibold text-amber-500">{t('canvas.header.healthWarn')}</span>
                     ) : null}
                   </span>
                 </button>
@@ -510,12 +512,12 @@ export function Canvas({
               <button
                 onClick={() => setHeaderExpanded((v) => !v)}
                 className="mt-0.5 block max-w-[520px] text-left"
-                title={headerExpanded ? '收起简介' : '展开简介'}
+                title={headerExpanded ? t('canvas.header.collapseTip') : t('canvas.header.expandTip')}
               >
                 <p className={`text-[11px] text-slate-500 dark:text-slate-400 ${headerExpanded ? 'max-h-28 overflow-y-auto' : 'truncate'}`}>
                   {map.meta.description}
                   <span className="ml-1 text-micro font-medium text-blue-400">
-                    {headerExpanded ? '▲ 收起' : '▼ 展开'}
+                    {headerExpanded ? t('canvas.header.collapse') : t('canvas.header.expand')}
                   </span>
                 </p>
               </button>
@@ -523,23 +525,23 @@ export function Canvas({
                 <span className="flex items-center gap-1">
                   <GitBranch size={11} /> {map.meta.generator}
                 </span>
-                <span>{mergedMap.modules.length} 模块</span>
-                <span>{mergedMap.layers.length} 层</span>
-                <span>{mergedMap.edges.length} 依赖</span>
-                <span className="text-red-500">{violations} 逆向</span>
+                <span>{t('canvas.header.moduleCount', { count: mergedMap.modules.length })}</span>
+                <span>{t('canvas.header.layerCount', { count: mergedMap.layers.length })}</span>
+                <span>{t('canvas.header.edgeCount', { count: mergedMap.edges.length })}</span>
+                <span className="text-red-500">{t('canvas.header.violationCount', { count: violations })}</span>
                 {/* 归纳过场期间：罩层左上角小标签，说明留守的是上一份地图（顶部 chip 已隐藏） */}
                 {overlayActive && (
                   <span className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-1.5 py-px font-semibold text-slate-500 dark:text-slate-400 shadow-sm">
                     <RefreshCw size={9} className="animate-spin" />
-                    上一份地图 · 归纳中
+                    {t('canvas.header.staleMap')}
                   </span>
                 )}
                 {!backendRepo && (
                   <span
                     className="flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-px font-semibold text-amber-700"
-                    title="后端不在线：当前为静态演示数据，重新归纳/巡检/任务不可用"
+                    title={t('canvas.header.demoTip')}
                   >
-                    <WifiOff size={9} /> 演示数据 · 后端离线
+                    <WifiOff size={9} /> {t('canvas.header.demoBadge')}
                   </span>
                 )}
                 {freshness && (
@@ -547,18 +549,18 @@ export function Canvas({
                     className={`flex items-center gap-1 rounded-full px-1.5 py-px font-semibold ${
                       freshness === 'stale' ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
                     }`}
-                    title={`git 有 ${freshnessInfo.commitsSinceMap ?? '?'} 个提交在地图生成之后——对话/建议/健康分可能基于过时信息`}
+                    title={t('canvas.header.staleTip', { count: freshnessInfo.commitsSinceMap ?? '?' })}
                   >
                     <AlertTriangle size={9} />
-                    地图已过时 · {freshness === 'stale' ? '建议重新归纳' : `${freshnessInfo.commitsSinceMap ?? '?'} 个新提交未归纳`}
+                    {freshness === 'stale' ? t('canvas.header.stale') : t('canvas.header.uninduced', { count: freshnessInfo.commitsSinceMap ?? '?' })}
                     {/* 2026-10-04 实弹：只摆问题不给出路是死胡同——drifting/stale 两档都挂行动按钮 */}
                     {backendRepo && !inducingAny && !shared.reinduceQueued && (
                       <button
                         onClick={guardReinduce}
                         className="ml-0.5 flex items-center gap-0.5 rounded-full bg-white/80 dark:bg-slate-800/80 px-1.5 py-px text-micro font-bold text-red-600 dark:text-amber-300 shadow-sm transition-colors hover:bg-white dark:hover:bg-slate-700"
-                        title="立即重新归纳：agent 按 v2.2 协议重跑，全程直播"
+                        title={t('canvas.header.reinduceNowTip')}
                       >
-                        <RefreshCw size={8} /> 立即归纳
+                        <RefreshCw size={8} /> {t('canvas.header.reinduceNow')}
                       </button>
                     )}
                   </span>
@@ -566,7 +568,7 @@ export function Canvas({
                 {inducingAny && !chipSuppressed && (
                   <span className="flex items-center gap-1 font-semibold text-amber-600">
                     <RefreshCw size={10} className="animate-spin" />
-                    {shared.reinduceQueued ? '归纳排队中…' : '归纳中…'}
+                    {shared.reinduceQueued ? t('canvas.header.inducingQueued') : t('canvas.header.inducing')}
                   </span>
                 )}
               </div>
@@ -588,7 +590,7 @@ export function Canvas({
         {inductionFailed && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-2">
             <div className="anim-fade-in-fast rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-[12px] font-semibold text-red-700 shadow-sm dark:border-red-800 dark:bg-red-950/80 dark:text-red-300">
-              归纳失败，仍显示上一份地图
+              {t('canvas.induce.failed')}
             </div>
           </div>
         )}
@@ -600,7 +602,7 @@ export function Canvas({
         <div
           onMouseDown={startPanelDrag}
           className="w-1 shrink-0 cursor-col-resize bg-slate-100 dark:bg-slate-800 transition-colors hover:bg-blue-300"
-          title="拖拽调整面板宽度"
+          title={t('canvas.panelShell.dragTip')}
         />
         <div className="flex w-full shrink-0 flex-col" style={{ width: panelWidth }}>
           {guide}
@@ -628,10 +630,10 @@ export function Canvas({
         <button
           onClick={() => panelOpen === false && onPanelOpenChange(true)}
           className="flex w-9 shrink-0 flex-col items-center gap-2 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-4 text-slate-400 dark:text-slate-500 hover:text-blue-600"
-          title="展开面板"
+          title={t('canvas.panelShell.expandTip')}
         >
           <PanelRightOpen size={15} />
-          <span className="text-micro [writing-mode:vertical-rl]">{selection ? '详情' : '面板'}</span>
+          <span className="text-micro [writing-mode:vertical-rl]">{selection ? t('canvas.panelShell.tabDetail') : t('canvas.panelShell.tabPanel')}</span>
         </button>
       )}
 

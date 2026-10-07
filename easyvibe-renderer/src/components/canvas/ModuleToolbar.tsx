@@ -1,4 +1,5 @@
 import { Focus, FoldVertical, MessagesSquare, RefreshCw, UnfoldVertical } from 'lucide-react'
+import { useLang } from '@/runtime/i18n'
 
 // 选中模块时的横向工具栏（F1a）
 export function ModuleToolbar({
@@ -23,6 +24,7 @@ export function ModuleToolbar({
   /** v0.2：就此模块对话——带上下文跳「任务对话」页 */
   onChat?: () => void
 }) {
+  const { t } = useLang()
   return (
     <div className="flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 py-1.5 pl-4 pr-2 shadow-sm backdrop-blur">
       <span className="mr-1 max-w-[180px] truncate text-[12px] font-bold text-slate-700 dark:text-slate-200">{moduleName}</span>
@@ -30,10 +32,10 @@ export function ModuleToolbar({
         <button
           onClick={onChat}
           className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/70"
-          title="就此模块发起对话：跳转「任务对话」并自动带入模块上下文"
+          title={t('canvas.toolbar.chatTip')}
         >
           <MessagesSquare size={12} />
-          对话
+          {t('canvas.toolbar.chat')}
         </button>
       )}
       <button
@@ -43,7 +45,7 @@ export function ModuleToolbar({
         }`}
       >
         {expanded ? <FoldVertical size={12} /> : <UnfoldVertical size={12} />}
-        {expanded ? '收起内部' : '展开内部结构'}
+        {expanded ? t('canvas.toolbar.collapse') : t('canvas.toolbar.expand')}
       </button>
       <button
         onClick={onToggleSolo}
@@ -52,17 +54,17 @@ export function ModuleToolbar({
         }`}
       >
         <Focus size={12} />
-        {solo ? '✕ 退出聚焦' : '只看依赖'}
+        {solo ? t('canvas.toolbar.exitSolo') : t('canvas.toolbar.solo')}
       </button>
       <button
         onClick={onReinduce}
         disabled={!backendActive || inducing}
         title={
           !backendActive
-            ? '需要本地后端服务（cargo run 启动后可用）'
+            ? t('canvas.toolbar.reinduceOffline')
             : inducing
-              ? '归纳进行中，完成后自动恢复'
-              : '重新归纳该仓库：spawn agent 按 v2.2 协议执行，全程直播'
+              ? t('canvas.toolbar.reinduceBusy')
+              : t('canvas.toolbar.reinduceTip')
         }
         className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
           inducing
@@ -73,7 +75,7 @@ export function ModuleToolbar({
         }`}
       >
         <RefreshCw size={12} className={inducing ? 'animate-spin' : ''} />
-        {inducing ? '归纳中…' : '重新归纳'}
+        {inducing ? t('canvas.toolbar.inducing') : t('canvas.toolbar.reinduce')}
       </button>
     </div>
   )

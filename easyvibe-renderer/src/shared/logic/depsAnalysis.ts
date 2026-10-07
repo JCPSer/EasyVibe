@@ -148,19 +148,36 @@ const TYPE_LABEL: Record<MapEdge['type'], string> = {
   call: '函数调用', import: 'import', api: 'API 调用', event: '消息事件', db: '共享数据库', config: '配置依赖',
 }
 
+/** 文案翻译注入（英文化第二批）：shared 是 archGuard 叶子，不得 import runtime/i18n——
+ *  由调用方（页面/组件）把 t() 注进来；缺省回退中文词表（存量测试与中文界面行为不变）。
+ *  约定：tx 返回 key 本身视为缺 key，回退默认中文文案。 */
+export type DepsTx = (key: string, vars?: Record<string, string | number>) => string
+
+const txOr = (tx: DepsTx | undefined, key: string, vars: Record<string, string | number>, fallback: string): string => {
+  if (!tx) return fallback
+  const s = tx(key, vars)
+  return s === key ? fallback : s
+}
+
 /** 结论卡片（人话结论 + 证据 + 后果 + 行动），默认视图唯一信息单元 */
-export function buildDepCards(map: CodeMap, a: CouplingAnalysis): DepCard[] {
+export function buildDepCards(map: CodeMap, a: CouplingAnalysis, tx?: DepsTx): DepCard[] {
   const cards: DepCard[] = []
   const nameOf = (id: string) => a.moduleById.get(id)?.name ?? id
+  const typeLabel = (type: MapEdge['type']) => txOr(tx, `deps.type.${type}`, {}, TYPE_LABEL[type])
 
   for (const e of a.violations) {
     cards.push({
       id: `vio-${e.id}`,
       kind: 'violation',
       severity: 'critical',
-      title: `「${nameOf(e.from)}」反向调用了「${nameOf(e.to)}」`,
-      evidence: `${TYPE_LABEL[e.type]} · ${refCount(e)} 处引用 · 违反「${a.layerNameByModule(e.from)} → ${a.layerNameByModule(e.to)}」分层`,
-      consequence: `改「${nameOf(e.to)}」时「${nameOf(e.from)}」被一起拖着改，下层无法独立替换、独立测试。`,
+      title: txOr(tx, 'deps.card.violation.title', { from: nameOf(e.from), to: nameOf(e.to) }, `「${nameOf(e.from)}」反向调用了「${nameOf(e.to)}」`),
+      evidence: txOr(
+        tx,
+        'deps.card.violation.evidence',
+        { type: typeLabel(e.type), count: refCount(e), layerFrom: a.layerNameByModule(e.from), layerTo: a.layerNameByModule(e.to) },
+        `${TYPE_LABEL[e.type]} · ${refCount(e)} 处引用 · 违反「${a.layerNameByModule(e.from)} → ${a.layerNameByModule(e.to)}」分层`,
+      ),
+      consequence: txOr(tx, 'deps.card.violation.consequence', { from: nameOf(e.from), to: nameOf(e.to) }, `改「${nameOf(e.to)}」时「${nameOf(e.from)}」被一起拖着改，下层无法独立替换、独立测试。`),
       edge: e, sourceId: e.from, targetId: e.to,
     })
   }
@@ -169,13 +186,16 @@ export function buildDepCards(map: CodeMap, a: CouplingAnalysis): DepCard[] {
   if (biggest) {
     const singles = map.modules.filter((m) => !a.cycleModuleIds.has(m.id))
     const singleNames = singles.slice(0, 2).map((m) => m.name).join('、')
+    const singlesPart = singles.length > 0
+      ? txOr(tx, 'deps.card.cycle.singles', { names: singleNames }, `，全仓仅「${singleNames}」独善其身`)
+      : ''
     cards.push({
       id: 'cycle-0',
       kind: 'cycle',
       severity: 'warning',
-      title: `循环群：${biggest.length} 个模块互相可达${singles.length > 0 ? `，全仓仅「${singleNames}」独善其身` : ''}`,
-      evidence: `闭环由 ${a.violations.length} 条逆向依赖互相打通；直连跨度越大，环越难拆。`,
-      consequence: '发布与测试互相绑架，任何一环改动都可能波及全链。',
+      title: txOr(tx, 'deps.card.cycle.title', { count: biggest.length, singles: singlesPart }, `循环群：${biggest.length} 个模块互相可达${singles.length > 0 ? `，全仓仅「${singleNames}」独善其身` : ''}`),
+      evidence: txOr(tx, 'deps.card.cycle.evidence', { count: a.violations.length }, `闭环由 ${a.violations.length} 条逆向依赖互相打通；直连跨度越大，环越难拆。`),
+      consequence: txOr(tx, 'deps.card.cycle.consequence', {}, '发布与测试互相绑架，任何一环改动都可能波及全链。'),
       members: [...biggest].sort(),
     })
   }
@@ -186,9 +206,9 @@ export function buildDepCards(map: CodeMap, a: CouplingAnalysis): DepCard[] {
       id: `risk-${g.target.id}`,
       kind: 'highRisk',
       severity: 'warning',
-      title: `「${g.target.name}」（${g.target.health.score} 分）被 ${g.edges.length} 条强耦合依赖——腐化在传染`,
-      evidence: `strong 依赖来自：${froms.join(' / ')}`,
-      consequence: `它的腐化会顺着强耦合传给 ${froms.length} 个调用方。`,
+      title: txOr(tx, 'deps.card.highRisk.title', { name: g.target.name, score: g.target.health.score, count: g.edges.length }, `「${g.target.name}」（${g.target.health.score} 分）被 ${g.edges.length} 条强耦合依赖——腐化在传染`),
+      evidence: txOr(tx, 'deps.card.highRisk.evidence', { froms: froms.join(' / ') }, `strong 依赖来自：${froms.join(' / ')}`),
+      consequence: txOr(tx, 'deps.card.highRisk.consequence', { count: froms.length }, `它的腐化会顺着强耦合传给 ${froms.length} 个调用方。`),
       targetId: g.target.id,
       edge: g.edges[0],
     })

@@ -4,6 +4,7 @@ import { onFreshnessEvent } from '@/runtime/growthBus'
 import { useRepoActivityMap } from '@/runtime/useRepoActivity'
 import { relTime } from '@/shared/logic/diffStat'
 import { toast } from '@/runtime/toast'
+import { useLang } from '@/runtime/i18n'
 import { listRepos, patrolRuns } from '@/api/repos'
 import { freshness, reinduce as reinduceApi } from '@/api/canvas'
 
@@ -39,11 +40,12 @@ interface RepoDrift {
   reinducing: boolean
 }
 
-const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
-  fresh: { color: '#10b981', bg: 'bg-emerald-50 dark:bg-emerald-950/40', label: '新鲜' },
-  drifting: { color: '#f59e0b', bg: 'bg-amber-50 dark:bg-amber-950/40', label: '漂移中' },
-  stale: { color: '#ef4444', bg: 'bg-red-50 dark:bg-red-950/40', label: '已过期' },
-  unknown: { color: '#94a3b8', bg: 'bg-slate-50 dark:bg-slate-950/70', label: '未知' },
+// 漂移状态元信息（label 走字典 pages.drift.status.*）
+const STATUS_META: Record<string, { color: string; bg: string; labelKey: string }> = {
+  fresh: { color: '#10b981', bg: 'bg-emerald-50 dark:bg-emerald-950/40', labelKey: 'pages.drift.status.fresh' },
+  drifting: { color: '#f59e0b', bg: 'bg-amber-50 dark:bg-amber-950/40', labelKey: 'pages.drift.status.drifting' },
+  stale: { color: '#ef4444', bg: 'bg-red-50 dark:bg-red-950/40', labelKey: 'pages.drift.status.stale' },
+  unknown: { color: '#94a3b8', bg: 'bg-slate-50 dark:bg-slate-950/70', labelKey: 'pages.drift.status.unknown' },
 }
 
 /** 漂移进度：已漂移天数占 7 天保鲜窗的比例（fresh=0%，超过 7 天=100%） */
@@ -56,6 +58,7 @@ function driftPercent(f: Freshness, now: number): number | null {
 }
 
 export function DriftPage() {
+  const { t } = useLang()
   const [rows, setRows] = useState<RepoDrift[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -141,9 +144,9 @@ export function DriftPage() {
     try {
       const r = await reinduceApi(repoId)
       const d = await r.json().catch(() => null)
-      if (!r.ok) toast(d?.error ?? '重新归纳发起失败', 'error')
+      if (!r.ok) toast(d?.error ?? t('pages.drift.reinduceFailed'), 'error')
     } catch {
-      toast('重新归纳发起失败（需要后端在线）', 'error')
+      toast(t('pages.drift.reinduceOffline'), 'error')
     } finally {
       await load()
     }
@@ -153,9 +156,9 @@ export function DriftPage() {
     <div className="h-full overflow-y-auto p-5">
       <div className="mb-4 flex items-start justify-between">
         <div>
-          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">漂移洞察</h2>
+          <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{t('pages.drift.title')}</h2>
           <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-            持续跟踪代码仓库与归纳状态之间的漂移，帮助团队及时发现并处理落后风险。
+            {t('pages.drift.subtitle')}
           </p>
         </div>
         <button
@@ -163,16 +166,16 @@ export function DriftPage() {
           disabled={loading}
           className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-40"
         >
-          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> 刷新
+          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> {t('pages.drift.refresh')}
         </button>
       </div>
 
       {/* KPI 行 */}
       <div className="mb-4 grid grid-cols-3 gap-3">
         {[
-          { icon: <Coins size={16} className="text-red-500" />, chip: 'bg-red-50 dark:bg-red-950/40', label: '需重归纳', value: kpis.needReinduce, unit: '仓库' },
-          { icon: <Clock3 size={16} className="text-amber-500" />, chip: 'bg-amber-50 dark:bg-amber-950/40', label: '平均落后', value: kpis.avgCommits, unit: '提交' },
-          { icon: <RefreshCw size={16} className="text-emerald-500" />, chip: 'bg-emerald-50 dark:bg-emerald-950/40', label: '最近巡检', value: kpis.latestPatrol ? relTime(kpis.latestPatrol, now) : null, unit: '' },
+          { icon: <Coins size={16} className="text-red-500" />, chip: 'bg-red-50 dark:bg-red-950/40', label: t('pages.drift.kpiNeedReinduce'), value: kpis.needReinduce, unit: t('pages.drift.unitRepos') },
+          { icon: <Clock3 size={16} className="text-amber-500" />, chip: 'bg-amber-50 dark:bg-amber-950/40', label: t('pages.drift.kpiAvgBehind'), value: kpis.avgCommits, unit: t('pages.drift.unitCommits') },
+          { icon: <RefreshCw size={16} className="text-emerald-500" />, chip: 'bg-emerald-50 dark:bg-emerald-950/40', label: t('pages.drift.kpiLatestPatrol'), value: kpis.latestPatrol ? relTime(kpis.latestPatrol, now, t) : null, unit: '' },
         ].map((k) => (
           <div key={k.label} className="lift flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3">
             <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${k.chip}`}>{k.icon}</div>
@@ -189,15 +192,15 @@ export function DriftPage() {
       {/* 仓库漂移排名 */}
       <div ref={tableRef} className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
         <div className="border-b border-slate-100 dark:border-slate-800 px-4 py-2.5">
-          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">仓库漂移排名</span>
+          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.drift.tableTitle')}</span>
         </div>
         <table className="w-full text-left">
           <thead>
             <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
-              <th className="w-14 px-4 py-2">排名</th>
-              <th className="px-3 py-2">仓库</th>
-              <th className="px-3 py-2">漂移进度</th>
-              <th className="w-28 px-3 py-2 text-right">操作</th>
+              <th className="w-14 px-4 py-2">{t('pages.drift.colRank')}</th>
+              <th className="px-3 py-2">{t('pages.drift.colRepo')}</th>
+              <th className="px-3 py-2">{t('pages.drift.colProgress')}</th>
+              <th className="w-28 px-3 py-2 text-right">{t('pages.drift.colAction')}</th>
             </tr>
           </thead>
           <tbody>
@@ -222,9 +225,9 @@ export function DriftPage() {
                     </p>
                     <p className="tnum mt-0.5 text-cap text-slate-400 dark:text-slate-500">
                       {typeof r.freshness?.commitsSinceMap === 'number'
-                        ? `落后 ${r.freshness.commitsSinceMap} 提交`
-                        : '落后提交数未知'}
-                      {r.freshness?.mapGeneratedAt ? ` · 上次归纳 ${relTime(r.freshness.mapGeneratedAt, now)}` : ''}
+                        ? t('pages.drift.behind', { count: r.freshness.commitsSinceMap })
+                        : t('pages.drift.behindUnknown')}
+                      {r.freshness?.mapGeneratedAt ? ` · ${t('pages.drift.lastInduce', { time: relTime(r.freshness.mapGeneratedAt, now, t) })}` : ''}
                     </p>
                   </td>
                   <td className="px-3 py-3">
@@ -250,7 +253,7 @@ export function DriftPage() {
                           disabled={busy}
                           className="rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-cap font-semibold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                         >
-                          {act?.reinduceQueued ? '排队中…' : r.reinducing || act?.inducing ? '归纳中…' : '重新归纳'}
+                          {act?.reinduceQueued ? t('pages.drift.reinduceQueued') : r.reinducing || act?.inducing ? t('pages.drift.reinducing') : t('pages.drift.reinduce')}
                         </button>
                       )
                     })()}
@@ -262,10 +265,10 @@ export function DriftPage() {
               <tr>
                 <td colSpan={4} className="px-4 py-10 text-center text-[12px] text-slate-400 dark:text-slate-500">
                   {loadError
-                    ? '后端不在线——请确认 EasyVibe 服务已启动后点「刷新」重试。'
+                    ? t('pages.drift.loadError')
                     : rows === null
-                      ? '加载中…'
-                      : '暂无注册仓库，请先在顶栏项目选择器中添加仓库。'}
+                      ? t('common.loading')
+                      : t('pages.drift.noRepos')}
                 </td>
               </tr>
             )}
@@ -278,9 +281,9 @@ export function DriftPage() {
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3">
           <AlertTriangle size={16} className="shrink-0 text-amber-500" />
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] font-bold text-amber-700">检测到仓库漂移</p>
+            <p className="text-[12px] font-bold text-amber-700">{t('pages.drift.bannerTitle')}</p>
             <p className="mt-0.5 text-[11px] text-amber-600">
-              {kpis.needReinduce} 个仓库与当前归纳状态存在显著差异，可能影响智能体的回答准确性与时效性。
+              {t('pages.drift.bannerBody', { count: kpis.needReinduce })}
             </p>
           </div>
           {/* 重审 P2：横幅"查看详情"此前是 span 假链接（点了没反应）——真按钮，滚动到上方排名表 */}
@@ -288,7 +291,7 @@ export function DriftPage() {
             onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
             className="shrink-0 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40"
           >
-            查看详情 ↑
+            {t('pages.drift.bannerDetail')}
           </button>
         </div>
       )}

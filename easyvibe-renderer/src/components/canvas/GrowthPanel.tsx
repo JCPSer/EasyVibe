@@ -1,5 +1,6 @@
 import { Pause, Play, RotateCcw, Sparkles, X } from 'lucide-react'
 import type { GrowthState } from './types'
+import { useLang } from '@/runtime/i18n'
 
 // 生长回放控制条（消费 v2.2 growth.log 事件流）
 export function GrowthPanel({
@@ -13,20 +14,21 @@ export function GrowthPanel({
   onRestart: () => void
   onExit: () => void
 }) {
+  const { t } = useLang()
   const total = growth.events.length
   const pct = total === 0 ? 0 : Math.round((growth.index / total) * 100)
   const cur = growth.index < growth.events.length ? growth.events[growth.index] : null
   const status = growth.done
-    ? '归纳完成'
+    ? t('canvas.growth.done')
     : total === 0
-      ? '等待生长事件…'
+      ? t('canvas.growth.waiting')
     : cur?.type === 'layer'
-      ? `分层：${cur.layer.name}`
+      ? t('canvas.growth.layer', { name: cur.layer.name })
       : cur?.type === 'module'
-        ? `正在分析模块：${cur.module.name}`
+        ? t('canvas.growth.module', { name: cur.module.name })
         : cur?.type === 'arch_health'
-          ? '架构级健康评估'
-          : '初始化'
+          ? t('canvas.growth.archHealth')
+          : t('canvas.growth.init')
 
   return (
     <div className="flex w-[460px] items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-2.5 shadow-sm backdrop-blur">
@@ -34,7 +36,7 @@ export function GrowthPanel({
         onClick={onPause}
         disabled={growth.done}
         className="rounded-full p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-700 disabled:opacity-30"
-        title={growth.playing ? '暂停' : '继续'}
+        title={growth.playing ? t('canvas.growth.pauseTip') : t('canvas.growth.resumeTip')}
       >
         {growth.playing ? <Pause size={14} /> : <Play size={14} />}
       </button>
@@ -53,10 +55,10 @@ export function GrowthPanel({
           />
         </div>
       </div>
-      <button onClick={onRestart} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title="重播">
+      <button onClick={onRestart} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title={t('canvas.growth.replayTip')}>
         <RotateCcw size={13} />
       </button>
-      <button onClick={onExit} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title="退出演示">
+      <button onClick={onExit} className="rounded-full p-1.5 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/70 hover:text-slate-600" title={t('canvas.growth.exitTip')}>
         <X size={14} />
       </button>
     </div>

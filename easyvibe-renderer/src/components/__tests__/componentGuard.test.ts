@@ -43,7 +43,7 @@ const lsRecursive = (dir: string): string[] => {
 // 9 个路由可达整页（`routes.tsx` 由 repoLayout 的冻结键集合单独守）。
 const PAGES_FILES = [
   'ChangesPage.tsx', 'DepsPage.tsx', 'DriftPage.tsx', 'GitPage.tsx', 'HealthPage.tsx',
-  'ModulesPage.tsx', 'PlaceholderPage.tsx', 'RunsPage.tsx', 'UsagePage.tsx',
+  'ModulesPage.tsx', 'PlaceholderPage.tsx', 'RunsPage.tsx', 'RunsStreamView.tsx', 'UsagePage.tsx',
 ]
 // 本次迁入 canvas/ 的 7 件（含 4 个 ReactFlow 节点 + 3 个画布面板）。
 const CANVAS_NEW_FILES = [
@@ -75,7 +75,7 @@ const GUARDED_SUBDIRS = ['canvas', 'shell', 'overlays', 'chat', 'settings', 'tas
 const SUBDIR_FILES: Record<string, string[]> = {
   canvas: [
     'canvas/BandNode.tsx', 'canvas/Canvas.tsx', 'canvas/CanvasBoundary.tsx',
-    'canvas/DetailPanel.tsx', 'canvas/ExpandedModuleNode.tsx', 'canvas/FilterButton.tsx',
+    'canvas/DetailPanel.tsx', 'canvas/DetailViews.tsx', 'canvas/ExpandedModuleNode.tsx', 'canvas/FilterButton.tsx',
     'canvas/GrowthPanel.tsx', 'canvas/InductionOverlay.tsx', 'canvas/IssuesList.tsx',
     'canvas/Legend.tsx', 'canvas/ModuleNode.tsx', 'canvas/ModuleToolbar.tsx',
     'canvas/SubmoduleNode.tsx', 'canvas/TaskFormPanel.tsx', 'canvas/buildFlow.ts',

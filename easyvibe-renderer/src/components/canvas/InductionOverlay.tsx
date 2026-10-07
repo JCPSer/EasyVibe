@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, X } from 'lucide-react'
 import { onSessionOutput } from '@/runtime/growthBus'
 import { prefersReducedMotion } from '@/runtime/motion'
+import { useLang } from '@/runtime/i18n'
 import { mapProgress } from '@/api/canvas'
 import { sessionOutput } from '@/api/system'
 import {
@@ -28,8 +29,8 @@ const SILENT_MS = 30_000 // agent 静默阈值：ticker 降显 + "（agent 静�
  * 过场实时数据：progress.json 2s 轮询（排队时不轮）+ session.output WS 直播 + 首挂补拉。
  * enabled=false 时全部静默。
  */
-function useInductionLive(repo: string | null, session: InductionSessionRef | null, enabled: boolean) {
-  const [view, setView] = useState<InductionPhaseView>(() => interpretInductionProgress(null))
+function useInductionLive(repo: string | null, session: InductionSessionRef | null, enabled: boolean, t: (key: string, vars?: Record<string, string | number>) => string) {
+  const [view, setView] = useState<InductionPhaseView>(() => interpretInductionProgress(null, t))
   const [ticker, setTicker] = useState<{ text: string; silent: boolean }>({ text: '', silent: false })
 
   // progress.json → 阶段卡（内容变化才 setState；陈旧 done/缺失的解读在 interpretInductionProgress）
@@ -45,17 +46,17 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
           const next = JSON.stringify(d?.data ?? null)
           if (next === last) return
           last = next
-          setView(interpretInductionProgress(d?.data ?? null))
+          setView(interpretInductionProgress(d?.data ?? null, t))
         })
         .catch(() => {})
     }
     tick()
-    const t = window.setInterval(tick, 2000)
+    const timer = window.setInterval(tick, 2000)
     return () => {
       stale = true
-      window.clearInterval(t)
+      window.clearInterval(timer)
     }
-  }, [enabled, repo])
+  }, [enabled, repo, t])
 
   // agent 输出行：WS 直播（按 seq 幂等去重）+ 首挂补拉（接住订阅前已产出的行）
   const linesRef = useRef<string[]>([])
@@ -76,7 +77,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
         seenRef.current.add(seq)
         if (seq > maxSeqRef.current) maxSeqRef.current = seq
       }
-      const text = formatTickerLine(line, stream)
+      const text = formatTickerLine(line, stream, t)
       if (!text) return
       const lines = linesRef.current
       lines.push(text)
@@ -84,7 +85,7 @@ function useInductionLive(repo: string | null, session: InductionSessionRef | nu
       setTicker({ text: lines[lines.length - 1], silent: false })
       armSilentTimer()
     },
-    [armSilentTimer],
+    [armSilentTimer, t],
   )
 
   useEffect(() => {
@@ -170,6 +171,7 @@ export function InductionOverlay({
   onOpenRuns?: (sessionId: string) => void
   onCancelQueue?: () => void
 }) {
+  const { t } = useLang()
   const [leaving, setLeaving] = useState(false)
   const everShownRef = useRef(false)
   useEffect(() => {
@@ -192,7 +194,7 @@ export function InductionOverlay({
     return () => window.clearTimeout(t)
   }, [leaving])
 
-  const live = useInductionLive(repo, session, active && !queued)
+  const live = useInductionLive(repo, session, active && !queued, t)
 
   if (!everShownRef.current || leaving) return null
 
@@ -209,13 +211,13 @@ export function InductionOverlay({
           <button
             onClick={tickerClickable ? () => onOpenRuns!(session!.sessionId) : undefined}
             disabled={!tickerClickable}
-            title={tickerClickable ? '查看完整流水' : undefined}
+            title={tickerClickable ? t('canvas.overlay.viewRunsTip') : undefined}
             className={`pointer-events-auto max-w-[min(460px,90%)] truncate rounded-full border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-3 py-1 text-left font-mono text-micro text-slate-500 shadow-sm backdrop-blur anim-fade-in-fast dark:text-slate-400 ${
               live.ticker.silent ? 'opacity-50' : ''
             } ${tickerClickable ? 'hover:border-blue-300 dark:hover:border-blue-700' : ''}`}
           >
             {tickerText}
-            {live.ticker.silent && <span className="font-sans text-slate-400 dark:text-slate-500">（agent 静默中）</span>}
+            {live.ticker.silent && <span className="font-sans text-slate-400 dark:text-slate-500">{t('canvas.overlay.silent')}</span>}
           </button>
         )}
 
@@ -224,16 +226,16 @@ export function InductionOverlay({
             <div className="flex items-center gap-2.5">
               <Clock size={15} className="shrink-0 text-amber-500" />
               <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-semibold text-amber-700 dark:text-amber-400">归纳排队中</p>
+                <p className="text-[12px] font-semibold text-amber-700 dark:text-amber-400">{t('canvas.overlay.queuedTitle')}</p>
                 <p className="mt-0.5 truncate text-micro text-slate-400 dark:text-slate-500">
-                  当前会话结束后自动开始
+                  {t('canvas.overlay.queuedHint')}
                 </p>
               </div>
               {onCancelQueue && (
                 <button
                   onClick={onCancelQueue}
                   className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700/70 dark:hover:text-slate-300"
-                  title="取消排队"
+                  title={t('canvas.overlay.cancelQueueTip')}
                 >
                   <X size={13} />
                 </button>

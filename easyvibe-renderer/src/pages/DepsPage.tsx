@@ -17,6 +17,7 @@ import { buildModuleTask, type TaskDraft } from '@/shared/logic/taskContext'
 import type { ChatAboutTarget } from '@/shared/contract/chat'
 import { couplingAnalysis, buildDepCards, type CouplingAnalysis, type DepCard } from '@/shared/logic/depsAnalysis'
 import { Select } from '@/components/ui/SelectMenu'
+import { useLang } from '@/runtime/i18n'
 
 // 依赖体检全页（docs/dependency-feature-design-v2.md 施工）：
 // KPI 筛选卡 + 结论卡片清单（应当修复 / 值得留意 / ▸全部依赖默认折叠）+ 右半详情。
@@ -80,6 +81,7 @@ function Card({ card, selected, onSelect }: { card: DepCard; selected: boolean; 
 
 /** 违规卡迷你分层示意：from（下）→ to（上）红虚线 */
 function MiniDiagram({ card, a }: { card: DepCard; a: CouplingAnalysis }) {
+  const { t } = useLang()
   const from = card.sourceId ? a.moduleById.get(card.sourceId) : undefined
   const to = card.targetId ? a.moduleById.get(card.targetId) : undefined
   if (!from || !to) {
@@ -87,7 +89,7 @@ function MiniDiagram({ card, a }: { card: DepCard; a: CouplingAnalysis }) {
     if (card.members) {
       return (
         <div className="rounded-lg bg-slate-50 dark:bg-slate-950/70 p-3">
-          <p className="mb-2 text-micro font-semibold text-slate-400 dark:text-slate-500">循环群成员（{card.members.length}）</p>
+          <p className="mb-2 text-micro font-semibold text-slate-400 dark:text-slate-500">{t('pages.deps.diagramMembers', { count: card.members.length })}</p>
           <div className="flex flex-wrap gap-1.5">
             {card.members.map((id) => {
               const m = a.moduleById.get(id)
@@ -120,7 +122,7 @@ function MiniDiagram({ card, a }: { card: DepCard; a: CouplingAnalysis }) {
           {i === 0 && (
             <div className="my-1 flex items-center gap-1.5 pl-4">
               <span className="h-4 border-l-2 border-dashed border-red-400" />
-              <span className="text-micro text-red-500">▲ 下层调用上层 = 逆向</span>
+              <span className="text-micro text-red-500">{t('pages.deps.diagramReverse')}</span>
             </div>
           )}
         </div>
@@ -130,8 +132,9 @@ function MiniDiagram({ card, a }: { card: DepCard; a: CouplingAnalysis }) {
 }
 
 export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspectModule, onOpenMap, focusCardId, onFocusConsumed }: Props) {
+  const { t } = useLang()
   const a = useMemo(() => (map ? couplingAnalysis(map) : null), [map])
-  const cards = useMemo(() => (map && a ? buildDepCards(map, a) : []), [map, a])
+  const cards = useMemo(() => (map && a ? buildDepCards(map, a, t) : []), [map, a, t])
   const [kpiFilter, setKpiFilter] = useState<KpiFilter>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showAllViolations, setShowAllViolations] = useState(false)
@@ -162,12 +165,12 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
   const nameOf = (id: string) => a?.moduleById.get(id)?.name ?? id
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">{t('common.pickProject')}</div>
   }
   if (!map || !a) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[12px] text-slate-400 dark:text-slate-500">
-        <Loader2 size={13} className="animate-spin" /> 地图加载中…
+        <Loader2 size={13} className="animate-spin" /> {t('common.loading')}
       </div>
     )
   }
@@ -181,26 +184,26 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
       <div className="mb-4 flex items-start justify-between">
         <div>
           <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800 dark:text-slate-100">
-            <Waypoints size={15} className="text-blue-500" /> 依赖体检
+            <Waypoints size={15} className="text-blue-500" /> {t('pages.deps.title')}
           </h2>
           <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-            这个仓库模块间的耦合体检：哪里被穿透、哪里在循环、哪里在传染。
+            {t('pages.deps.subtitle')}
           </p>
         </div>
         <button
           onClick={onOpenMap}
           className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/70"
         >
-          <MapIcon size={11} /> 在画布中查看
+          <MapIcon size={11} /> {t('pages.deps.viewOnMap')}
         </button>
       </div>
 
       {/* KPI 行：点击 = 筛选下方清单 */}
       <div className="mb-4 grid grid-cols-4 gap-3">
-        <KpiCard label="逆向依赖" value={String(a.violations.length)} sub="条下层调用上层" tone="red" active={kpiFilter === 'violation'} onClick={() => setKpiFilter(kpiFilter === 'violation' ? null : 'violation')} />
-        <KpiCard label="循环群" value={a.sccGroups.length ? `${a.sccGroups.length} 群` : '0'} sub={a.sccGroups[0] ? `${a.sccGroups[0].length} 个模块互相可达` : '无循环依赖'} tone="amber" active={kpiFilter === 'cycle'} onClick={() => setKpiFilter(kpiFilter === 'cycle' ? null : 'cycle')} />
-        <KpiCard label="高风险耦合" value={`${a.highRisk.reduce((s, g) => s + g.edges.length, 0)} 条`} sub={`${a.highRisk.length} 个低分模块被强依赖`} tone="red" active={kpiFilter === 'highRisk'} onClick={() => setKpiFilter(kpiFilter === 'highRisk' ? null : 'highRisk')} />
-        <KpiCard label="跨层直达" value={`${a.topToFoundation.length} 条`} sub="顶层模块直连基础支撑层" tone="amber" active={kpiFilter === 'cross'}
+        <KpiCard label={t('pages.deps.kpiViolations')} value={String(a.violations.length)} sub={t('pages.deps.kpiViolationsSub')} tone="red" active={kpiFilter === 'violation'} onClick={() => setKpiFilter(kpiFilter === 'violation' ? null : 'violation')} />
+        <KpiCard label={t('pages.deps.kpiCycles')} value={a.sccGroups.length ? t('pages.deps.kpiCyclesValue', { count: a.sccGroups.length }) : '0'} sub={a.sccGroups[0] ? t('pages.deps.kpiCyclesSub', { count: a.sccGroups[0].length }) : t('pages.deps.kpiNoCycles')} tone="amber" active={kpiFilter === 'cycle'} onClick={() => setKpiFilter(kpiFilter === 'cycle' ? null : 'cycle')} />
+        <KpiCard label={t('pages.deps.kpiHighRisk')} value={t('pages.deps.kpiEdgesCount', { count: a.highRisk.reduce((s, g) => s + g.edges.length, 0) })} sub={t('pages.deps.kpiHighRiskSub', { count: a.highRisk.length })} tone="red" active={kpiFilter === 'highRisk'} onClick={() => setKpiFilter(kpiFilter === 'highRisk' ? null : 'highRisk')} />
+        <KpiCard label={t('pages.deps.kpiCross')} value={t('pages.deps.kpiEdgesCount', { count: a.topToFoundation.length })} sub={t('pages.deps.kpiCrossSub')} tone="amber" active={kpiFilter === 'cross'}
           onClick={() => { setKpiFilter(kpiFilter === 'cross' ? null : 'cross'); setFoldOpen(true); setFoldFilter('cross') }} />
       </div>
 
@@ -209,15 +212,15 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
         <div className="col-span-3 space-y-4">
           {violations.length === 0 && notices.length === 0 && (
             <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-white/60 px-4 py-8 text-center">
-              <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">当前架构没有耦合问题</p>
-              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">模块间方向约束良好，循环与高风险耦合均未检出。</p>
+              <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">{t('pages.deps.emptyTitle')}</p>
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{t('pages.deps.emptyHint')}</p>
             </div>
           )}
 
           {groupVisible('violation') && violations.length > 0 && (
             <section>
               <p className="mb-2 text-[13px] font-bold text-red-500">
-                应当修复 <span className="ml-1 font-normal text-slate-400">（共 {violations.length} 条{showAllViolations ? '' : ' · 此处列最严重 2 条'}）</span>
+                {t('pages.deps.groupFix')} <span className="ml-1 font-normal text-slate-400">{t('pages.deps.groupFixMeta', { count: violations.length, truncated: showAllViolations ? '' : t('pages.deps.showingTop') })}</span>
               </p>
               <div className="space-y-2">
                 {shownViolations.map((c) => (
@@ -226,7 +229,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
               </div>
               {!showAllViolations && violations.length > 2 && (
                 <button onClick={() => setShowAllViolations(true)} className="mt-2 text-[11px] font-semibold text-blue-600 hover:text-blue-700">
-                  其余 {violations.length - 2} 条逆向违规 →
+                  {t('pages.deps.showRest', { count: violations.length - 2 })}
                 </button>
               )}
             </section>
@@ -235,7 +238,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
           {(kpiFilter === null || kpiFilter === 'cycle' || kpiFilter === 'highRisk') && notices.length > 0 && (
             <section>
               <p className="mb-2 text-[13px] font-bold text-amber-500">
-                值得留意 <span className="ml-1 font-normal text-slate-400">（不紧急，但趋势值得盯）</span>
+                {t('pages.deps.groupNotice')} <span className="ml-1 font-normal text-slate-400">{t('pages.deps.groupNoticeMeta')}</span>
               </p>
               <div className="space-y-2">
                 {notices
@@ -251,7 +254,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
           <section>
             <button onClick={() => setFoldOpen(!foldOpen)} className="flex items-center gap-1 text-[12px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700">
               {foldOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              全部依赖（{map.edges.length}）—— 内行展开后按类型 / 强度 / 层过滤
+              {t('pages.deps.foldTitle', { count: map.edges.length })}
             </button>
             {foldOpen && (
               <div className="anim-fade-in-fast mt-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
@@ -261,13 +264,13 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                     value={foldFilter}
                     onChange={(v) => setFoldFilter(v as typeof foldFilter)}
                     options={[
-                      { value: 'all', label: '全部' },
-                      { value: 'violation', label: '仅违规' },
-                      { value: 'cross', label: '跨层直达' },
-                      { value: 'strong', label: '仅强耦合' },
+                      { value: 'all', label: t('pages.deps.filterAll') },
+                      { value: 'violation', label: t('pages.deps.filterViolation') },
+                      { value: 'cross', label: t('pages.deps.filterCross') },
+                      { value: 'strong', label: t('pages.deps.filterStrong') },
                     ]}
                   />
-                  <span className="text-micro text-slate-400 dark:text-slate-500">{foldEdges.length} 条</span>
+                  <span className="text-micro text-slate-400 dark:text-slate-500">{t('pages.deps.foldCount', { count: foldEdges.length })}</span>
                 </div>
                 <div className="max-h-72 overflow-y-auto">
                   {foldEdges.map((e) => (
@@ -281,11 +284,11 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                       <span className="text-slate-300 dark:text-slate-600">→</span>
                       <span className="truncate text-[12px] text-slate-600 dark:text-slate-300">{nameOf(e.to)}</span>
                       <span className="ml-auto shrink-0 text-micro text-slate-400 dark:text-slate-500">
-                        {e.type} · {e.label ?? '1 处引用'}
+                        {e.type} · {e.label ?? t('canvas.edgeTip.refCount', { count: 1 })}
                       </span>
                     </button>
                   ))}
-                  {foldEdges.length === 0 && <p className="px-3 py-6 text-center text-[11px] text-slate-300 dark:text-slate-600">无匹配项</p>}
+                  {foldEdges.length === 0 && <p className="px-3 py-6 text-center text-[11px] text-slate-300 dark:text-slate-600">{t('pages.deps.foldEmpty')}</p>}
                 </div>
               </div>
             )}
@@ -298,7 +301,13 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
             <div className="sticky top-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
               <p className="text-[13px] font-bold leading-5 text-slate-800 dark:text-slate-100">{selected.title}</p>
               <p className="mt-1 text-cap text-slate-400 dark:text-slate-500">
-                {selected.kind === 'violation' ? `${selected.edge?.type} · ${selected.edge?.label ?? '1 处引用'} · 上次巡检 ${map.meta.last_patrol_at?.slice(0, 10) ?? '—'}` : selected.evidence}
+                {selected.kind === 'violation'
+                  ? t('pages.deps.edgeMeta', {
+                      type: selected.edge?.type ?? '',
+                      label: selected.edge?.label ?? t('canvas.edgeTip.refCount', { count: 1 }),
+                      date: map.meta.last_patrol_at?.slice(0, 10) ?? '—',
+                    })
+                  : selected.evidence}
               </p>
 
               <div className="mt-3">
@@ -307,13 +316,13 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
 
               {primaryModuleId && (
                 <>
-                  <p className="mt-4 text-cap font-semibold text-slate-400 dark:text-slate-500">度量 · {nameOf(primaryModuleId)}</p>
+                  <p className="mt-4 text-cap font-semibold text-slate-400 dark:text-slate-500">{t('pages.deps.metricsLabel', { name: nameOf(primaryModuleId) })}</p>
                   <div className="mt-1.5 grid grid-cols-4 gap-1.5">
                     {[
-                      ['扇入', String(a.fanIn.get(primaryModuleId) ?? 0)],
-                      ['扇出', String(a.fanOut.get(primaryModuleId) ?? 0)],
-                      ['循环群', inCycle ? `${a.sccGroups[0]?.length ?? 0} 模块` : '不在环上'],
-                      ['跨层跳数', selected.edge ? String(Math.abs(a.orderOf(selected.edge.from) - a.orderOf(selected.edge.to))) : '—'],
+                      [t('pages.deps.metricFanIn'), String(a.fanIn.get(primaryModuleId) ?? 0)],
+                      [t('pages.deps.metricFanOut'), String(a.fanOut.get(primaryModuleId) ?? 0)],
+                      [t('pages.deps.metricCycle'), inCycle ? t('pages.deps.metricCycleIn', { count: a.sccGroups[0]?.length ?? 0 }) : t('pages.deps.metricCycleOut')],
+                      [t('pages.deps.metricCrossJumps'), selected.edge ? String(Math.abs(a.orderOf(selected.edge.from) - a.orderOf(selected.edge.to))) : '—'],
                     ].map(([k, v]) => (
                       <div key={k} className="rounded-lg bg-slate-50 dark:bg-slate-950/70 px-2 py-1.5">
                         <p className="text-micro text-slate-400 dark:text-slate-500">{k}</p>
@@ -324,7 +333,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                 </>
               )}
 
-              <p className="mt-4 text-cap text-slate-400 dark:text-slate-500">即将支持精确定位到具体文件与代码行。</p>
+              <p className="mt-4 text-cap text-slate-400 dark:text-slate-500">{t('pages.deps.soon')}</p>
 
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 {selected.targetId && (
@@ -332,7 +341,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                     onClick={() => onCreateTask(buildModuleTask(map, selected.targetId!))}
                     className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-micro font-bold text-white hover:bg-blue-700"
                   >
-                    <Wrench size={10} /> 发起修复
+                    <Wrench size={10} /> {t('pages.deps.actionFix')}
                   </button>
                 )}
                 {selected.targetId && (
@@ -340,7 +349,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                     onClick={() => onChatAbout({ refId: selected.targetId!, refName: nameOf(selected.targetId!), kind: 'module' })}
                     className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-micro font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600"
                   >
-                    <MessagesSquare size={10} /> 问 agent
+                    <MessagesSquare size={10} /> {t('pages.deps.actionAsk')}
                   </button>
                 )}
                 <button
@@ -348,7 +357,7 @@ export function DepsPage({ backendRepo, map, onCreateTask, onChatAbout, onInspec
                   disabled={!primaryModuleId}
                   className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-micro font-bold text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40"
                 >
-                  <MapIcon size={10} /> 在画布上看
+                  <MapIcon size={10} /> {t('pages.deps.actionViewMap')}
                 </button>
               </div>
             </div>

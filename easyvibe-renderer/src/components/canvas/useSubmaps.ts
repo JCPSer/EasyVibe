@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SubMap } from '@/types/map'
+import { t } from '@/runtime/i18n'
 import { enqueue } from '@/runtime/sessionQueue'
 import { onQueueChanged, onSessionEvent, onSessionOutput as onSessionOutputListener } from '@/runtime/growthBus'
 import { analyzeSubmap as analyzeSubmapRequest, submap } from '@/api/canvas'
@@ -72,7 +73,7 @@ export function useSubmaps(backendRepo: string | null) {
         setSubmapSessions((prev) => {
           const hit = Object.entries(prev).find(([, sid]) => sid === evt.sessionId)
           if (hit && evt.status === 'failed') {
-            setSubmapErrors((e) => ({ ...e, [hit[0]]: '分析会话失败（agent 未能完成内部结构分析）。可重试「深入分析」；多次失败请检查 LLM 配置。' }))
+            setSubmapErrors((e) => ({ ...e, [hit[0]]: t('canvas.submap.sessionFailed') }))
             setSubmaps((p) => ({ ...p, [hit[0]]: 'error' }))
             setSubmapSessions((prev) => {
               const n = { ...prev }
@@ -130,19 +131,19 @@ export function useSubmaps(backendRepo: string | null) {
           setSubmapSessions((prev) => ({ ...prev, [id]: sid }))
           setSubmaps((prev) => ({ ...prev, [id]: 'loading' }))
           let n = 0
-          const t = window.setInterval(() => {
+          const pollTimer = window.setInterval(() => {
             n += 1
             const cur = submapsRef.current?.[id]
             if (cur && cur !== 'loading' && cur !== 'error') {
-              window.clearInterval(t)
+              window.clearInterval(pollTimer)
               return
             }
             if (n >= 40) {
-              window.clearInterval(t)
+              window.clearInterval(pollTimer)
               // 超时必须显式告之——此前静默停轮询，界面永远"分析中"
               setSubmapErrors((prev) => ({
                 ...prev,
-                [id]: '分析超时（4 分钟未产出内部结构）。可能是 agent 执行缓慢或失败，请重试「深入分析」。',
+                [id]: t('canvas.submap.timeout'),
               }))
               setSubmaps((prev) => ({ ...prev, [id]: 'error' }))
               setSubmapSessions((prev) => {
@@ -157,15 +158,15 @@ export function useSubmaps(backendRepo: string | null) {
         })
         .catch(async (e) => {
           // 409=单会话纪律（另一个分析/归纳在跑）——一键入队，当前会话结束后自动接续
-          let msg = '分析启动失败（请确认后端在线后重试）。'
+          let msg = t('canvas.submap.startFailed')
           try {
             const body = await (e as Response)?.json?.()
             if (body?.code === 'CONFLICT' || /conflict|活动会话/.test(String(body?.error ?? ''))) {
               const res = await enqueue(backendRepo, 'submap', id)
               if (res?.outcome === 'replaced')
-                msg = `已加入队列，当前会话结束后自动开始分析（已替换排队：${res.replacedLabel ?? '旧任务'}）`
-              else if (res?.outcome === 'queued') msg = '已加入队列，当前会话结束后自动开始分析'
-              else if (res?.outcome === 'started') msg = '分析已直接开始，稍候重新展开即可看到内部结构'
+                msg = t('canvas.submap.queuedReplaced', { label: res.replacedLabel ?? t('common.replacedFallback') })
+              else if (res?.outcome === 'queued') msg = t('canvas.submap.queued')
+              else if (res?.outcome === 'started') msg = t('canvas.submap.started')
             }
           } catch { /* 保持默认文案 */ }
           setSubmapErrors((prev) => ({ ...prev, [id]: msg }))

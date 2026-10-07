@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Gauge, Loader2, TriangleAlert, Lightbulb, ArrowRight } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/shared/logic/layout'
+import { useLang } from '@/runtime/i18n'
 import { usage } from '@/api/repos'
 
 // 「用量」页（docs/llm-usage-page-design-v1.md U2/L1/L2 施工）：
@@ -39,11 +40,8 @@ interface UsageData {
   sessions: AgentSession[]
 }
 
-const KIND_ZH: Record<string, string> = {
-  induce: '归纳', patrol: '巡检', submap: '子图分析', task: '任务执行',
-  'subagent-review': '任务执行 · 初审', 'subagent-audit': '任务执行 · 审查', unknown: '其他',
-}
-const RANGE = [{ d: 1, label: '今天' }, { d: 7, label: '7 天' }, { d: 30, label: '30 天' }, { d: 0, label: '全部' }]
+// 时间范围选项（labelKey 走字典 pages.usage.range*）
+const RANGE = [{ d: 1, labelKey: 'pages.usage.rangeToday' }, { d: 7, labelKey: 'pages.usage.range7d' }, { d: 30, labelKey: 'pages.usage.range30d' }, { d: 0, labelKey: 'pages.usage.rangeAll' }] as const
 
 const fmtCost = (v?: number | null): string => (v == null ? '—' : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`)
 const fmtTokens = (v?: number | null): string => {
@@ -77,6 +75,7 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string; sub: s
 
 /** 纯 SVG 堆积柱（按日 tokens 趋势）：输入浅蓝在下、输出深蓝在上——TrendChart 同款零依赖范式 */
 function DailyChart({ daily }: { daily: UsageDaily[] }) {
+  const { t } = useLang()
   const W = 620, H = 170, PAD = { l: 34, r: 10, t: 10, b: 20 }
   const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b
   const max = Math.max(1, ...daily.map((d) => (d.inputTokens ?? 0) + (d.outputTokens ?? 0)))
@@ -98,10 +97,10 @@ function DailyChart({ daily }: { daily: UsageDaily[] }) {
         return (
           <g key={d.day}>
             <rect x={x} y={PAD.t + ih - inH} width={bw} height={Math.max(1, inH)} rx={1.5} fill="#93c5fd">
-              <title>{`${d.day} 输入 ${fmtTokens(d.inputTokens)} · 输出 ${fmtTokens(d.outputTokens)}`}</title>
+              <title>{t('pages.usage.chartTip', { day: d.day, in: fmtTokens(d.inputTokens), out: fmtTokens(d.outputTokens) })}</title>
             </rect>
             <rect x={x} y={PAD.t + ih - inH - outH} width={bw} height={Math.max(1, outH)} rx={1.5} fill={outH > 0 ? '#2563eb' : 'none'}>
-              <title>{`${d.day} 输入 ${fmtTokens(d.inputTokens)} · 输出 ${fmtTokens(d.outputTokens)}`}</title>
+              <title>{t('pages.usage.chartTip', { day: d.day, in: fmtTokens(d.inputTokens), out: fmtTokens(d.outputTokens) })}</title>
             </rect>
             {(i % Math.ceil(daily.length / 8) === 0 || i === daily.length - 1) && (
               <text x={x + bw / 2} y={H - 5} textAnchor="middle" fontSize={8} fill="#cbd5e1">{d.day.slice(5)}</text>
@@ -109,19 +108,21 @@ function DailyChart({ daily }: { daily: UsageDaily[] }) {
           </g>
         )
       })}
-      {daily.length === 0 && <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={10} fill="#cbd5e1">区间内暂无会话</text>}
+      {daily.length === 0 && <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={10} fill="#cbd5e1">{t('pages.usage.chartEmpty')}</text>}
     </svg>
   )
 }
 
 /** 横向分布条（按类型/按模型/按模块共用） */
-function GroupBars({ rows, total, unit, valueFmt, renderMeta }: {
+function GroupBars({ rows, total, unit, valueFmt, kindLabel, renderMeta }: {
   rows: UsageGroup[] | UsageModule[]
   total: number
   unit: 'cost' | 'tokens' | 'sessions'
   valueFmt: (v?: number | null) => string
+  kindLabel: (name: string) => string
   renderMeta?: (r: UsageGroup | UsageModule) => React.ReactNode
 }) {
+  const { t } = useLang()
   return (
     <div className="space-y-2">
       {rows.map((r) => {
@@ -129,7 +130,7 @@ function GroupBars({ rows, total, unit, valueFmt, renderMeta }: {
         const pct = total > 0 && v != null ? v / total : 0
         return (
           <div key={r.name} className="flex items-center gap-2">
-            <span className="w-36 shrink-0 truncate text-[12px] text-slate-600 dark:text-slate-300">{KIND_ZH[r.name] ?? r.name}</span>
+            <span className="w-36 shrink-0 truncate text-[12px] text-slate-600 dark:text-slate-300">{kindLabel(r.name)}</span>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.max(2, pct * 100)}%` }} />
             </div>
@@ -139,7 +140,7 @@ function GroupBars({ rows, total, unit, valueFmt, renderMeta }: {
           </div>
         )
       })}
-      {rows.length === 0 && <p className="py-4 text-center text-[11px] text-slate-300 dark:text-slate-600">暂无数据</p>}
+      {rows.length === 0 && <p className="py-4 text-center text-[11px] text-slate-300 dark:text-slate-600">{t('pages.usage.groupEmpty')}</p>}
     </div>
   )
 }
@@ -150,6 +151,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
   onOpenModule: (moduleId: string) => void
   onOpenSession: (sessionId: string) => void
 }) {
+  const { t } = useLang()
   const [days, setDays] = useState(30)
   const [data, setData] = useState<UsageData | null>(null)
   // 首次加载态由 data===null 派生（避免 effect 内同步 setState 的级联渲染告警）；
@@ -172,21 +174,32 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
     }
   }, [backendRepo, days])
 
-  const t = data?.totals
+  const totals = data?.totals
   const modById = useMemo(() => new Map((map?.modules ?? []).map((m) => [m.id, m])), [map])
+
+  // 会话类型名：kinds.* 字典；未知 kind 回退原名（模型名等原始值）
+  const kindName = (name: string) => {
+    const key = `kinds.${name}`
+    const s = t(key)
+    return s === key ? name : s
+  }
 
   // L2 洞察自动生成为人话
   const insights = useMemo(() => {
-    if (!data || !t || t.sessions === 0) return []
+    if (!data || !totals || totals.sessions === 0) return []
     const out: { title: string; body: string; tone: 'amber' | 'red' | 'green' }[] = []
     const kindCostTotal = data.byKind.reduce((s, k) => s + (k.value ?? 0), 0)
     const top = [...data.byKind].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))[0]
     if (top && (top.value ?? 0) > 0) {
-      const failed = t.failed ?? 0
-      const failedCost = t.failedCost ?? 0
+      const failed = totals.failed ?? 0
+      const failedCost = totals.failedCost ?? 0
       out.push({
-        title: `${KIND_ZH[top.name] ?? top.name}是本期最贵的动作`,
-        body: `花掉 ${fmtCost(top.value)}（占 ${kindCostTotal > 0 ? Math.round(((top.value ?? 0) / kindCostTotal) * 100) : 0}%）${failed > 0 ? `；其中 ${failed} 次失败白跑 ${fmtCost(failedCost)}` : ''}。`,
+        title: t('pages.usage.insightTopCost', { kind: kindName(top.name) }),
+        body: t('pages.usage.insightTopCostBody', {
+          cost: fmtCost(top.value),
+          pct: kindCostTotal > 0 ? Math.round(((top.value ?? 0) / kindCostTotal) * 100) : 0,
+          failedPart: failed > 0 ? t('pages.usage.insightTopCostFailed', { count: failed, cost: fmtCost(failedCost) }) : '',
+        }),
         tone: 'amber',
       })
     }
@@ -199,24 +212,24 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
     const decayMods = data.byModule.filter((m) => (modById.get(m.name)?.health.score ?? 100) < 60)
     if (modTotal > 0 && decayCost > 0 && decayMods.length > 0) {
       out.push({
-        title: '腐化的代价',
-        body: `${Math.round((decayCost / modTotal) * 100)}% 的模块治理花费集中在 ${decayMods.length} 个健康分 <60 的模块上——钱在替腐化买单。`,
+        title: t('pages.usage.insightDecayTitle'),
+        body: t('pages.usage.insightDecayBody', { pct: Math.round((decayCost / modTotal) * 100), count: decayMods.length }),
         tone: 'red',
       })
     }
-    if ((t.cacheRead ?? 0) > 0 && (t.inputTokens ?? 0) > 0) {
-      const hit = Math.round((t.cacheRead! / (t.cacheRead! + t.inputTokens!)) * 100)
-      out.push({ title: `缓存命中率 ${hit}%`, body: '重复上下文命中缓存，这部分输入按缓存价计。', tone: 'green' })
+    if ((totals.cacheRead ?? 0) > 0 && (totals.inputTokens ?? 0) > 0) {
+      const hit = Math.round((totals.cacheRead! / (totals.cacheRead! + totals.inputTokens!)) * 100)
+      out.push({ title: t('pages.usage.insightCacheTitle', { pct: hit }), body: t('pages.usage.insightCacheBody'), tone: 'green' })
     }
     return out.slice(0, 3)
-  }, [data, t, modById])
+  }, [data, totals, modById, t])
 
   if (!backendRepo) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">先在左侧选择一个项目。</div>
+    return <div className="flex h-full items-center justify-center text-[12px] text-slate-400 dark:text-slate-500">{t('common.pickProject')}</div>
   }
 
-  const cacheHit = t && (t.cacheRead ?? 0) > 0 && (t.inputTokens ?? 0) > 0
-    ? Math.round((t.cacheRead! / (t.cacheRead! + t.inputTokens!)) * 100)
+  const cacheHit = totals && (totals.cacheRead ?? 0) > 0 && (totals.inputTokens ?? 0) > 0
+    ? Math.round((totals.cacheRead! / (totals.cacheRead! + totals.inputTokens!)) * 100)
     : null
   const kindCostTotal = data?.byKind.reduce((s, k) => s + (k.value ?? 0), 0) ?? 0
   const modelTokenTotal = data?.byModel.reduce((s, m) => s + (m.value ?? 0), 0) ?? 0
@@ -227,14 +240,14 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
       <div className="mb-4 flex items-start justify-between">
         <div>
           <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800 dark:text-slate-100">
-            <Gauge size={15} className="text-blue-500" /> 用量
+            <Gauge size={15} className="text-blue-500" /> {t('pages.usage.title')}
           </h2>
           <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-            这个项目的 agent 花掉了多少模型额度：按时间、按类型、按模型的统计与逐次会话明细。
+            {t('pages.usage.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-0.5">
-          {RANGE.map(({ d, label }) => (
+          {RANGE.map(({ d, labelKey }) => (
             <button
               key={d}
               onClick={() => setDays(d)}
@@ -242,7 +255,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
                 days === d ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600'
               }`}
             >
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </div>
@@ -250,43 +263,47 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
 
       {loading && (
         <div className="flex items-center justify-center gap-2 py-16 text-[12px] text-slate-400 dark:text-slate-500">
-          <Loader2 size={13} className="animate-spin" /> 加载中…
+          <Loader2 size={13} className="animate-spin" /> {t('common.loading')}
         </div>
       )}
 
-      {data && t && t.sessions === 0 && (
+      {data && totals && totals.sessions === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-white/60 px-4 py-10 text-center">
-          <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">这个时间范围内还没有会话</p>
-          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">归纳 / 巡检 / 任务执行跑起来后，这里会自动统计 tokens 与花费。</p>
+          <p className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">{t('pages.usage.emptyTitle')}</p>
+          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{t('pages.usage.emptyHint')}</p>
         </div>
       )}
 
-      {data && t && t.sessions > 0 && (
+      {data && totals && totals.sessions > 0 && (
         <>
           {/* KPI 行 */}
           <div className="mb-4 grid grid-cols-4 gap-3">
             <Kpi
-              label="本期花费"
-              value={fmtCost(t.cost)}
-              sub={t.cost == null ? '跑几次会话后自动填充' : `自报 ${t.reported ?? 0} 次 · 口径见页脚`}
+              label={t('pages.usage.kpiCost')}
+              value={fmtCost(totals.cost)}
+              sub={totals.cost == null ? t('pages.usage.kpiCostFill') : t('pages.usage.kpiCostReported', { count: totals.reported ?? 0 })}
               tone="amber"
             />
             <Kpi
-              label="总消耗 tokens"
-              value={t.inputTokens == null && t.outputTokens == null ? '—' : fmtTokens((t.inputTokens ?? 0) + (t.outputTokens ?? 0))}
-              sub={`输入 ${fmtTokens(t.inputTokens)} · 输出 ${fmtTokens(t.outputTokens)}`}
+              label={t('pages.usage.kpiTokens')}
+              value={totals.inputTokens == null && totals.outputTokens == null ? '—' : fmtTokens((totals.inputTokens ?? 0) + (totals.outputTokens ?? 0))}
+              sub={t('pages.usage.kpiTokensInOut', { in: fmtTokens(totals.inputTokens), out: fmtTokens(totals.outputTokens) })}
               tone="blue"
             />
             <Kpi
-              label="会话次数"
-              value={String(t.sessions)}
-              sub={`成功 ${t.succeeded ?? 0} · 失败 ${t.failed ?? 0}${(t.failedCost ?? 0) > 0 ? `（白跑 ${fmtCost(t.failedCost)}）` : ''}`}
+              label={t('pages.usage.kpiSessions')}
+              value={String(totals.sessions)}
+              sub={t('pages.usage.kpiSessionsSub', {
+                ok: totals.succeeded ?? 0,
+                failed: totals.failed ?? 0,
+                wasted: (totals.failedCost ?? 0) > 0 ? t('pages.usage.wasted', { cost: fmtCost(totals.failedCost) }) : '',
+              })}
               tone="green"
             />
             <Kpi
-              label="缓存命中率"
+              label={t('pages.usage.kpiCache')}
               value={cacheHit === null ? '—' : `${cacheHit}%`}
-              sub={cacheHit === null ? '暂无缓存数据' : `缓存读 ${fmtTokens(t.cacheRead)}`}
+              sub={cacheHit === null ? t('pages.usage.kpiCacheNone') : t('pages.usage.kpiCacheRead', { tokens: fmtTokens(totals.cacheRead) })}
               tone="indigo"
             />
           </div>
@@ -295,31 +312,31 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
           <div className="mb-3 grid grid-cols-3 gap-3">
             <div className="col-span-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">按日消耗趋势</span>
+                <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.usage.trendTitle')}</span>
                 <span className="flex items-center gap-3 text-micro text-slate-400 dark:text-slate-500">
-                  <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-300" /> 输入</span>
-                  <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-600" /> 输出</span>
+                  <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-300" /> {t('pages.usage.legendIn')}</span>
+                  <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-600" /> {t('pages.usage.legendOut')}</span>
                 </span>
               </div>
               <DailyChart daily={data.daily} />
             </div>
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-              <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">按类型分布</p>
-              <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">本期花费占比 · 子 agent 折入父类型</p>
-              <GroupBars rows={data.byKind} total={kindCostTotal} unit="cost" valueFmt={fmtCost} />
+              <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.usage.byKindTitle')}</p>
+              <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">{t('pages.usage.byKindSub')}</p>
+              <GroupBars rows={data.byKind} total={kindCostTotal} unit="cost" valueFmt={fmtCost} kindLabel={kindName} />
             </div>
           </div>
 
           {/* 按模型 + 洞察卡 */}
           <div className="mb-3 grid grid-cols-5 gap-3">
             <div className="col-span-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-              <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">按模型分布</p>
-              <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">tokens 占比 · 来自会话上报的真实模型名</p>
-              <GroupBars rows={data.byModel} total={modelTokenTotal} unit="tokens" valueFmt={fmtTokens} />
+              <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.usage.byModelTitle')}</p>
+              <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">{t('pages.usage.byModelSub')}</p>
+              <GroupBars rows={data.byModel} total={modelTokenTotal} unit="tokens" valueFmt={fmtTokens} kindLabel={(n) => n} />
             </div>
             <div className="col-span-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30">
               <p className="flex items-center gap-1 text-[13px] font-bold text-amber-600 dark:text-amber-400">
-                <Lightbulb size={13} /> 本期洞察
+                <Lightbulb size={13} /> {t('pages.usage.insightsTitle')}
               </p>
               {insights.map((ins, i) => (
                 <div key={i} className={i > 0 ? 'border-t border-amber-200 pt-2 dark:border-amber-900/60' : ''}>
@@ -335,8 +352,8 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
 
           {/* L1 按模块治理账单 */}
           <div className="mb-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-            <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">按模块 TopN · 治理账单</p>
-            <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">花费经「任务→影响模块」与子图会话归属归因 · 点击行跳模块详情</p>
+            <p className="mb-1 text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.usage.moduleTitle')}</p>
+            <p className="mb-3 text-micro text-slate-400 dark:text-slate-500">{t('pages.usage.moduleSub')}</p>
             <div className="space-y-2">
               {data.byModule.map((m) => {
                 const mod = modById.get(m.name)
@@ -355,7 +372,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
                     </div>
                     <span className="tnum w-16 shrink-0 text-right text-[11px] text-slate-600 dark:text-slate-300">{fmtCost(m.cost)}</span>
                     <span className="w-32 shrink-0 truncate text-right text-micro text-slate-400 dark:text-slate-500">
-                      {m.sessions} 次{m.failed ? <span className="text-red-400"> · {m.failed} 次失败</span> : ''}
+                      {t('pages.usage.moduleSessions', { count: m.sessions })}{m.failed ? <span className="text-red-400"> · {t('pages.usage.moduleFailed', { count: m.failed })}</span> : ''}
                     </span>
                     <ArrowRight size={11} className="shrink-0 text-slate-300 dark:text-slate-600" />
                   </button>
@@ -363,7 +380,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
               })}
               {data.byModule.length === 0 && (
                 <p className="py-4 text-center text-[11px] text-slate-300 dark:text-slate-600">
-                  暂无模块归因数据（任务与子图分析跑起来后自动归因）
+                  {t('pages.usage.moduleEmpty')}
                 </p>
               )}
             </div>
@@ -372,23 +389,23 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
           {/* 明细表 */}
           <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-2.5">
-              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">会话明细</span>
-              <span className="text-micro text-slate-400 dark:text-slate-500">共 {t.sessions} 次 · 点击行看会话流水 · 按开始时间倒序</span>
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.usage.tableTitle')}</span>
+              <span className="text-micro text-slate-400 dark:text-slate-500">{t('pages.usage.tableMeta', { count: totals.sessions })}</span>
             </div>
             <div className="max-h-80 overflow-y-auto">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-slate-50/90 dark:bg-slate-900/90 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
                   <tr>
-                    <th className="px-4 py-2">时间</th>
-                    <th className="px-3 py-2">类型</th>
-                    <th className="px-3 py-2">模块</th>
-                    <th className="px-3 py-2">模型</th>
-                    <th className="px-3 py-2 text-right">tokens 进/出</th>
-                    <th className="px-3 py-2 text-right">缓存命中</th>
-                    <th className="px-3 py-2 text-right">耗时</th>
-                    <th className="px-3 py-2 text-right">轮数</th>
-                    <th className="px-3 py-2 text-right">花费</th>
-                    <th className="px-3 py-2">状态</th>
+                    <th className="px-4 py-2">{t('pages.usage.colTime')}</th>
+                    <th className="px-3 py-2">{t('pages.usage.colKind')}</th>
+                    <th className="px-3 py-2">{t('pages.usage.colModule')}</th>
+                    <th className="px-3 py-2">{t('pages.usage.colModel')}</th>
+                    <th className="px-3 py-2 text-right">{t('pages.usage.colTokens')}</th>
+                    <th className="px-3 py-2 text-right">{t('pages.usage.colCache')}</th>
+                    <th className="px-3 py-2 text-right">{t('pages.usage.colDuration')}</th>
+                    <th className="px-3 py-2 text-right">{t('pages.usage.colTurns')}</th>
+                    <th className="px-3 py-2 text-right">{t('pages.usage.colCost')}</th>
+                    <th className="px-3 py-2">{t('pages.usage.colStatus')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,7 +416,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
                     return (
                       <tr key={s.id} onClick={() => onOpenSession(s.id)} className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                         <td className="tnum px-4 py-2 text-[12px] text-slate-600 dark:text-slate-300">{fmtDate(s.startedAt)}</td>
-                        <td className="px-3 py-2 text-[12px] text-slate-600 dark:text-slate-300">{KIND_ZH[s.kind] ?? s.label ?? s.kind}</td>
+                        <td className="px-3 py-2 text-[12px] text-slate-600 dark:text-slate-300">{kindName(s.kind) ?? s.label ?? s.kind}</td>
                         <td className="max-w-[120px] truncate px-3 py-2 text-[12px] text-slate-500 dark:text-slate-400">
                           {s.moduleId ? (modById.get(s.moduleId)?.name ?? s.moduleId) : '—'}
                         </td>
@@ -417,7 +434,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
                             : s.status === 'failed' ? 'bg-red-50 dark:bg-red-950/40 text-red-500'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                           }`}>
-                            {s.status === 'succeeded' ? '成功' : s.status === 'failed' ? '失败' : s.status}
+                            {s.status === 'succeeded' ? t('common.status.succeeded') : s.status === 'failed' ? t('common.status.failed') : s.status}
                           </span>
                         </td>
                       </tr>
@@ -430,7 +447,7 @@ export function UsagePage({ backendRepo, map, onOpenModule, onOpenSession }: {
 
           {/* 页脚口径 */}
           <p className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-900/60 px-3 py-2 text-center text-micro text-slate-400 dark:text-slate-500">
-            口径：花费优先取 agent 自报成本，缺失时按模型价格表估算；订阅制计费与实际账单可能有差异，仅供参考。被终止的会话无用量回报，显示「—」。
+            {t('pages.usage.footnote')}
           </p>
         </>
       )}

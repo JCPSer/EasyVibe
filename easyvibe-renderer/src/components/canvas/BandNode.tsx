@@ -4,6 +4,7 @@ import { Boxes, ChevronRight } from 'lucide-react'
 import type { Layer } from '@/types/map'
 import type { BandBox } from '@/shared/logic/layout'
 import { healthColor } from '@/shared/logic/layout'
+import { useLang } from '@/runtime/i18n'
 
 export interface LayerStats {
   count: number
@@ -19,6 +20,7 @@ export type BandNodeType = Node<
 // 层横带：左侧层标签列（可点击选中该层）+ 右侧带状区域。
 // 注意：层健康（stats）为成员模块的聚合指标，LLM 独立评估只有模块级与架构级两级。
 export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>) {
+  const { t } = useLang()
   const { layer, box, index, stats, selected, onSelect } = data
   const color = healthColor(stats.avgScore)
 
@@ -39,7 +41,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
           cursor: 'pointer',
           pointerEvents: 'auto',
         }}
-        title="点击选中该层"
+        title={t('canvas.node.selectLayerTip')}
       >
         {/* 改进#5：层序徽标 L0/L1…——分层"可数可辨"，远看知道几层、谁在上谁在下 */}
         <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
@@ -66,7 +68,7 @@ export const BandNode = memo(function BandNode({ data }: NodeProps<BandNodeType>
             {stats.avgScore}
           </span>
           <span className="text-micro text-slate-400 dark:text-slate-500">
-            · {stats.count} 模块{stats.violations > 0 && ` · ${stats.violations} 逆向`}
+            · {t('canvas.node.moduleCount', { count: stats.count })}{stats.violations > 0 && ` · ${t('canvas.node.violationCount', { count: stats.violations })}`}
           </span>
         </div>
       </button>

@@ -3,14 +3,9 @@ import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { Loader2, FileCode2 } from 'lucide-react'
 import type { SubModule } from '@/types/map'
 import { healthColor, healthLabel, SUB_W, SUB_H } from '@/shared/logic/layout'
+import { useLang } from '@/runtime/i18n'
 
-// 腐化标记中文标签（与主图 ModuleNode 同表 + 子图内部专属）
-const SUB_FLAG_LABEL: Record<string, string> = {
-  god_object: '上帝对象', internal_circular_dep: '内部循环依赖', circular_dep: '循环依赖',
-  coupling_high: '耦合过高', layer_violation: '分层违规', single_file_module: '单文件模块',
-  file_too_large: '文件过大', part_file_coupling: '部分文件耦合', duplicated_protocol: '协议重复',
-  ref_plumbing: '引用缠绕', doc_drift: '文档漂移',
-}
+// 腐化标记标签（与主图 ModuleNode 同走 canvas.flags.* 字典 + 子图内部专属；未知 id 回退 key 本身）
 
 export type SubmoduleNodeType = Node<
   { sub?: SubModule; loading: boolean; inCount: number; outCount: number; parentName: string },
@@ -21,6 +16,7 @@ const MAX_HANDLES = 10
 
 // 子模块卡片（模块内部连线图的节点）；加载中显示骨架
 export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: NodeProps<SubmoduleNodeType>) {
+  const { t } = useLang()
   const nIn = Math.min(Math.max(data.inCount, 1), MAX_HANDLES)
   const nOut = Math.min(Math.max(data.outCount, 1), MAX_HANDLES)
 
@@ -30,7 +26,7 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
         className="flex h-full w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-950/70 text-[11px] text-slate-400 dark:text-slate-500"
         style={{ width: SUB_W, height: SUB_H }}
       >
-        <Loader2 size={13} className="animate-spin" /> 分析中…
+        <Loader2 size={13} className="animate-spin" /> {t('canvas.node.subAnalyzing')}
       </div>
     )
   }
@@ -74,10 +70,10 @@ export const SubmoduleNode = memo(function SubmoduleNode({ data, selected }: Nod
 
       <div className="mt-1.5 flex items-center gap-2 text-micro text-slate-400 dark:text-slate-500">
         <span className="flex items-center gap-0.5">
-          <FileCode2 size={9} /> {sub.files.length} 文件
+          <FileCode2 size={9} /> {t('canvas.node.fileCount', { count: sub.files.length })}
         </span>
         {sub.health.decay_flags.length > 0 && (
-          <span className="truncate text-red-500">{sub.health.decay_flags.map((f) => SUB_FLAG_LABEL[f] ?? f).join(' · ')}</span>
+          <span className="truncate text-red-500">{sub.health.decay_flags.map((f) => t(`canvas.flags.${f}`)).join(' · ')}</span>
         )}
       </div>
     </div>
