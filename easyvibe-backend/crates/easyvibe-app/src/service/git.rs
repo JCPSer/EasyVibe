@@ -3,6 +3,7 @@
 //! 领域规则（解析 / 命令 / 安全防线）在 `easyvibe-git`；本层只做
 //! 「仓库查找 + 领域调用 + 响应数据装配」，HTTP 边界（入参解析 / 状态码 / Json 包装）留 `routes/repo.rs`。
 
+use crate::db_ports::TaskPort as _;
 use crate::state::{resolve_llm, AppState, LlmMode};
 use easyvibe_common::ApiError;
 use easyvibe_map::Repo;
@@ -114,7 +115,6 @@ pub(crate) async fn git_commit_message(
     id: &str,
     body: CommitMessageRequest,
 ) -> Result<CommitMessageResult, ApiError> {
-    use easyvibe_db::TaskRepository as _;
     let _repo = find_repo(st, id).await?;
 
     let (task_ctx, footer) = match &body.task_id {

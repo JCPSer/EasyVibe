@@ -3,13 +3,13 @@
 //! 自 `routes/sessions.rs` 原样搬迁（零语义改动）——routes 只保留 HTTP 边界
 //! （Path/Query 解析 → 调本域 → 映射响应）。
 
+use crate::db_ports::{EventPort as _, HealthPort as _};
 use crate::state::*;
 use easyvibe_common::ApiError;
 use tracing::info;
 
 /// 健康历史：巡检运行列表 / R3 D1：前端交互埋点入库（dot.case 事件名 + JSON 计数维度）。
 pub(crate) async fn ingest_event(st: &AppState, id: &str, body: serde_json::Value) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::EventRepository as _;
     let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let name = body["name"].as_str().unwrap_or_default().trim();
     if name.is_empty() || name.len() > 64 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-') {
@@ -22,7 +22,6 @@ pub(crate) async fn ingest_event(st: &AppState, id: &str, body: serde_json::Valu
 
 /// R3 D1：门控读数——按事件名计数（L3 三道门、Harness 验证指标的秤）。
 pub(crate) async fn events_summary(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::EventRepository as _;
     let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let rows = st.event_repo.summary(&repo.id).await?;
     Ok(serde_json::json!({ "success": true, "data": rows }))
@@ -81,7 +80,6 @@ pub(crate) async fn list_agent_sessions(st: &AppState, id: &str) -> Result<serde
 
 /// 巡检运行列表（近 20 次）。
 pub(crate) async fn list_patrol_runs(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::HealthRepository as _;
     let runs = st.health_repo.list_runs(id, 20).await?;
     Ok(serde_json::json!({ "success": true, "data": runs }))
 }
@@ -89,7 +87,6 @@ pub(crate) async fn list_patrol_runs(st: &AppState, id: &str) -> Result<serde_js
 /// 巡检历史清理（重审 P1）：只留最近 N 次已终态巡检，running 的永不进删除集。
 /// 默认 keep=10，上限 200（防误传超大值）。
 pub(crate) async fn prune_patrol_runs(st: &AppState, id: &str, keep: i64) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::HealthRepository as _;
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let keep = keep.clamp(0, 200);
     let deleted = st.health_repo.prune_runs(id, keep).await?;
@@ -100,7 +97,6 @@ pub(crate) async fn prune_patrol_runs(st: &AppState, id: &str, keep: i64) -> Res
 /// M4-3 健康看板数据面：近 20 次巡检（含各自模块平均分）+ 最近一次成功巡检的模块明细。
 /// 一次聚合查询代替前端 N×M 次 health-history 轮询（N 模块 × M 次巡检）。
 pub(crate) async fn get_health_dashboard(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::HealthRepository as _;
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let runs = st.health_repo.list_runs(id, 20).await?;
     let avgs = st.health_repo.list_run_averages(id, 20).await?;

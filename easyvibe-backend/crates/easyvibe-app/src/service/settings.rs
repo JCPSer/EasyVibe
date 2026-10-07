@@ -3,6 +3,7 @@
 //! 自 `routes/settings.rs` 原样搬迁（零语义改动）——routes 只保留 HTTP 边界；
 //! harness 自定义槽端点仍留 routes（纯 FS + harness 装载，不触库）。
 
+use crate::db_ports::{HealthPort as _, SettingsPort as _, TaskPort as _};
 use crate::state::*;
 use easyvibe_common::ApiError;
 use crate::VERSION;
@@ -14,7 +15,6 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
 
 /// 设置列表（scope 缺省 global；加密值解密回显供 UI 编辑）。
 pub(crate) async fn list_settings(st: &AppState, scope: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::SettingsRepository as _;
     let rows = st.settings_repo.list(scope).await?;
     let items: Vec<serde_json::Value> = rows
         .into_iter()
@@ -38,7 +38,6 @@ pub(crate) async fn list_settings(st: &AppState, scope: &str) -> Result<serde_js
 
 /// 写设置（scope/key 合法性校验 → 敏感 key 加密 → 落库）。
 pub(crate) async fn put_setting(st: &AppState, scope: &str, key: &str, value: serde_json::Value) -> Result<(), ApiError> {
-    use easyvibe_db::{SettingRow, SettingsRepository as _};
     if scope.is_empty() || key.is_empty() || key.contains('/') || key.contains("..") {
         return Err(ApiError::BadRequest("非法 scope/key".into()));
     }
@@ -49,21 +48,13 @@ pub(crate) async fn put_setting(st: &AppState, scope: &str, key: &str, value: se
     } else {
         (raw, false)
     };
-    st.settings_repo
-        .set(&SettingRow {
-            scope: scope.to_string(),
-            key: key.to_string(),
-            value,
-            encrypted,
-            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string(),
-        })
-        .await?;
+    let updated_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string();
+    st.settings_repo.set(scope, key, value, encrypted, updated_at).await?;
     Ok(())
 }
 
 /// 删除设置。
 pub(crate) async fn delete_setting(st: &AppState, scope: &str, key: &str) -> Result<(), ApiError> {
-    use easyvibe_db::SettingsRepository as _;
     st.settings_repo.delete(scope, key).await?;
     Ok(())
 }
@@ -71,7 +62,6 @@ pub(crate) async fn delete_setting(st: &AppState, scope: &str, key: &str) -> Res
 /// Y3：一键诊断导出——把"用户报障口头描述"变成"导出一个文件"
 /// 最近 200 行日志 + 后端版本 + 各表计数（settings 的加密值剔除）。
 pub(crate) async fn export_diagnostics(st: &AppState) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::{HealthRepository as _, TaskRepository as _};
     let dir = data_dir().to_string_lossy().into_owned();
     let log_path = format!("{dir}/logs/easyvibe.log");
     let logs = std::fs::read_to_string(&log_path)

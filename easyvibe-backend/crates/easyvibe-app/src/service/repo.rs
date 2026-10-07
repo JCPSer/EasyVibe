@@ -3,6 +3,7 @@
 //!
 //! HTTP 边界（入参解析 / 状态码 / Json 包装）留 `routes/repo.rs`；启动装配在 `bootstrap.rs`。
 
+use crate::db_ports::{RepoMaintenancePort as _, TaskPort as _};
 use crate::state::{read_desktop_repos, write_desktop_repos, AppState};
 use easyvibe_api_types::RepoInfo;
 use easyvibe_common::ApiError;
@@ -87,7 +88,6 @@ pub(crate) async fn remove_repo(st: &AppState, id: &str, wipe: bool) -> Result<W
     }
     // 任务会话兜底（active 槽位只记最后一个注册者；running/awaiting 的任务逐个点杀，
     // 已终态会话 kill 返回 409 属预期，忽略）
-    use easyvibe_db::TaskRepository as _;
     if let Ok(tasks) = st.task_repo.list(id, 500).await {
         for t in tasks.into_iter().filter(|t| matches!(t.status.as_str(), "running" | "awaiting_approval")) {
             if let Some(sid) = t.session_id {
@@ -100,7 +100,7 @@ pub(crate) async fn remove_repo(st: &AppState, id: &str, wipe: bool) -> Result<W
     let _ = st.session_queue.cancel(st, id).await;
     // 数据清除（?wipe=true）：抹掉该仓库在本地库的全部痕迹
     // （任务/审批/会话/消息/巡检历史/事件/仓库级设置）——默认保留，用户显式选择才清
-    let wiped = if wipe { easyvibe_db::wipe_repo(&st.pool, id).await? } else { 0u64 };
+    let wiped = if wipe { st.pool.wipe(id).await? } else { 0u64 };
     // 先取根再注销（注销后 find_repo 即查不到）
     let root = st.map_service.find_repo(id).await.map(|r| r.root);
     if !st.map_service.remove_repo(id).await {

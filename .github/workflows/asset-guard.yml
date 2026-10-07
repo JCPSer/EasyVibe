@@ -42,11 +42,12 @@ jobs:
         run: python3 scripts/check_shell_boundary.py --selfcheck
 
       # R6 地图无环验收：CI 不可见 live map（.easyvibe/ 被 gitignore），改对受版本控制 fixture。
-      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，21 模块 / 55 边，c-arch-5 后 DV=0；i18n 归属外迁后 e42 同层环已摘；c-arch-9 后新增 e56 renderer-runtime→renderer-api）；
+      # fixture 必须与 EXPECT_EDGES 同代（map_post_split.json，22 模块 / 62 边，c-arch-10 服务边界收敛后：
+      # 新增装配格 assembly 及其 7 条「装配必需」出边；DV=0、跨层 SCC=0）；
       # 旧快照 map_post_migration.json（14 模块 / 31 边，含受控 DV=1）仅由 --selfcheck 的 H2 负例自证使用；
       # 绿例（H1）改用与 EXPECT_EDGES 同代的 map_post_split.json（DV=0，DV_MAX 归零后的合法全绿样本）。
       - name: 地图无环验收（对受版本控制 fixture）
-        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 55
+        run: python3 scripts/verify_map_acyclic.py --check --map scripts/tests/fixtures/map_post_split.json --expect-edges 62
 
       - name: 地图无环守卫自检（负例必红）
         run: python3 scripts/verify_map_acyclic.py --selfcheck
@@ -140,3 +141,13 @@ jobs:
 
       - name: app 层 DB 边界守卫自检（负例必红，含解析失败 fail-closed）
         run: python3 scripts/check_app_db_boundary.py --selfcheck
+
+      # c-arch-10 / R7 app 编排层端口化 + 装配格单向守卫：本仓 CI 不跑 cargo，故把
+      # crates/easyvibe-app/tests/arch_guard.rs 的同套判据落成纯 python3 载体——解析该守卫的
+      # 常量表（SERVICE_DB_RATCHET / SERVICE_BANNED_TYPES / ASSEMBLY_REVERSE）作为单一事实源，
+      # 用**原始文本**（不去注释）最严口径对 src/ 复判；常量解析失败即 fail-closed。
+      - name: app 编排层端口化守卫（service/** 不得直连 easyvibe_db + 装配格单向）
+        run: python3 scripts/check_app_service_boundary.py --check
+
+      - name: app 编排层端口化守卫自检（负例必红，含解析失败 fail-closed）
+        run: python3 scripts/check_app_service_boundary.py --selfcheck

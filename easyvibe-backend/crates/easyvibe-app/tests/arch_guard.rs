@@ -74,6 +74,8 @@ const FORBIDDEN: &[&str] = &[
     "crate::service::sessions",
     "crate::service::settings",
     "crate::service::agent",
+    // c-arch-10：切片不得反向引用装配格（装配 → 切片 单向）
+    "crate::assembly",
 ];
 
 #[test]
@@ -366,5 +368,82 @@ fn db_boundary_guard_selfcheck() {
     ];
     for (text, expect, why) in alias_cases {
         assert_eq!(detect_alias_reexport(text), *expect, "别名自证失败（{why}）: {text:?}");
+    }
+}
+
+// ============================================================================
+// c-arch-10：service/** 不得直连 easyvibe_db（端口化）+ 装配格单向
+// ============================================================================
+
+/// service/** 生产文件 `easyvibe_db` 出现次数棘轮（只降不升；端口化后为 0）。
+/// 与 `check_app_service_boundary.py`（CI 载体）**同源**：本常量是单一事实源。
+const SERVICE_DB_RATCHET: usize = 0;
+
+/// service/** 不得出现的具体仓储类型名——换名直连 = 端口未真正收窄（c-arch-10 R4）。
+const SERVICE_BANNED_TYPES: &[&str] = &[
+    "SqliteTaskRepository",
+    "SqliteSettingsRepository",
+    "SqliteApprovalRepository",
+    "SqliteConversationRepository",
+    "SqliteEventRepository",
+    "SqliteHealthRepository",
+    "AgentSessionRepo",
+    "SessionOutputRepo",
+    "TaskRow",
+    "SettingRow",
+    "ConversationRow",
+    "ConversationMessageRow",
+];
+
+/// 非装配格文件不得反向引用装配格（唯一合法声明是 main.rs 的 `mod assembly;`，无 `crate::` 路径）。
+const ASSEMBLY_REVERSE: &str = "crate::assembly";
+
+/// c-arch-10 R4：service/** 去注释后零 `easyvibe_db`、零具体仓储类型名。
+#[test]
+fn service_layer_has_no_db_direct_access() {
+    let mut used = 0usize;
+    for f in rs_files("src/service") {
+        let rel = format!("src/service/{f}");
+        let code = strip_comments(&read_src(&rel));
+        used += code.matches(DB_BANNED).count();
+        for t in SERVICE_BANNED_TYPES {
+            assert!(
+                !code.contains(t),
+                "{rel} 出现具体仓储类型名 `{t}`——service 须只见 crate::db_ports 端口与本地 DTO"
+            );
+        }
+    }
+    assert!(
+        used <= SERVICE_DB_RATCHET,
+        "service/** 直连 `{DB_BANNED}` 出现 {used} 次 > 棘轮 {SERVICE_DB_RATCHET}——编排层须经 crate::db_ports（c-arch-10 R4）"
+    );
+}
+
+/// c-arch-10 R5②：非装配格 `src/**` 不得出现 `crate::assembly`（装配 → server-api 单向）。
+#[test]
+fn only_main_declares_assembly_module() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&app_root().join("src"), &mut files);
+    files.sort();
+    for p in files {
+        let rel = p.strip_prefix(app_root()).unwrap().to_string_lossy().replace('\\', "/");
+        if rel.starts_with("src/assembly/") || rel == "src/main.rs" {
+            continue; // 装配格自身 + main.rs 的 `mod assembly;` 是合法声明
+        }
+        let code = strip_comments(&std::fs::read_to_string(&p).unwrap());
+        assert!(
+            !code.contains(ASSEMBLY_REVERSE),
+            "{rel} 出现 `{ASSEMBLY_REVERSE}`——server-api 反向引用装配格（c-arch-10 R5）"
+        );
     }
 }

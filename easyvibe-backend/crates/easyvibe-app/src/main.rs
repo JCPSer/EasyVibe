@@ -4,7 +4,7 @@
 //! 资源域 handler 在 `routes/*`，共享状态/助手在 `state`，路由表在 `router`，
 //! WS 面在 `ws`，启动装配在 `bootstrap`，资产在 `assets`。
 mod assets;
-mod bootstrap;
+mod assembly;
 mod db_ports;
 mod router;
 mod routes;
@@ -26,7 +26,7 @@ pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() {
-    bootstrap::run().await;
+    assembly::run().await;
 }
 
 #[cfg(test)] mod test_support;

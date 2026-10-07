@@ -58,9 +58,20 @@ fn god_files_stay_below_size_limits() {
     // 主文件：装配与阶段状态机（≤900，见文件头 N4 豁免说明）
     assert!(loc("main.rs") <= 900, "main.rs 超 900 行（god file 复发）: {}", loc("main.rs"));
     assert!(loc("task_exec.rs") <= 900, "task_exec.rs 超 900 行: {}", loc("task_exec.rs"));
-    // 装配层其余文件（c-arch-1：git/freshness/reinduce/pipeline/map_concerns 已迁出本 crate）
-    for f in ["state.rs", "router.rs", "ws.rs", "bootstrap.rs", "assets.rs", "session_queue_routes.rs", "db_ports.rs"] {
+    // 装配层其余文件（c-arch-1：git/freshness/reinduce/pipeline/map_concerns 已迁出本 crate；
+    // c-arch-10：bootstrap.rs 纯搬运至 assembly/**，本列表不再含 bootstrap）
+    for f in ["state.rs", "router.rs", "ws.rs", "assets.rs", "session_queue_routes.rs", "db_ports.rs"] {
         assert!(loc(f) <= 700, "{f} 超 700 行: {}", loc(f));
+    }
+    // c-arch-10：独立装配格（assembly/**）≤600（使命是「短主线 + 分组工厂」，不得再膨胀为 god 格）
+    let asm_dir = app_src().join("assembly");
+    for e in std::fs::read_dir(&asm_dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().map(|x| x == "rs").unwrap_or(false) {
+            let name = format!("assembly/{}", p.file_name().unwrap().to_string_lossy());
+            let n = std::fs::read_to_string(&p).unwrap().lines().count();
+            assert!(n <= 600, "{name} 超 600 行: {n}（装配格须保持短主线 + 分组工厂）");
+        }
     }
     // 服务编排层（方案 R1：service/{mod,chat,task,map}.rs）
     let service_dir = app_src().join("service");
@@ -138,6 +149,8 @@ const TASK_ENGINE_FORBIDDEN: &[&str] = &[
     "crate::service::sessions",
     "crate::service::settings",
     "crate::service::agent",
+    // c-arch-10：切片不得反向引用装配格
+    "crate::assembly",
 ];
 
 #[test]
@@ -546,8 +559,10 @@ fn service_file_set_is_frozen() {
 /// 文件归属类别（**封闭**：无第五类，且每类必须非空——见 `app_files_have_declared_ownership`）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SrcClass {
-    /// 组合根：装配与共享状态（命题点名的 main / router / state / bootstrap）
+    /// 组合根：装配与共享状态（命题点名的 main / router / state / db_ports）
     CompositionRoot,
+    /// c-arch-10：独立装配格（启动装配 + 静态托管；同层单向 assembly → server-api）
+    Assembly,
     /// HTTP/WS 边界：请求 / 响应面
     HttpBoundary,
     /// task-engine 切片（共享同一 crate；由 `arch_guard.rs` 约束反向引用）
@@ -570,8 +585,13 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::CompositionRoot, "main.rs", "命题点名：进程入口与 mod 声明"),
     (SrcClass::CompositionRoot, "router.rs", "命题点名：域自注册 merge 与 /ws 装配"),
     (SrcClass::CompositionRoot, "state.rs", "命题点名：共享状态与助手；组合根本就要装配依赖"),
-    (SrcClass::CompositionRoot, "bootstrap.rs", "命题点名：启动装配；管线挂载已收口 service/repo.rs"),
-    (SrcClass::CompositionRoot, "db_ports.rs", "c-arch-7 组合根：task-engine 端口 ↔ 具体仓储适配器唯一落点（依赖倒置）"),
+    (SrcClass::CompositionRoot, "db_ports.rs", "c-arch-7/c-arch-10 组合根：端口 ↔ 具体仓储适配器唯一落点（依赖倒置）"),
+    // —— c-arch-10 独立装配格（启动装配 + 静态托管；bootstrap.rs 纯搬运 + router.rs 静态段外提）——
+    (SrcClass::Assembly, "assembly/mod.rs", "c-arch-10：run() 主线 + build_state() 工厂；装配只许落装配格"),
+    (SrcClass::Assembly, "assembly/logging.rs", "c-arch-10：日志/仓库注册/预热/资产/agent 解析（自 bootstrap.rs 搬运）"),
+    (SrcClass::Assembly, "assembly/bridges.rs", "c-arch-10：5 条落库/直播桥（自 bootstrap.rs 内联闭包搬运）"),
+    (SrcClass::Assembly, "assembly/schedulers.rs", "c-arch-10：定时器/启动探测/队列宿主（自 bootstrap.rs 内联闭包搬运）"),
+    (SrcClass::Assembly, "assembly/static_host.rs", "c-arch-10：静态回落 + 内嵌 dist + MIME（自 router.rs/assets.rs 外提）"),
     // —— HTTP/WS 边界 ——
     (SrcClass::HttpBoundary, "ws.rs", "命题点名：WS 面（事件名契约由 contract_guard 冻结）"),
     (SrcClass::HttpBoundary, "assets.rs", "命题未点名：受管资产解析（编译期 include 清单 + 启动期读取），零业务规则"),
@@ -602,16 +622,31 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
 /// 封闭类别全集（键集必须与此**全等**：既无第五类，也不得某类为空）。
 const APP_SRC_CLASSES: &[SrcClass] = &[
     SrcClass::CompositionRoot,
+    SrcClass::Assembly,
     SrcClass::HttpBoundary,
     SrcClass::TaskEngineSlice,
     SrcClass::TestFixture,
 ];
 
-/// 顶层文件集（由归属表派生：非 task-engine 切片项）。
+/// c-arch-10：装配格文件集（显式冻结；磁盘 `src/assembly/*.rs` 必须与之全等）。
+const ASSEMBLY_FROZEN_FILES: &[&str] = &[
+    "mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs",
+];
+
+/// 顶层文件集（由归属表派生：非 task-engine 切片、非装配格项——后两者按目录单独登记）。
 fn app_top_files() -> Vec<String> {
     APP_SRC_OWNERSHIP
         .iter()
-        .filter(|(c, _, _)| *c != SrcClass::TaskEngineSlice)
+        .filter(|(c, _, _)| *c != SrcClass::TaskEngineSlice && *c != SrcClass::Assembly)
+        .map(|(_, f, _)| f.to_string())
+        .collect()
+}
+
+/// 装配格文件集（由归属表派生：Assembly 项，含 `assembly/` 前缀）。
+fn app_assembly_files() -> Vec<String> {
+    APP_SRC_OWNERSHIP
+        .iter()
+        .filter(|(c, _, _)| *c == SrcClass::Assembly)
         .map(|(_, f, _)| f.to_string())
         .collect()
 }
@@ -654,6 +689,8 @@ fn app_src_tree_is_frozen() {
     expected.extend(rs_files(&app_src().join("routes")).into_iter().map(|f| format!("routes/{f}")));
     expected.extend(rs_files(&app_src().join("service")).into_iter().map(|f| format!("service/{f}")));
     expected.extend(app_task_engine_files());
+    // c-arch-10：装配格文件按目录单独登记（assembly/ 前缀，单一事实源 = APP_SRC_OWNERSHIP）
+    expected.extend(app_assembly_files());
     expected.sort();
 
     let actual = app_src_tree();
@@ -665,6 +702,18 @@ fn app_src_tree_is_frozen() {
         !expected.iter().any(|f| f.starts_with("routes/") && !f.ends_with(".rs")),
         "routes 归属项必须是 .rs 文件"
     );
+}
+
+/// c-arch-10：装配格文件集**双向全等**（磁盘 `src/assembly/*.rs` == 显式冻结 == 归属表 Assembly 项）。
+#[test]
+fn assembly_file_set_is_frozen() {
+    let actual = rs_files(&app_src().join("assembly"));
+    let mut expected: Vec<String> = ASSEMBLY_FROZEN_FILES.iter().map(|s| s.to_string()).collect();
+    expected.sort();
+    assert_eq!(actual, expected, "assembly/ 文件集漂移——装配格新增/改名须同步 ASSEMBLY_FROZEN_FILES（c-arch-10 R6）");
+    let mut declared: Vec<String> = app_assembly_files().into_iter().map(|f| f.strip_prefix("assembly/").unwrap().to_string()).collect();
+    declared.sort();
+    assert_eq!(actual, declared, "assembly/ 文件集与 APP_SRC_OWNERSHIP 的 Assembly 项不一致（单一事实源被破坏）");
 }
 
 /// R9-①：顶层归属表键集 ↔ 磁盘顶层 .rs **双向全等**（与 app_src_tree_is_frozen 同义，

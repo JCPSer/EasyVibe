@@ -113,15 +113,8 @@ use tower::ServiceExt;
         std::fs::remove_file(&f).ok();
     }
 
-    #[test]
-    fn mime_by_ext_known_types() {
-        assert!(mime_by_ext("index.html").starts_with("text/html"));
-        assert!(mime_by_ext("app.js").contains("javascript"));
-        assert!(mime_by_ext("app.css").starts_with("text/css"));
-        assert_eq!(mime_by_ext("logo.png"), "image/png");
-        assert_eq!(mime_by_ext("font.woff2"), "font/woff2");
-        assert_eq!(mime_by_ext("data.bin"), "application/octet-stream");
-    }
+    // c-arch-10 ΔS8：`mime_by_ext` 随静态托管外提至 assembly/static_host.rs，
+    // 其唯一测试消费点亦随迁（见该文件内联 `#[cfg(test)] mod tests`）。
 
     #[tokio::test]
     async fn health_ok() {

@@ -15,12 +15,10 @@ pub(crate) fn spec(role: &str) -> &'static AssetSpec {
         .unwrap_or_else(|| panic!("资产 role 未在名录中: {role}"))
 }
 
-include!(concat!(env!("OUT_DIR"), "/embedded_dist.rs"));
-
-/// 独立形态（内嵌 UI 可用且未指定外部静态目录）下为 true：启动后自动打开浏览器
-pub(crate) fn embedded_ui_available() -> bool {
-    EMBEDDED_UI_REAL
-}
+// c-arch-10 ΔS6：内嵌 dist（`embedded_dist.rs`）与 `embedded_ui_available` 已随静态托管
+// 外提至装配格 `assembly::static_host`——本文件只留受管文本资产的解析链。
+// 注意：本文件仍属 server-api（`service/map.rs` 依赖 `crate::assets::{self, resolve_text_asset}`，
+// 见 ΔS2 出边不可能下降），故 `map-toolchain` 出边不受装配格拆分影响。
 
 /// 文本资产解析链：env 显式路径 → exe 旁路文件 → 当前目录 → 编译期内嵌。
 /// 内嵌命中且 persist 时落盘到数据目录 assets/（schema 需以真实路径交给外部 agent 读取）。

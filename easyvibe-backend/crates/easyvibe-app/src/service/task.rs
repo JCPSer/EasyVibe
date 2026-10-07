@@ -4,6 +4,7 @@
 //! 事件广播）下沉到本域——routes 只保留「解析入参 → 调 service → 映射响应」。
 //! 语义逐条等价（分页/limit clamp、`unwrap_or_default` 兜底、错误映射与状态码不变）。
 
+use crate::db_ports::{ApprovalPort as _, EventPort as _, TaskPort as _};
 use crate::state::*;
 use easyvibe_api_types::TaskActionResult;
 use easyvibe_common::ApiError;
@@ -63,7 +64,6 @@ pub(crate) async fn task_ctx_with_contract(
 /// 建任务编排（从 `routes/task.rs::create_task` 原样搬迁，零语义改动）。
 /// 返回新任务 id；HTTP 边界（201/响应包装）留在 handler。
 pub(crate) async fn create_task(st: &AppState, id: &str, body: CreateTaskRequest) -> Result<String, ApiError> {
-    use easyvibe_db::{ApprovalRepository as _, EventRepository as _, TaskRepository as _};
     let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     if body.description.trim().is_empty() {
         return Err(ApiError::BadRequest("需求描述不能为空".into()));
@@ -107,7 +107,7 @@ pub(crate) async fn create_task(st: &AppState, id: &str, body: CreateTaskRequest
     }
     let contract_ctx = task_ctx_with_contract(st, &repo, &body.modules, body.context.clone()).await;
     let has_contract = contract_ctx.get("contract").is_some();
-    let row = easyvibe_db::TaskRow {
+    let row = crate::db_ports::TaskDraft {
         id: task_id.clone(),
         repo: repo_id.clone(),
         title: body.title,
@@ -158,7 +158,6 @@ pub(crate) async fn create_task(st: &AppState, id: &str, body: CreateTaskRequest
 
 /// 任务列表（`?conv=` 会话级过滤优先；`limit` 缺省 50、clamp(1,500)）——响应体原样组装。
 pub(crate) async fn list_tasks(st: &AppState, id: &str, conv: Option<&str>, limit: i64) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::TaskRepository as _;
     let limit = limit.clamp(1, 500);
     let tasks = match conv {
         Some(cid) => st.task_repo.list_by_conversation(cid).await?,
@@ -183,14 +182,12 @@ pub(crate) async fn list_tasks(st: &AppState, id: &str, conv: Option<&str>, limi
 
 /// 审批留痕列表（diff/审批卡数据源）。
 pub(crate) async fn list_task_approvals(st: &AppState, tid: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::ApprovalRepository as _;
     let aps = st.approval_repo.list_by_task(tid).await?;
     Ok(serde_json::json!({ "success": true, "data": aps }))
 }
 
 /// 按任务终止：解析任务 → 会话 → kill（任务卡「终止」按钮）。
 pub(crate) async fn kill_task(st: &AppState, id: &str, tid: &str) -> Result<(), ApiError> {
-    use easyvibe_db::TaskRepository as _;
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.task_repo.get(tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
     let sid = task.session_id.ok_or_else(|| ApiError::BadRequest(format!("任务 {tid} 无关联会话（未开始执行）")))?;
@@ -202,7 +199,6 @@ pub(crate) async fn kill_task(st: &AppState, id: &str, tid: &str) -> Result<(), 
 /// 任务自有归档 development_docs/{tid}.json 一并删除（共享 MEMORY/INDEX 不动）→
 /// 内存基线清残留 → 广播 deleted。返工链反链（origin/successor）保留不动。
 pub(crate) async fn delete_task(st: &AppState, id: &str, tid: &str) -> Result<(), ApiError> {
-    use easyvibe_db::TaskRepository as _;
     let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.task_repo.get(tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
     if matches!(task.status.as_str(), "running" | "awaiting_approval") {
@@ -316,7 +312,6 @@ pub(crate) async fn suggest_tasks(st: &AppState, id: &str) -> Result<serde_json:
 /// 右端规则：running/pending 用 now()（updatedAt 执行期不刷新），终态用 updatedAt+10min；
 /// excerpt 按 char 边界截 200 字；INDEX-/MEMORY-/operation- 单独归类。
 pub(crate) async fn list_task_dev_docs(st: &AppState, id: &str, tid: &str) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::TaskRepository as _;
     let repo = st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let task = st.task_repo.get(tid).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {tid} 不存在")))?;
     let docs_root = repo.root.join(".easyvibe/development_docs");

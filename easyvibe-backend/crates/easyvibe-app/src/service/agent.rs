@@ -2,6 +2,7 @@
 //!
 //! 自 `routes/agent.rs` 原样搬迁（零语义改动）——routes 只保留 HTTP 边界。
 
+use crate::db_ports::SettingsPort as _;
 use crate::state::*;
 use easyvibe_ai_agent::agent_conf;
 use easyvibe_common::ApiError;
@@ -85,7 +86,6 @@ pub(crate) async fn agent_test(st: &AppState) -> Result<serde_json::Value, ApiEr
 /// 优先用请求体现填值（未保存也能测），缺省回落全局已存配置；max_tokens=1 的 ping，代价可忽略。
 /// 认证头双发（与 AnthropicClient 同一纪律：x-api-key + Bearer 并存）。
 pub(crate) async fn llm_test_inner(st: &AppState, body: LlmTestBody) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::SettingsRepository as _;
     let base = st.settings_repo.get("global", &format!("llm.service.{}", body.service_id)).await.ok().flatten()
         .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.value).ok());
     let stored_key = st.settings_repo.get("global", &format!("llm.service.{}.apiKey", body.service_id)).await.ok().flatten()
@@ -143,6 +143,5 @@ pub(crate) async fn llm_test_inner(st: &AppState, body: LlmTestBody) -> Result<s
 
 /// 读取一条 agent 相关设置（响应体组装用）。
 pub(crate) async fn cfg_get(st: &AppState, key: &str) -> Option<serde_json::Value> {
-    use easyvibe_db::SettingsRepository as _;
     st.settings_repo.get("global", key).await.ok().flatten().map(|r| serde_json::Value::String(r.value))
 }

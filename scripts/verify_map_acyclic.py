@@ -3,8 +3,8 @@
 
   --check [--map PATH]   默认读 live `.easyvibe/map/map.json`（本地/归纳期真值）；
                          CI 传 `--map scripts/tests/fixtures/map_post_split.json`（受版本控制，
-                         与 EXPECT_EDGES 同代：c-arch-5 宿主能力端口化 + i18n 归属外迁 + c-arch-9 渲染侧
-                         网络出口收敛后的 21 模块 / 55 边快照；新增 e56 renderer-runtime→renderer-api）。
+                         与 EXPECT_EDGES 同代：c-arch-10 服务边界收敛后的 22 模块 / 62 边快照；
+                         新增装配格 assembly 及其 7 条「装配必需」出边）。
                          fixture 是**结构投影**：只保留本文件与 verify_arch_split 断言的字段
                          （模块 id/name/layer/files/dependencies/health 与 concern 的 id+severity、
                          边的 id/from/to/type/strength/DV），prose（review_note / concern 正文 /
@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import map_policy  # noqa: E402
 
-EXPECT_EDGES = 55
+EXPECT_EDGES = 62
 DV_MAX = 0
 EXPECT_SHELL_DEPS = ["server-api", "map-toolchain"]
 RETIRED_CONCERN = "c-arch-2"

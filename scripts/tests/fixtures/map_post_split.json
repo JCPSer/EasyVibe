@@ -2,12 +2,12 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-07T13:51:34+08:00",
+    "generated_at": "2026-10-07T16:33:15+08:00",
     "stats": {
-      "files_total": 371,
-      "files_covered": 371,
+      "files_total": 400,
+      "files_covered": 400,
       "coverage_ratio": 1.0,
-      "edges_derived": 55,
+      "edges_derived": 62,
       "edges_inferred": 0,
       "retried_modules": 0
     }
@@ -275,6 +275,31 @@
       }
     },
     {
+      "id": "assembly",
+      "name": "启动装配与静态托管",
+      "layer": "application",
+      "files": [
+        "easyvibe-backend/crates/easyvibe-app/src/assembly/**"
+      ],
+      "dependencies": [
+        "contract-foundation",
+        "persistence",
+        "map-domain",
+        "agent-runtime",
+        "event-bus",
+        "task-engine",
+        "server-api"
+      ],
+      "health": {
+        "score": 74,
+        "coupling": "high",
+        "complexity": "medium",
+        "churn": "medium",
+        "decay_flags": [],
+        "concerns": []
+      }
+    },
+    {
       "id": "server-api",
       "name": "服务边界与编排",
       "layer": "application",
@@ -294,7 +319,7 @@
         "map-toolchain"
       ],
       "health": {
-        "score": 71,
+        "score": 79,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
@@ -302,14 +327,6 @@
           "coupling_high"
         ],
         "concerns": [
-          {
-            "id": "c-server-api-1",
-            "severity": "high"
-          },
-          {
-            "id": "c-server-api-2",
-            "severity": "high"
-          },
           {
             "id": "c-server-api-3",
             "severity": "high"
@@ -411,9 +428,9 @@
         "renderer-api"
       ],
       "health": {
-        "score": 84,
+        "score": 82,
         "coupling": "medium",
-        "complexity": "low",
+        "complexity": "medium",
         "churn": "low",
         "decay_flags": [],
         "concerns": [
@@ -521,6 +538,7 @@
         "easyvibe-renderer/src/components/shell/**",
         "easyvibe-renderer/src/components/gate/**",
         "easyvibe-renderer/src/components/overlays/**",
+        "easyvibe-renderer/src/components/git/**",
         "easyvibe-renderer/src/components/__tests__/**"
       ],
       "dependencies": [
@@ -777,307 +795,356 @@
     },
     {
       "id": "e12",
-      "from": "server-api",
+      "from": "assembly",
       "to": "contract-foundation",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e13",
-      "from": "server-api",
+      "from": "assembly",
       "to": "persistence",
       "type": "db",
       "strength": "strong"
     },
     {
       "id": "e14",
-      "from": "server-api",
+      "from": "assembly",
       "to": "map-domain",
       "type": "call",
       "strength": "strong"
     },
     {
       "id": "e15",
-      "from": "server-api",
+      "from": "assembly",
       "to": "agent-runtime",
       "type": "call",
       "strength": "strong"
     },
     {
       "id": "e16",
-      "from": "server-api",
+      "from": "assembly",
       "to": "event-bus",
       "type": "event",
       "strength": "strong"
     },
     {
       "id": "e17",
-      "from": "server-api",
+      "from": "assembly",
       "to": "task-engine",
       "type": "call",
       "strength": "strong"
     },
     {
       "id": "e18",
+      "from": "assembly",
+      "to": "server-api",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e19",
+      "from": "server-api",
+      "to": "contract-foundation",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e20",
+      "from": "server-api",
+      "to": "persistence",
+      "type": "db",
+      "strength": "strong"
+    },
+    {
+      "id": "e21",
+      "from": "server-api",
+      "to": "map-domain",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e22",
+      "from": "server-api",
+      "to": "agent-runtime",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e23",
+      "from": "server-api",
+      "to": "event-bus",
+      "type": "event",
+      "strength": "strong"
+    },
+    {
+      "id": "e24",
+      "from": "server-api",
+      "to": "task-engine",
+      "type": "call",
+      "strength": "strong"
+    },
+    {
+      "id": "e25",
       "from": "server-api",
       "to": "easyvibe-git",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e19",
+      "id": "e26",
       "from": "server-api",
       "to": "easyvibe-pipeline",
       "type": "call",
       "strength": "normal"
     },
     {
-      "id": "e20",
+      "id": "e27",
       "from": "server-api",
       "to": "map-toolchain",
       "type": "config",
       "strength": "normal"
     },
     {
-      "id": "e21",
+      "id": "e28",
       "from": "easyvibe-git",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e22",
+      "id": "e29",
       "from": "easyvibe-pipeline",
       "to": "contract-foundation",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e23",
+      "id": "e30",
       "from": "easyvibe-pipeline",
       "to": "map-domain",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e24",
+      "id": "e32",
       "from": "easyvibe-pipeline",
       "to": "agent-runtime",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e25",
+      "id": "e33",
       "from": "easyvibe-pipeline",
       "to": "event-bus",
       "type": "event",
       "strength": "normal"
     },
     {
-      "id": "e26",
+      "id": "e34",
       "from": "renderer-runtime",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e56",
+      "id": "e35",
       "from": "renderer-runtime",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e27",
+      "id": "e36",
       "from": "renderer-api",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e28",
+      "id": "e37",
       "from": "host-adapter",
       "to": "console-ui",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e29",
+      "id": "e38",
       "from": "host-adapter",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e30",
-      "from": "console-ui",
-      "to": "renderer-runtime",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e32",
-      "from": "console-ui",
-      "to": "renderer-api",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e33",
-      "from": "console-ui",
-      "to": "renderer-shared",
-      "type": "import",
-      "strength": "strong"
-    },
-    {
-      "id": "e34",
-      "from": "console-ui",
-      "to": "ui-kit",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e35",
-      "from": "console-ui",
-      "to": "map-canvas",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e36",
-      "from": "console-ui",
-      "to": "chat-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e37",
-      "from": "console-ui",
-      "to": "task-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e38",
-      "from": "console-ui",
-      "to": "settings-ui",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
       "id": "e39",
-      "from": "settings-ui",
+      "from": "console-ui",
       "to": "renderer-runtime",
       "type": "import",
-      "strength": "normal"
+      "strength": "strong"
     },
     {
       "id": "e40",
-      "from": "settings-ui",
+      "from": "console-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
       "id": "e41",
+      "from": "console-ui",
+      "to": "renderer-shared",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e42",
+      "from": "console-ui",
+      "to": "ui-kit",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e43",
+      "from": "console-ui",
+      "to": "map-canvas",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e44",
+      "from": "console-ui",
+      "to": "chat-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e45",
+      "from": "console-ui",
+      "to": "task-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e46",
+      "from": "console-ui",
+      "to": "settings-ui",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e47",
+      "from": "settings-ui",
+      "to": "renderer-runtime",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e48",
+      "from": "settings-ui",
+      "to": "renderer-api",
+      "type": "import",
+      "strength": "strong"
+    },
+    {
+      "id": "e49",
       "from": "settings-ui",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e42",
+      "id": "e50",
       "from": "chat-ui",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e43",
+      "id": "e51",
       "from": "chat-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e44",
+      "id": "e52",
       "from": "chat-ui",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e45",
+      "id": "e53",
       "from": "chat-ui",
       "to": "task-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e46",
+      "id": "e54",
       "from": "task-ui",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e47",
+      "id": "e55",
       "from": "task-ui",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e48",
+      "id": "e56",
       "from": "task-ui",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e49",
+      "id": "e57",
       "from": "map-canvas",
       "to": "renderer-runtime",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e50",
+      "id": "e58",
       "from": "map-canvas",
       "to": "renderer-api",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e51",
+      "id": "e59",
       "from": "map-canvas",
       "to": "renderer-shared",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e52",
+      "id": "e60",
       "from": "map-canvas",
       "to": "ui-kit",
       "type": "import",
       "strength": "normal"
     },
     {
-      "id": "e53",
+      "id": "e61",
       "from": "map-canvas",
       "to": "chat-ui",
       "type": "import",
       "strength": "weak"
     },
     {
-      "id": "e54",
+      "id": "e62",
       "from": "desktop-shell",
       "to": "server-api",
       "type": "api",
       "strength": "strong"
     },
     {
-      "id": "e55",
+      "id": "e63",
       "from": "desktop-shell",
       "to": "map-toolchain",
       "type": "config",
@@ -1085,16 +1152,14 @@
     }
   ],
   "health": {
-    "score": 80,
+    "score": 85,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
-    "decay_flags": [
-      "responsibility_overlap"
-    ],
+    "decay_flags": [],
     "concerns": [
       {
-        "id": "c-arch-10",
+        "id": "c-arch-9",
         "severity": "high"
       }
     ]

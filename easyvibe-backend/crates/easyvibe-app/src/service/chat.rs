@@ -1,11 +1,10 @@
 //! chat 域编排（自 `service.rs` 原样搬迁，零语义改动）。
 
+use crate::db_ports::{to_message_rows, Conversation, ConversationPort as _, Message, SettingsPort as _, TaskPort as _};
 use crate::state::*;
 use easyvibe_ai_agent::QaClient as _;
 use easyvibe_ai_agent::compaction;
 use easyvibe_common::ApiError;
-use easyvibe_db::{ConversationMessageRow, ConversationRepository as _};
-use easyvibe_db::{SettingsRepository as _, TaskRepository as _};
 use tracing::info;
 
 /// 近期窗口原文保留的消息条数（3 轮问答不动，三层策略第 1 层）
@@ -27,7 +26,7 @@ pub(crate) async fn resolve_adv_i64(st: &AppState, repo_id: &str, key: &str, def
 }
 
 /// 未压缩消息折叠为 (q, a) 对（容错奇数/乱序；系统消息不参与）
-pub(crate) fn fold_pairs(messages: &[ConversationMessageRow]) -> Vec<(String, String)> {
+pub(crate) fn fold_pairs(messages: &[Message]) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = Vec::new();
     let mut pending_q: Option<String> = None;
     for m in messages {
@@ -59,23 +58,26 @@ pub(crate) async fn maybe_compact(st: &AppState, repo_id: &str, conv_id: Option<
     if !force && !compaction::needs_compaction(total, budget, threshold) {
         return Ok(None);
     }
-    let Some(wm) = compaction::compaction_watermark(&fresh, KEEP_RECENT_MESSAGES) else {
+    // compaction 的窄接口仍取具体消息行——本地 DTO 经 db_ports 转换（service 不写名具体类型）
+    let fresh_rows = to_message_rows(&fresh);
+    let Some(wm) = compaction::compaction_watermark(&fresh_rows, KEEP_RECENT_MESSAGES) else {
         return Ok(None); // 不足一个窗口不压
     };
-    let old: Vec<ConversationMessageRow> = fresh.iter().filter(|m| m.id <= wm).cloned().collect();
+    let old: Vec<Message> = fresh.iter().filter(|m| m.id <= wm).cloned().collect();
     if old.is_empty() {
         return Ok(None);
     }
+    let old_rows = to_message_rows(&old);
     let result = match *st.llm_mode {
-        LlmMode::Stub => compaction::compact_stub(conv.summary.as_deref(), &old, budget, total),
+        LlmMode::Stub => compaction::compact_stub(conv.summary.as_deref(), &old_rows, budget, total),
         LlmMode::Anthropic => {
             let cfg = resolve_llm(st, repo_id, "chat").await;
             if cfg.api_key.is_empty() {
                 // 无 key 退化 stub（诚实标注），压缩不可用不该打断对话
-                compaction::compact_stub(conv.summary.as_deref(), &old, budget, total)
+                compaction::compact_stub(conv.summary.as_deref(), &old_rows, budget, total)
             } else {
                 let llm = easyvibe_ai_agent::AnthropicClient::new(&cfg.base_url, &cfg.api_key, &cfg.model);
-                compaction::compact_with_llm(&llm, conv.summary.as_deref(), &old, budget, total).await?
+                compaction::compact_with_llm(&llm, conv.summary.as_deref(), &old_rows, budget, total).await?
             }
         }
     };
@@ -91,7 +93,7 @@ pub(crate) async fn maybe_compact(st: &AppState, repo_id: &str, conv_id: Option<
 }
 
 /// M4-2 多会话：解析目标会话（缺省=该仓库最近活跃的会话）
-pub(crate) async fn resolve_conv(st: &AppState, repo: &str, conv: Option<&str>) -> Result<easyvibe_db::ConversationRow, ApiError> {
+pub(crate) async fn resolve_conv(st: &AppState, repo: &str, conv: Option<&str>) -> Result<Conversation, ApiError> {
     match conv {
         Some(cid) => {
             let rows = st.conversation_repo.list_by_repo(repo).await?;
@@ -102,7 +104,7 @@ pub(crate) async fn resolve_conv(st: &AppState, repo: &str, conv: Option<&str>) 
 }
 
 /// 会话摘要（AionUI TConversationRuntimeSummary 精简版）：state + pending 审批数 + 消息数
-pub(crate) async fn conversation_summary(st: &AppState, c: &easyvibe_db::ConversationRow) -> serde_json::Value {
+pub(crate) async fn conversation_summary(st: &AppState, c: &Conversation) -> serde_json::Value {
     let tasks = st.task_repo.list_by_conversation(&c.id).await.unwrap_or_default();
     let pending = tasks.iter().filter(|t| t.status == "awaiting_approval").count();
     let running = tasks.iter().filter(|t| t.status == "running" || t.status == "pending").count();
@@ -325,7 +327,6 @@ pub(crate) async fn get_chat(
     before: Option<i64>,
     limit: i64,
 ) -> Result<serde_json::Value, ApiError> {
-    use easyvibe_db::TaskRepository as _;
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
     let limit = limit.clamp(1, 200);
     // M4-2 多会话：?conv=<id> 选择会话（缺省=最近活跃）

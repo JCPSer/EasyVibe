@@ -36,6 +36,8 @@ import map_policy  # noqa: E402
 
 APP_CRATE = os.path.join("easyvibe-backend", "crates", "easyvibe-app")
 APP_SRC = os.path.join(APP_CRATE, "src")
+# c-arch-10：独立装配格（启动装配 + 静态托管；与 server-api 同层，单向外向）
+ASSEMBLY_GRID = os.path.join(APP_CRATE, "src", "assembly")
 DOMAIN_FILES = ["git.rs", "freshness.rs", "reinduce.rs", "pipeline.rs", "map_concerns.rs"]
 EXTRACTED_MODULES = ["easyvibe-git", "easyvibe-pipeline"]
 CLOSED_CONCERN = "c-arch-1"
@@ -46,26 +48,36 @@ POST_FIXTURE = os.path.join(FIXTURE_DIR, "map_post_split.json")
 LOC_MIN_DROP = 1000
 
 # c-arch-7（2026-10-06）登记棘轮上界：见文件头 ★ 说明。只降不升，超出即红。
+# c-arch-10（2026-10-07）重登记：bootstrap.rs 纯搬运至 assembly/**（装配格另立棘轮），
+#   server-api 因外提而**真降**：files 35→34、loc 6749→6472。
 C7_RATCHET = {
-    "files": 35,
-    "loc": 6749,
-    "_registered_at": "2026-10-06",
+    "files": 34,
+    "loc": 6472,
+    "_registered_at": "2026-10-07",
     "_registered_additions": [
-        "src/db_ports.rs（组合根：端口↔仓储适配器唯一落点）",
-        "src/service/agent.rs",
-        "src/service/sessions.rs",
-        "src/service/settings.rs",
+        "c-arch-10：bootstrap.rs 外提 assembly/**（server-api −1 文件），装配格另立 C7_ASSEMBLY_RATCHET",
     ],
 }
 C7_RATCHET_MAX_FILES = C7_RATCHET["files"]
 C7_RATCHET_MAX_LOC = C7_RATCHET["loc"]
 
+# c-arch-10：装配格（assembly/**）棘轮——本轮**新登记**的一格（非抬升既有棘轮）。只降不升。
+C7_ASSEMBLY_RATCHET = {
+    "files": 5,
+    "loc": 746,
+    "_registered_at": "2026-10-07",
+    "_files": ["mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs"],
+}
+
 
 def is_product(rel):
-    """server-api 归属口径：产品文件，剔除 `tests/` 与 task-engine 切片（`task_exec*`）。"""
+    """server-api 归属口径：产品文件，剔除 `tests/`、task-engine 切片（`task_exec*`）
+    与**装配格**（assembly/**，c-arch-10 独立成格）。"""
     if "/tests/" in "/" + rel:
         return False
     if "task_exec" in rel:
+        return False
+    if rel.startswith(ASSEMBLY_GRID + "/"):
         return False
     return rel.endswith(".rs") or os.path.basename(rel) in PRODUCT_NAMES
 
@@ -81,6 +93,28 @@ def inventory(root):
             rel = os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/")
             if not is_product(rel):
                 continue
+            files.append(rel)
+            try:
+                with open(os.path.join(root, rel), encoding="utf-8", errors="ignore") as fh:
+                    loc += sum(1 for _ in fh)
+            except OSError:
+                pass
+    return sorted(files), loc
+
+
+def inventory_assembly(root):
+    """c-arch-10：装配格（`src/assembly/**`）归属文件列表与 LOC 合计。"""
+    files, loc = [], 0
+    base = os.path.join(root, ASSEMBLY_GRID)
+    if not os.path.isdir(base):
+        return files, loc
+    for dirpath, _dirnames, filenames in os.walk(base):
+        if "/target/" in "/" + dirpath.replace(os.sep, "/"):
+            continue
+        for fn in sorted(filenames):
+            if not fn.endswith(".rs"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/")
             files.append(rel)
             try:
                 with open(os.path.join(root, rel), encoding="utf-8", errors="ignore") as fh:
@@ -110,7 +144,8 @@ def crossed_scc_edges(m):
     return map_policy.cross_layer_scc(ids, edges, mod_order)
 
 
-def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=None):
+def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=None,
+          assembly=None, assembly_ratchet=None):
     """纯函数判决（selfcheck 可注入合成输入）。返回 (problems, report)。"""
     problems = []
     mods_by_id = {x["id"]: x for x in m.get("modules", [])}
@@ -171,6 +206,16 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=Non
     if dv > 0:
         problems.append("I6 direction_violation %d > 0" % dv)
 
+    # I8 装配格棘轮（c-arch-10）：文件数 / LOC 不得超过登记值（只降不升；新格非抬升既有棘轮）
+    if assembly is not None and assembly_ratchet is not None:
+        af, aloc = assembly
+        if len(af) > assembly_ratchet["files"]:
+            problems.append("I8 装配格归属文件数 %d 超登记上限 %d（c-arch-10；只降不升）"
+                            % (len(af), assembly_ratchet["files"]))
+        if aloc > assembly_ratchet["loc"]:
+            problems.append("I8 装配格归属 LOC %d 超登记上限 %d（c-arch-10；只降不升）"
+                            % (aloc, assembly_ratchet["loc"]))
+
     report = {
         "server_api_files": len(files), "server_api_files_baseline": baseline["server_api_files"],
         "server_api_loc": loc, "server_api_loc_baseline": baseline["server_api_loc"],
@@ -180,6 +225,11 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=Non
         "ratchet_loc_max": (ratchet or {}).get("loc"),
         "coverage_ratio": ratio, "modules": len(m.get("modules", [])), "edges": len(m.get("edges", [])),
         "cross_layer_scc": len(crossed_scc_edges(m)), "direction_violation": dv,
+        # c-arch-10 装配格口径（G6 两指标可复读：files / loc 只降不升）
+        "assembly_files": (len(assembly[0]) if assembly else None),
+        "assembly_loc": (assembly[1] if assembly else None),
+        "assembly_ratchet_files_max": (assembly_ratchet or {}).get("files"),
+        "assembly_ratchet_loc_max": (assembly_ratchet or {}).get("loc"),
         # I7 趋势双口径：地图自评分（本文件）+ 巡检分（HealthPage 从库内巡检记录读取，按测量时间新旧裁决）
         "map_self_score": (m.get("health") or {}).get("score"),
         "patrol_score": "见 HealthPage（巡检分存于库内 patrol_runs，按测量时间新旧裁决，不写回地图）",
@@ -238,6 +288,22 @@ def selfcheck():
     results.append(("N6 main.rs 仍 mod reinduce → 必红", any(x.startswith("I2") for x in p6), "; ".join(p6[:1])))
     p7, _ = synthetic_case()
     results.append(("N7 正例 → 必绿", not p7, "; ".join(p7[:1])))
+    # N8/N9 装配格棘轮（c-arch-10 I8）：超限必红 / 在限内必绿
+    m8 = {"layers": [{"id": "application", "order": 3}], "modules": [
+        {"id": "server-api", "layer": "application", "dependencies": [], "health": {"decay_flags": [], "concerns": []}},
+        {"id": "easyvibe-git", "layer": "application", "dependencies": [], "health": {"decay_flags": [], "concerns": []}},
+        {"id": "easyvibe-pipeline", "layer": "application", "dependencies": [], "health": {"decay_flags": [], "concerns": []}},
+    ], "edges": [], "meta": {"stats": {"coverage_ratio": 1.0}}, "health": {"score": 80, "concerns": []}}
+    bl = {"server_api_files": 5, "server_api_loc": 4000}
+    asm_ratchet = {"files": 5, "loc": 746}
+    p8, _ = check(m8, ["a.rs"], 100, bl, [], [], emit_modules=EXTRACTED_MODULES,
+                  ratchet={"files": 40, "loc": 9000}, assembly=(["x/assembly/a.rs"], 99999),
+                  assembly_ratchet=asm_ratchet)
+    results.append(("N8 装配格超棘轮 → 必红", any(x.startswith("I8") for x in p8), "; ".join(p8[:1])))
+    p9, _ = check(m8, ["a.rs"], 100, bl, [], [], emit_modules=EXTRACTED_MODULES,
+                  ratchet={"files": 40, "loc": 9000}, assembly=(["x/assembly/a.rs"], 700),
+                  assembly_ratchet=asm_ratchet)
+    results.append(("N9 装配格在棘轮内 → 必绿", not p9, "; ".join(p9[:1])))
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
@@ -267,6 +333,7 @@ def main():
     with open(path, encoding="utf-8") as fh:
         m = json.load(fh)
     files, loc = inventory(root)
+    assembly = inventory_assembly(root)
     present, mods = domain_files_present(root)
     emit_modules = None
     if live:
@@ -275,7 +342,8 @@ def main():
             with open(order_path, encoding="utf-8") as fh:
                 emit_modules = json.load(fh).get("modules", [])
     problems, report = check(m, files, loc, baseline, present, mods, emit_modules,
-                            ratchet={"files": C7_RATCHET_MAX_FILES, "loc": C7_RATCHET_MAX_LOC})
+                            ratchet={"files": C7_RATCHET_MAX_FILES, "loc": C7_RATCHET_MAX_LOC},
+                            assembly=assembly, assembly_ratchet=C7_ASSEMBLY_RATCHET)
     print(json.dumps({"ok": not problems, **report, "problems": problems}, ensure_ascii=False, indent=2))
     return 0 if not problems else 1
 

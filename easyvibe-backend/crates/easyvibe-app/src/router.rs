@@ -18,14 +18,9 @@
 //! R4（版本锚）：`/api/*` 响应统一带只读响应头 `X-EasyVibe-Api-Version`（复用 Y7 的
 //! `crate::VERSION`，与 `/api/health` 的 `version` 字段同源，不另造第二套版本语义）。
 
-use axum::{
-    response::{IntoResponse, Response},
-    routing::get, Router,
-};
+use axum::{routing::get, Router};
 use crate::state::*;
 use crate::VERSION;
-use crate::assets;
-use crate::assets::embedded_ui_available;
 use crate::ws::ws_handler;
 use crate::routes::{agent, chat, dev_docs, map, repo, sessions, settings, task};
 
@@ -85,56 +80,11 @@ pub fn build_router(state: AppState) -> Router {
         }))
         .with_state(state);
 
-    // D5：桌面壳同源托管——EASYVIBE_STATIC_DIR 指向渲染器构建产物（dist）时，
-    // / 与未命中路径回落到静态资源；前端 fetch('/api/...') 与 /ws 全部同源，
-    // 桌面 WebView 直接加载 http://127.0.0.1:{port}，CORS/跨站问题整体消失。
-    // 独立分发形态（未指定静态目录）回落到编译期内嵌的 dist——后端自己同源托管 UI，
-    // 双击 exe 直接出界面（2026-10-04：此前裸 exe 只挂 API 无 UI，用户双击"没反应"）。
-    match std::env::var("EASYVIBE_STATIC_DIR").ok().filter(|d| !d.is_empty()) {
-        Some(dir) => {
-            use tower_http::services::ServeDir;
-            router.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true))
-        }
-        None if embedded_ui_available() => router.fallback_service(get(embedded_static)),
-        None => router,
-    }
-}
-
-/// 内嵌 dist 的静态回落（独立形态）：按路径精确查找，未命中回落 index.html（SPA 前端路由）
-pub(crate) async fn embedded_static(uri: axum::http::Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
-    let file = assets::DIST
-        .get_file(path)
-        .or_else(|| assets::DIST.get_file("index.html"));
-    match file {
-        Some(f) => (
-            [(
-                axum::http::header::CONTENT_TYPE,
-                axum::http::HeaderValue::from_static(mime_by_ext(path)),
-            )],
-            f.contents(),
-        )
-            .into_response(),
-        None => axum::http::StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-pub(crate) fn mime_by_ext(path: &str) -> &'static str {
-    match path.rsplit('.').next() {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("json") => "application/json; charset=utf-8",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        Some("woff2") => "font/woff2",
-        Some("woff") => "font/woff",
-        Some("ico") => "image/x-icon",
-        Some("txt") | Some("md") => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    }
+    // c-arch-10 ΔS6：静态回落**不在本文件挂**——装配格 `static_host::attach(router)`
+    // 在 `build_router` 之外追加 `fallback_service`（先纯 API/WS 路由，再静态回落）。
+    // 若此处回落，则本文件需反向引用装配格而产生 server-api → assembly 新出边
+    //（本层外向边不得上升）；层序与行为不变（回落亦在 layer 之后）。
+    router
 }
 
 /// D5：Tauri v2 生产 WebView 的固定源（WKWebView 自定义协议映射为 http://tauri.localhost）。

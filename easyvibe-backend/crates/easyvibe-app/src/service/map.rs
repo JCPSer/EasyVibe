@@ -9,8 +9,8 @@ use easyvibe_map::concerns::{assign_concern_ids, diff_concerns, extract_concerns
 use crate::state::*;
 use easyvibe_ai_agent::agent_conf;
 use easyvibe_api_types::SessionStatusChanged;
+use crate::db_ports::HealthPort as _;
 use easyvibe_common::ApiError;
-use easyvibe_db::HealthRepository as _;
 use easyvibe_event_bus::queue::{JobKind, QueueHost, QueuedJob};
 use easyvibe_event_bus::{publish, BusEvent};
 use tracing::info;
