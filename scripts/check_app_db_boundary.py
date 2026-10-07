@@ -9,11 +9,17 @@ task_exec 文件集双向全等 / 豁免棘轮 / 别名再导出反绕过）搬�
 作为单一事实源（零新清单文件、零双写）。
 
   --check     解析 tests/arch_guard.rs 的常量（DB_BANNED / ALIAS_REEXPORT / TASK_ENGINE_PROD /
-              TASK_ENGINE_TEST_EXEMPT / TASK_ENGINE_TEST_BUDGET / ROUTES_REPO_FIELDS）
+              TASK_ENGINE_TEST_EXEMPT / TASK_ENGINE_TEST_BUDGET / ROUTES_REPO_FIELDS
+              / DB_DIRECT_LITERAL / DB_DIRECT_TOTAL / DB_DIRECT_FOCUS_MAX / DB_DIRECT_FOCUS_FILES_MAX）
               → 对 src/ 复判。任一常量缺失/解析为空 = fail-closed（ok:false，退出 1），
               绝不静默全绿。判据一律用**原始文本**（不去注释）——最严口径。
-  --selfcheck 合成输入 N1–N6（不改仓库；判据直接施于内存构造的 {相对路径: 文本}），
-              逐条自证「负例必红、正例必绿」，其中 N5 专测「常量解析失败必红」的 fail-closed 路径。
+  --selfcheck 合成输入 N1–N9（不改仓库；判据直接施于内存构造的 {相对路径: 文本}），
+              逐条自证「负例必红、正例必绿」，其中 N5 专测「常量解析失败必红」的 fail-closed 路径；
+              N7/N8/N9 为 c-arch-13 焦点面直连集中度（I11b 超限 / 登记值正例 / I11a 总数漂移）。
+
+c-arch-13（R8）扩面：焦点面（`src/db_ports.rs` 或 `src/db_ports/**` + `src/state.rs`）复判三量——
+I11a 守恒律（`easyvibe_db::` 总处数 == DB_DIRECT_TOTAL）/ I11b 单文件最大 == DB_DIRECT_FOCUS_MAX
+（**双边全等**）/ I11c 有直连文件数 == DB_DIRECT_FOCUS_FILES_MAX；`--check` 输出 `db_direct_by_file`。
 
 退出码：--check 绿=0 / 红=1；--selfcheck 全 PASS=0 / 任一 FAIL=1。
 """
@@ -30,8 +36,10 @@ SRC = os.path.join(APP, "src")
 
 # 需解析的常量（任一缺失/解析为空即 fail-closed）
 ARRAY_CONSTS = ("TASK_ENGINE_PROD", "TASK_ENGINE_TEST_EXEMPT", "ROUTES_REPO_FIELDS")
-STR_CONSTS = ("DB_BANNED", "ALIAS_REEXPORT")
-INT_CONSTS = ("TASK_ENGINE_TEST_BUDGET",)
+STR_CONSTS = ("DB_BANNED", "ALIAS_REEXPORT", "DB_DIRECT_LITERAL")
+# c-arch-13：焦点面直连集中度三量（I11a 守恒 / I11b 单文件最大 / I11c 落点文件数）
+INT_CONSTS = ("TASK_ENGINE_TEST_BUDGET", "DB_DIRECT_TOTAL", "DB_DIRECT_FOCUS_MAX",
+              "DB_DIRECT_FOCUS_FILES_MAX")
 
 
 class GuardParseError(Exception):
@@ -80,11 +88,29 @@ def parse_guard(text):
     return {
         "db_banned": strs["DB_BANNED"],
         "alias_reexport": strs["ALIAS_REEXPORT"],
+        "db_direct_literal": strs["DB_DIRECT_LITERAL"],
         "task_engine_prod": arrays["TASK_ENGINE_PROD"],
         "task_engine_test_exempt": arrays["TASK_ENGINE_TEST_EXEMPT"],
         "task_engine_test_budget": ints["TASK_ENGINE_TEST_BUDGET"],
         "routes_repo_fields": arrays["ROUTES_REPO_FIELDS"],
+        # c-arch-13
+        "db_direct_total": ints["DB_DIRECT_TOTAL"],
+        "db_direct_focus_max": ints["DB_DIRECT_FOCUS_MAX"],
+        "db_direct_focus_files_max": ints["DB_DIRECT_FOCUS_FILES_MAX"],
     }
+
+
+def focus_direct_table(disk, literal):
+    """焦点面逐文件 `easyvibe_db::` 出现次数（键 = 相对 src/ 路径）。
+
+    焦点面 = `db_ports.rs`（目录化前）或 `db_ports/**`（目录化后）+ `state.rs`——以磁盘实际为准
+    （两者取存在者；read_src 已把 db_ports/ 展开为 "db_ports/<f>.rs"）。
+    """
+    out = {}
+    for rel in sorted(disk):
+        if rel == "state.rs" or rel == "db_ports.rs" or (rel.startswith("db_ports/") and rel.endswith(".rs")):
+            out[rel] = disk[rel].count(literal)
+    return out
 
 
 def _src_rel(path):
@@ -187,6 +213,22 @@ def evaluate(disk, consts):
                 % (rel, alias)
             )
 
+    # ⑥ c-arch-13：焦点面（db_ports.rs 或 db_ports/** + state.rs）直连集中度三量（I11a/b/c 的 CI 镜像）。
+    #    常量表（DB_DIRECT_*）是单一事实源；判据一律**原始文本**最严口径。
+    focus = focus_direct_table(disk, consts.get("db_direct_literal", "easyvibe_db::"))
+    total = sum(focus.values())
+    mx = max(focus.values()) if focus else 0
+    with_direct = len([1 for v in focus.values() if v > 0])
+    if total != consts["db_direct_total"]:
+        problems.append("I11a 焦点面直连总处数 %d != 登记 %d（守恒律破：搬运丢行/重复/新写直连）"
+                        % (total, consts["db_direct_total"]))
+    if mx != consts["db_direct_focus_max"]:
+        problems.append("I11b 焦点面单文件最大直连数 %d != 登记 %d（双边全等，须同步登记）"
+                        % (mx, consts["db_direct_focus_max"]))
+    if with_direct != consts["db_direct_focus_files_max"]:
+        problems.append("I11c 焦点面有直连的文件数 %d != 登记 %d（落点面漂移）"
+                        % (with_direct, consts["db_direct_focus_files_max"]))
+
     return problems
 
 
@@ -213,7 +255,13 @@ def cmd_check():
         return 1
     disk = read_src()
     problems = evaluate(disk, consts)
-    report = {"ok": not problems, "files": len(disk), "problems": problems}
+    report = {
+        "ok": not problems,
+        "files": len(disk),
+        # c-arch-13：焦点面逐文件直连真值表（与 verify_arch_split 同名同义，人工可读）
+        "db_direct_by_file": focus_direct_table(disk, consts["db_direct_literal"]),
+        "problems": problems,
+    }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if not problems else 1
 
@@ -223,7 +271,10 @@ def cmd_check():
 # ---------------------------------------------------------------------------
 
 def _green(consts):
-    """全干净合成输入：生产/豁免/路由各就位，文本零 easyvibe_db、零别名再导出。"""
+    """全干净合成输入：生产/豁免/路由各就位，文本零 easyvibe_db、零别名再导出。
+
+    c-arch-13：焦点面须满足 I11a/b/c 登记值（10 文件 / 每文件 ≤22 / 总数 91）——构造合成焦点面。
+    """
     d = {}
     for p in consts["task_engine_prod"]:
         d[_src_rel(p)] = "// synthetic prod\npub fn prod() {}\n"
@@ -231,7 +282,18 @@ def _green(consts):
         d[_src_rel(p)] = "// synthetic test\n#[test]\nfn t() {}\n"
     d["routes/mod.rs"] = "// synthetic routes\npub mod agent;\n"
     d["lib.rs"] = "// synthetic lib\n"
+    lit = consts.get("db_direct_literal", "easyvibe_db::")
+    line = "let _ = %sRow::x();\n" % lit
+    counts = [22, 15, 14, 11, 9, 6, 5, 4, 3, 2]  # 合计 91、最大 22、落点 10
+    for i, c in enumerate(counts):
+        d["db_ports/f%d.rs" % i] = line * c
     return d
+
+
+def _focus_line(consts, n):
+    """合成焦点面正文：n 处 `easyvibe_db::` 直连（口径与判据同源）。"""
+    lit = consts.get("db_direct_literal", "easyvibe_db::")
+    return ("let _ = %sRow::x();\n" % lit) * n
 
 
 def cmd_selfcheck():
@@ -274,6 +336,21 @@ def cmd_selfcheck():
     # N6 全干净合成输入 → 必绿
     cases.append(("N6 全干净合成输入", dict(base), False, consts, None))
 
+    # ---- c-arch-13：焦点面直连集中度（I11a/b/c）----
+    # N7 单文件 23 处直连（>22）→ 必红（总数守恒 91：另一文件 −1，隔离 I11b）
+    d7 = dict(base)
+    d7["db_ports/f0.rs"] = _focus_line(consts, 23)
+    d7["db_ports/f1.rs"] = _focus_line(consts, 14)
+    cases.append(("N7 焦点面单文件 23 处直连 → 必红", d7, True, consts, None))
+
+    # N8 10 文件 / 每文件 ≤22 / 总数 91 → 必绿
+    cases.append(("N8 焦点面 10 文件/最大 22/总数 91 → 必绿", dict(base), False, consts, None))
+
+    # N9 总数 92 → 必红（守恒律）
+    d9 = dict(base)
+    d9["db_ports/f9.rs"] += _focus_line(consts, 1)
+    cases.append(("N9 焦点面总数 92 → 必红", d9, True, consts, None))
+
     failed = 0
     for name, disk, expect_red, used, raw in cases:
         if raw is not None:
@@ -291,7 +368,7 @@ def cmd_selfcheck():
         ok = red == expect_red
         failed += 0 if ok else 1
         print("%s %s%s" % ("PASS" if ok else "FAIL", name, ("  " + detail) if detail else ""))
-    print("N1–N6 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
+    print("N1–N9 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
     return 0 if failed == 0 else 1
 
 

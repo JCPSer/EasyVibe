@@ -67,8 +67,11 @@ const FORBIDDEN: &[&str] = &[
     "crate::agent_conf",
     "crate::AppState",
     "crate::AppError",
-    "crate::service::map::start_",
-    "crate::service::map::analyze_submap_inner",
+    // c-arch-13 R2（ΔS4）：map.rs 按流程拆分后，旧锚点失效，改指**新锚点集合**
+    // （service/{patrol,reinduce_start,submap}.rs；与 module_size_guard.rs::TASK_ENGINE_FORBIDDEN 逐字一致）
+    "crate::service::patrol::start_",
+    "crate::service::reinduce_start::start_",
+    "crate::service::submap::analyze_submap",
     "crate::session_queue",
     "crate::db_ports",
     "crate::service::sessions",
@@ -398,6 +401,29 @@ const SERVICE_BANNED_TYPES: &[&str] = &[
 /// 非装配格文件不得反向引用装配格（唯一合法声明是 main.rs 的 `mod assembly;`，无 `crate::` 路径）。
 const ASSEMBLY_REVERSE: &str = "crate::assembly";
 
+// ============================================================================
+// c-arch-13：组合根直连集中度（焦点面 = `src/db_ports.rs` 或 `src/db_ports/**` + `src/state.rs`）
+// ----------------------------------------------------------------------------
+// 直连面没有消失，只是换了宿主：`db_ports.rs`（513 行 / 80 处）按端口域目录化后，若不再把
+// 三量钉死，下一轮必然以同样方式复现。故 I11 由「单条上界」升级为**守恒律 + 双边全等**三条
+// 子判据（ΔS-Q11）：① 总处数守恒（防搬运丢行/重复/新写直连）；② 单文件最大 == 登记值；
+// ③ 有直连的落点文件数 == 登记值。
+// python3 CI 载体 `scripts/check_app_db_boundary.py` 解析下列常量表为单一事实源（fail-closed）。
+// ============================================================================
+
+/// 直连计数口径字面量（含 `::`，与 `grep -c "easyvibe_db::"` 真值同源；注释中的回指亦计入，
+/// 故 `db_ports/repo.rs` = 3）。**不**做去注释——去注释会使总数跌至 90 与登记值 91 冲突。
+const DB_DIRECT_LITERAL: &str = "easyvibe_db::";
+
+/// 焦点面 `easyvibe_db::` 出现**总处数**（守恒律：丢行 / 重复搬 / 新写直连即红）。
+const DB_DIRECT_TOTAL: usize = 91;
+
+/// 焦点面**单文件最大**直连数（双边全等：登记值必须 == 实测最大值，不是 `<=`）。
+const DB_DIRECT_FOCUS_MAX: usize = 22;
+
+/// 焦点面**有直连的落点文件数**（双边全等）。
+const DB_DIRECT_FOCUS_FILES_MAX: usize = 10;
+
 /// c-arch-10 R4：service/** 去注释后零 `easyvibe_db`、零具体仓储类型名。
 #[test]
 fn service_layer_has_no_db_direct_access() {
@@ -416,6 +442,48 @@ fn service_layer_has_no_db_direct_access() {
     assert!(
         used <= SERVICE_DB_RATCHET,
         "service/** 直连 `{DB_BANNED}` 出现 {used} 次 > 棘轮 {SERVICE_DB_RATCHET}——编排层须经 crate::db_ports（c-arch-10 R4）"
+    );
+}
+
+/// c-arch-13 I11a/b/c：焦点面直连三量**双边全等**（守恒律 / 单文件最大 / 落点文件数）。
+/// 兼容目录化前后：磁盘存在 `src/db_ports/` 取目录，否则取 `src/db_ports.rs`（以磁盘实际为准）。
+#[test]
+fn db_direct_focus_stays_bounded() {
+    let mut by: Vec<(String, usize)> = Vec::new();
+    let dir = app_root().join("src/db_ports");
+    if dir.is_dir() {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "rs").unwrap_or(false))
+            .collect();
+        files.sort();
+        for p in files {
+            let rel = p.strip_prefix(app_root()).unwrap().to_string_lossy().replace('\\', "/");
+            let n = std::fs::read_to_string(&p).unwrap().matches(DB_DIRECT_LITERAL).count();
+            by.push((rel, n));
+        }
+    } else {
+        by.push(("src/db_ports.rs".to_string(), read_src("src/db_ports.rs").matches(DB_DIRECT_LITERAL).count()));
+    }
+    by.push(("src/state.rs".to_string(), read_src("src/state.rs").matches(DB_DIRECT_LITERAL).count()));
+
+    let total: usize = by.iter().map(|(_, n)| *n).sum();
+    let max = by.iter().map(|(_, n)| *n).max().unwrap_or(0);
+    let with_direct = by.iter().filter(|(_, n)| *n > 0).count();
+    let table: Vec<String> = by.iter().map(|(f, n)| format!("{f}={n}")).collect();
+    assert_eq!(
+        total, DB_DIRECT_TOTAL,
+        "焦点面直连总处数 {total} != {DB_DIRECT_TOTAL}（I11a 守恒律破：搬运丢行/重复/新写直连）\n{table:?}"
+    );
+    assert_eq!(
+        max, DB_DIRECT_FOCUS_MAX,
+        "焦点面单文件最大直连数 {max} != {DB_DIRECT_FOCUS_MAX}（I11b 双边全等，须同步登记）\n{table:?}"
+    );
+    assert_eq!(
+        with_direct, DB_DIRECT_FOCUS_FILES_MAX,
+        "焦点面有直连的文件数 {with_direct} != {DB_DIRECT_FOCUS_FILES_MAX}（I11c 落点面漂移）\n{table:?}"
     );
 }
 

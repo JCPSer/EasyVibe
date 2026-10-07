@@ -11,14 +11,19 @@ pub(crate) mod agent;
 pub(crate) mod chat;
 pub(crate) mod git;
 pub(crate) mod map;
+pub(crate) mod patrol;
 pub(crate) mod reinduce;
+pub(crate) mod reinduce_start;
+pub(crate) mod submap;
 pub(crate) mod repo;
 pub(crate) mod sessions;
 pub(crate) mod settings;
 pub(crate) mod task;
 
 // chat/task 编排的既有 `crate::service::<fn>` 调用路径经 re-export 保持全等；
-// map 不 re-export——强制唯一规范路径 `crate::service::map::<fn>`，使 R7 逆向引用
-// 守卫（`crate::service::map::start_`）不存在 `crate::service::start_*` 别名绕过面。
+// map/patrol/submap/reinduce(_start) 一概不 re-export——强制唯一规范路径
+// （`crate::service::{map,patrol,submap,reinduce,reinduce_start}::<fn>`），使逆向引用守卫
+// （c-arch-13：`crate::service::patrol::start_` / `crate::service::reinduce_start::start_` /
+//  `crate::service::submap::analyze_submap`）不存在 `crate::service::<fn>` 别名绕过面。
 pub(crate) use chat::*;
 pub(crate) use task::*;

@@ -8,10 +8,15 @@
 （零新清单文件、零双写）。
 
   --check     解析 tests/arch_guard.rs 常量（SERVICE_DB_RATCHET / SERVICE_BANNED_TYPES /
-              ASSEMBLY_REVERSE）→ 对 src/ 复判。任一常量缺失/解析为空 = fail-closed（ok:false，退出 1），
+              ASSEMBLY_REVERSE）与 tests/module_size_guard.rs 常量（SERVICE_FROZEN_FILES）
+              → 对 src/ 复判。任一常量缺失/解析为空 = fail-closed（ok:false，退出 1），
               绝不静默全绿。判据一律用**原始文本**（不去注释）——最严口径。
-  --selfcheck 合成输入 N1–N6（不改仓库；判据直接施于内存构造的 {相对路径: 文本}），
+  --selfcheck 合成输入 N1–N8（不改仓库；判据直接施于内存构造的 {相对路径: 文本}），
               逐条自证「负例必红、正例必绿」，其中 N5 专测「常量解析失败必红」的 fail-closed 路径。
+
+c-arch-13（R8）扩面：J5 —— `service/**` 每文件 ≤ `gates.single_file_loc_max`（默认 400；`mod.rs` ≤300），
+且磁盘 service/ 文件集 == `SERVICE_FROZEN_FILES`（双向全等）；存量超标（`service/chat.rs` 490）按
+`gates.single_file_loc_caps` 棘轮豁免（与 I10 同源）。
 
 退出码：--check 绿=0 / 红=1；--selfcheck 全 PASS=0 / 任一 FAIL=1。
 """
@@ -24,7 +29,11 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(REPO, "easyvibe-backend", "crates", "easyvibe-app")
 GUARD = os.path.join(APP, "tests", "arch_guard.rs")
+# c-arch-13：SERVICE_FROZEN_FILES 的单一事实源在 Rust 冻结表；阈值/棘轮单一事实源在 policy.gates。
+SIZE_GUARD = os.path.join(APP, "tests", "module_size_guard.rs")
+POLICY = os.path.join(REPO, "scripts", "map_edge_policy.json")
 SRC = os.path.join(APP, "src")
+APP_SRC_PREFIX = "easyvibe-backend/crates/easyvibe-app/src/"
 SERVICE_REL = "service/"
 
 # 装配格探针（J3）：文件缺失 = fail-closed（装配格被并回 server-api 时必红）
@@ -56,7 +65,7 @@ def _const_int(text, name):
     return int(m.group(1))
 
 
-def parse_guard(text):
+def parse_guard(text, size_text):
     """从 Rust 守卫源码解析常量表。任一缺失/解析为空即抛错（fail-closed）。"""
     banned = re.findall(r'"([^"]+)"', _const_rhs(text, "SERVICE_BANNED_TYPES"))
     if not banned:
@@ -64,11 +73,31 @@ def parse_guard(text):
     reverse = _const_str(text, "ASSEMBLY_REVERSE")
     if not reverse:
         raise GuardParseError("const ASSEMBLY_REVERSE 解析为空——fail-closed")
+    frozen = re.findall(r'"([^"]+)"', _const_rhs(size_text, "SERVICE_FROZEN_FILES"))
+    if not frozen:
+        raise GuardParseError("const SERVICE_FROZEN_FILES 解析为空——fail-closed")
     return {
         "db_ratchet": _const_int(text, "SERVICE_DB_RATCHET"),
         "banned": banned,
         "assembly_reverse": reverse,
+        "service_frozen": frozen,
     }
+
+
+def load_loc_gates():
+    """读 `scripts/map_edge_policy.json::gates` 的单文件行数阈值与棘轮（c-arch-13；缺失 fail-closed）。
+
+    返回 (single_file_loc_max:int, loc_caps:{src 相对路径: cap})——棘轮键按 `src/` 相对路径归一，
+    与 evaluate/disk 的键空间一致。
+    """
+    with open(POLICY, encoding="utf-8") as f:
+        gates = json.load(f)["gates"]
+    loc_max = int(gates["single_file_loc_max"])
+    caps = {}
+    for k, v in dict(gates["single_file_loc_caps"]).items():
+        kk = k[len(APP_SRC_PREFIX):] if k.startswith(APP_SRC_PREFIX) else k
+        caps[kk] = int(v)
+    return loc_max, caps
 
 
 def evaluate(disk, consts):
@@ -110,6 +139,28 @@ def evaluate(disk, consts):
         if reverse in disk[rel]:
             problems.append("%s 出现 `%s`——server-api 反向引用装配格（J4）" % (rel, reverse))
 
+    # J5（c-arch-13）：service/** 每文件 ≤ single_file_loc_max（mod.rs ≤300）+ 文件集双向全等。
+    loc_max = consts["loc_max"]
+    caps = consts["loc_caps"]
+    disk_svc = sorted(
+        rel[len(SERVICE_REL):]
+        for rel in disk
+        if rel.startswith(SERVICE_REL) and "/" not in rel[len(SERVICE_REL):] and rel.endswith(".rs")
+    )
+    for f in disk_svc:
+        rel = SERVICE_REL + f
+        n = len(disk[rel].splitlines())
+        lim = 300 if f == "mod.rs" else int(caps.get(rel, loc_max))
+        if n > lim:
+            problems.append("%s = %d 行 > 上限 %d（service/** 每文件须 ≤%d；存量超标须登记 "
+                            "single_file_loc_caps；J5）" % (rel, n, lim, loc_max))
+    declared_svc = sorted(set(consts["service_frozen"]))
+    if disk_svc != declared_svc:
+        extra = [f for f in disk_svc if f not in declared_svc]
+        missing = [f for f in declared_svc if f not in disk_svc]
+        problems.append("service/ 文件集漂移 extra=%s missing=%s——新增/改名须同步 "
+                        "SERVICE_FROZEN_FILES（c-arch-13 R7/J5）" % (extra, missing))
+
     return problems
 
 
@@ -130,13 +181,22 @@ def read_src():
 def cmd_check():
     try:
         with open(GUARD, encoding="utf-8") as f:
-            consts = parse_guard(f.read())
-    except (OSError, GuardParseError) as e:
+            consts = parse_guard(f.read(), open(SIZE_GUARD, encoding="utf-8").read())
+        consts["loc_max"], consts["loc_caps"] = load_loc_gates()
+    except (OSError, GuardParseError, KeyError, ValueError) as e:
         print(json.dumps({"ok": False, "stage": "parse-guard", "problems": [str(e)]}, ensure_ascii=False))
         return 1
     disk = read_src()
     problems = evaluate(disk, consts)
-    report = {"ok": not problems, "files": len(disk), "problems": problems}
+    report = {
+        "ok": not problems,
+        "files": len(disk),
+        "service_files": sorted(
+            rel[len(SERVICE_REL):] for rel in disk
+            if rel.startswith(SERVICE_REL) and "/" not in rel[len(SERVICE_REL):] and rel.endswith(".rs")
+        ),
+        "problems": problems,
+    }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if not problems else 1
 
@@ -146,11 +206,12 @@ def cmd_check():
 # ---------------------------------------------------------------------------
 
 def _green(consts):
-    """全干净合成输入：service 端口化、装配格探针齐备、无反向引用。"""
+    """全干净合成输入：service 端口化、装配格探针齐备、无反向引用、service 文件集齐备且 ≤400。"""
     d = {}
     for probe in ASSEMBLY_PROBES:
         d[probe] = "// synthetic assembly\n"
-    d["service/task.rs"] = "use crate::db_ports::TaskPort as _;\npub fn f() {}\n"
+    for f in consts["service_frozen"]:
+        d["service/%s" % f] = "// synthetic service\npub fn f() {}\n"
     d["main.rs"] = "mod assembly;\n"
     d["router.rs"] = "pub fn build_router() {}\n"
     return d
@@ -160,8 +221,11 @@ def cmd_selfcheck():
     try:
         with open(GUARD, encoding="utf-8") as f:
             guard_text = f.read()
-        consts = parse_guard(guard_text)
-    except (OSError, GuardParseError) as e:
+        with open(SIZE_GUARD, encoding="utf-8") as f:
+            size_text = f.read()
+        consts = parse_guard(guard_text, size_text)
+        consts["loc_max"], consts["loc_caps"] = load_loc_gates()
+    except (OSError, GuardParseError, KeyError, ValueError) as e:
         print("FAIL 无法加载守卫常量: %s" % e)
         return 1
 
@@ -195,11 +259,19 @@ def cmd_selfcheck():
     # N6 全干净合成输入 → 必绿
     cases.append(("N6 全干净合成输入", dict(base), False, consts, None))
 
+    # N7（c-arch-13）：合成 401 行 service/x.rs → 必红（J5 每文件 ≤400）
+    d7 = dict(base)
+    d7["service/x.rs"] = "pub fn f() {}\n" * 401
+    cases.append(("N7 合成 401 行 service/x.rs → 必红", d7, True, consts, None))
+
+    # N8（c-arch-13）：全 service 文件在限内且文件集齐备 → 必绿
+    cases.append(("N8 service 文件集齐备且 ≤400 → 必绿", dict(base), False, consts, None))
+
     failed = 0
     for name, disk, expect_red, used, raw in cases:
         if raw is not None:
             try:
-                parse_guard(raw)
+                parse_guard(raw, size_text)
                 red = False
                 detail = "未按预期抛错（改名/删除未被 fail-closed 拦截）"
             except GuardParseError as e:
@@ -212,7 +284,7 @@ def cmd_selfcheck():
         ok = red == expect_red
         failed += 0 if ok else 1
         print("%s %s%s" % ("PASS" if ok else "FAIL", name, ("  " + detail) if detail else ""))
-    print("N1–N6 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
+    print("N1–N8 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
     return 0 if failed == 0 else 1
 
 

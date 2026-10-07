@@ -59,9 +59,20 @@ fn god_files_stay_below_size_limits() {
     assert!(loc("main.rs") <= 900, "main.rs 超 900 行（god file 复发）: {}", loc("main.rs"));
     assert!(loc("task_exec.rs") <= 900, "task_exec.rs 超 900 行: {}", loc("task_exec.rs"));
     // 装配层其余文件（c-arch-1：git/freshness/reinduce/pipeline/map_concerns 已迁出本 crate；
-    // c-arch-10：bootstrap.rs 纯搬运至 assembly/**，本列表不再含 bootstrap）
-    for f in ["state.rs", "router.rs", "ws.rs", "assets.rs", "session_queue_routes.rs", "db_ports.rs"] {
+    // c-arch-10：bootstrap.rs 纯搬运至 assembly/**，本列表不再含 bootstrap；
+    // c-arch-13：db_ports.rs 目录化为 db_ports/**，改由下方目录遍历按 ≤400 断言）
+    for f in ["state.rs", "router.rs", "ws.rs", "assets.rs", "session_queue_routes.rs"] {
         assert!(loc(f) <= 700, "{f} 超 700 行: {}", loc(f));
+    }
+    // c-arch-13：组合根适配器族（db_ports/**）每文件 ≤400（与 I10 / single_file_loc_max 同阈值）
+    let dbp_dir = app_src().join("db_ports");
+    for e in std::fs::read_dir(&dbp_dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().map(|x| x == "rs").unwrap_or(false) {
+            let name = format!("db_ports/{}", p.file_name().unwrap().to_string_lossy());
+            let n = std::fs::read_to_string(&p).unwrap().lines().count();
+            assert!(n <= 400, "{name} 超 400 行: {n}（组合根适配器须按端口域保持单文件 ≤400）");
+        }
     }
     // c-arch-10：独立装配格（assembly/**）≤600（使命是「短主线 + 分组工厂」，不得再膨胀为 god 格）
     let asm_dir = app_src().join("assembly");
@@ -74,13 +85,20 @@ fn god_files_stay_below_size_limits() {
         }
     }
     // 服务编排层（方案 R1：service/{mod,chat,task,map}.rs）
+    // c-arch-13：上限 600 → 400（与 I10 / single_file_loc_max 同口径；chat.rs 490 走 I10 棘轮
+    //   single_file_loc_caps，不在本 Rust 目录遍历的 400 硬线内——故此处只断新拆流程文件）。
     let service_dir = app_src().join("service");
     for e in std::fs::read_dir(&service_dir).unwrap() {
         let p = e.unwrap().path();
         if p.extension().map(|x| x == "rs").unwrap_or(false) {
             let name = format!("service/{}", p.file_name().unwrap().to_string_lossy());
             let n = std::fs::read_to_string(&p).unwrap().lines().count();
-            let lim = if p.file_name().unwrap() == "mod.rs" { 300 } else { 600 };
+            let lim = if p.file_name().unwrap() == "mod.rs" { 300 } else { 400 };
+            if p.file_name().unwrap() == "chat.rs" {
+                // 存量超标棘轮（只降不升）：I10 的 single_file_loc_caps 登记为唯一事实源。
+                assert!(n <= 490, "{name} 超棘轮上限 490 行: {n}（single_file_loc_caps，只降不升）");
+                continue;
+            }
             assert!(n <= lim, "{name} 超 {lim} 行: {n}");
         }
     }
@@ -133,16 +151,18 @@ fn route_modules_have_no_horizontal_deps() {
 }
 
 /// task_exec 子模块的逆向引用禁止子串（应用层/事件出口符号）。
-/// 方案 R7：map 编排下沉后 `crate::start_*` / `crate::analyze_submap_inner` 旧禁串失效，
-/// 改指新路径 `crate::service::map::…`（与 tests/arch_guard.rs 两处同步）。
+/// c-arch-13 R2（ΔS4）：`service/map.rs` 按流程拆分后，旧锚点 `crate::service::map::start_` /
+/// `crate::service::map::analyze_submap_inner` 失效，改指**新锚点集合**
+/// `crate::service::{patrol,reinduce_start,submap}::…`（与 tests/arch_guard.rs::FORBIDDEN 逐字一致）。
 const TASK_ENGINE_FORBIDDEN: &[&str] = &[
     "crate::BusEvent",
     "crate::publish",
     "crate::agent_conf",
     "crate::AppState",
     "crate::AppError",
-    "crate::service::map::start_",
-    "crate::service::map::analyze_submap_inner",
+    "crate::service::patrol::start_",
+    "crate::service::reinduce_start::start_",
+    "crate::service::submap::analyze_submap",
     "crate::session_queue",
     // c-arch-7 R3：端口适配器落组合根后，切片不得反向引用组合根/新增 service 域
     "crate::db_ports",
@@ -492,8 +512,12 @@ const ROUTES_FROZEN_FILES: &[&str] = &[
 ];
 
 /// service/ 文件集归属快照（方案 R1 拆分为 {mod,chat,task,map}.rs；
-/// c-arch-1 增 {git,repo,reinduce}.rs —— routes 只经 crate::service 取能力的落点）。
-const SERVICE_FROZEN_FILES: &[&str] = &["agent.rs", "chat.rs", "git.rs", "map.rs", "mod.rs", "reinduce.rs", "repo.rs", "sessions.rs", "settings.rs", "task.rs"];
+/// c-arch-1 增 {git,repo,reinduce}.rs —— routes 只经 crate::service 取能力的落点；
+/// c-arch-13 增 {patrol,submap,reinduce_start}.rs —— map.rs 三条流程各自收口，走 ΔS2 扁平支）。
+const SERVICE_FROZEN_FILES: &[&str] = &[
+    "agent.rs", "chat.rs", "git.rs", "map.rs", "mod.rs", "patrol.rs",
+    "reinduce.rs", "reinduce_start.rs", "repo.rs", "sessions.rs", "settings.rs", "submap.rs", "task.rs",
+];
 
 fn rs_files(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
@@ -585,7 +609,17 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::CompositionRoot, "main.rs", "命题点名：进程入口与 mod 声明"),
     (SrcClass::CompositionRoot, "router.rs", "命题点名：域自注册 merge 与 /ws 装配"),
     (SrcClass::CompositionRoot, "state.rs", "命题点名：共享状态与助手；组合根本就要装配依赖"),
-    (SrcClass::CompositionRoot, "db_ports.rs", "c-arch-7/c-arch-10 组合根：端口 ↔ 具体仓储适配器唯一落点（依赖倒置）"),
+    // —— c-arch-13：db_ports.rs → db_ports/** 目录化（按端口域拆分；10 文件，含 mod 门面）——
+    (SrcClass::CompositionRoot, "db_ports/mod.rs", "c-arch-7/c-arch-10 组合根：按端口域拆分…（mod 声明 + pub(crate) use 再导出 + 零 dyn 论证）"),
+    (SrcClass::CompositionRoot, "db_ports/dto.rs", "c-arch-13：按端口域拆分…（本地 DTO 五型 + to_message_rows）"),
+    (SrcClass::CompositionRoot, "db_ports/task_engine.rs", "c-arch-13：按端口域拆分…（into_record + TaskStore/ApprovalStore/SessionAttribution/AgentSlotResolver）"),
+    (SrcClass::CompositionRoot, "db_ports/task.rs", "c-arch-13：按端口域拆分…（TaskPort）"),
+    (SrcClass::CompositionRoot, "db_ports/settings.rs", "c-arch-13：按端口域拆分…（SettingsPort）"),
+    (SrcClass::CompositionRoot, "db_ports/approval.rs", "c-arch-13：按端口域拆分…（ApprovalPort）"),
+    (SrcClass::CompositionRoot, "db_ports/conversation.rs", "c-arch-13：按端口域拆分…（ConversationPort）"),
+    (SrcClass::CompositionRoot, "db_ports/health.rs", "c-arch-13：按端口域拆分…（HealthPort）"),
+    (SrcClass::CompositionRoot, "db_ports/event.rs", "c-arch-13：按端口域拆分…（EventPort）"),
+    (SrcClass::CompositionRoot, "db_ports/repo.rs", "c-arch-13：按端口域拆分…（RepoMaintenancePort）"),
     // —— c-arch-10 独立装配格（启动装配 + 静态托管；bootstrap.rs 纯搬运 + router.rs 静态段外提）——
     (SrcClass::Assembly, "assembly/mod.rs", "c-arch-10：run() 主线 + build_state() 工厂；装配只许落装配格"),
     (SrcClass::Assembly, "assembly/logging.rs", "c-arch-10：日志/仓库注册/预热/资产/agent 解析（自 bootstrap.rs 搬运）"),
@@ -633,6 +667,12 @@ const ASSEMBLY_FROZEN_FILES: &[&str] = &[
     "mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs",
 ];
 
+/// c-arch-13：组合根适配器族文件集（显式冻结；磁盘 `src/db_ports/*.rs` 必须与之全等）。
+const DB_PORTS_FROZEN_FILES: &[&str] = &[
+    "mod.rs", "dto.rs", "task_engine.rs", "task.rs", "settings.rs",
+    "approval.rs", "conversation.rs", "health.rs", "event.rs", "repo.rs",
+];
+
 /// 顶层文件集（由归属表派生：非 task-engine 切片、非装配格项——后两者按目录单独登记）。
 fn app_top_files() -> Vec<String> {
     APP_SRC_OWNERSHIP
@@ -647,6 +687,15 @@ fn app_assembly_files() -> Vec<String> {
     APP_SRC_OWNERSHIP
         .iter()
         .filter(|(c, _, _)| *c == SrcClass::Assembly)
+        .map(|(_, f, _)| f.to_string())
+        .collect()
+}
+
+/// c-arch-13：db_ports 适配器族文件集（由归属表派生：CompositionRoot 中 `db_ports/` 前缀项）。
+fn app_db_ports_files() -> Vec<String> {
+    APP_SRC_OWNERSHIP
+        .iter()
+        .filter(|(c, f, _)| *c == SrcClass::CompositionRoot && f.starts_with("db_ports/"))
         .map(|(_, f, _)| f.to_string())
         .collect()
 }
@@ -714,6 +763,21 @@ fn assembly_file_set_is_frozen() {
     let mut declared: Vec<String> = app_assembly_files().into_iter().map(|f| f.strip_prefix("assembly/").unwrap().to_string()).collect();
     declared.sort();
     assert_eq!(actual, declared, "assembly/ 文件集与 APP_SRC_OWNERSHIP 的 Assembly 项不一致（单一事实源被破坏）");
+}
+
+/// c-arch-13：db_ports/ 文件集**双向全等**（磁盘 `src/db_ports/*.rs` == 显式冻结 == 归属表 CompositionRoot 派生）。
+#[test]
+fn db_ports_file_set_is_frozen() {
+    let actual = rs_files(&app_src().join("db_ports"));
+    let mut expected: Vec<String> = DB_PORTS_FROZEN_FILES.iter().map(|s| s.to_string()).collect();
+    expected.sort();
+    assert_eq!(actual, expected, "db_ports/ 文件集漂移——组合根适配器族新增/改名须同步 DB_PORTS_FROZEN_FILES（c-arch-13 R1）");
+    let mut declared: Vec<String> = app_db_ports_files()
+        .into_iter()
+        .map(|f| f.strip_prefix("db_ports/").unwrap().to_string())
+        .collect();
+    declared.sort();
+    assert_eq!(actual, declared, "db_ports/ 文件集与 APP_SRC_OWNERSHIP 的 CompositionRoot 派生项不一致（单一事实源被破坏）");
 }
 
 /// R9-①：顶层归属表键集 ↔ 磁盘顶层 .rs **双向全等**（与 app_src_tree_is_frozen 同义，
@@ -935,19 +999,46 @@ fn routes_have_no_undeclared_json_decoding() {
 }
 
 /// G3′（v2 重写）：routes 文件的 service 域**归属映射 + 受限例外**。
-/// 默认每文件 ≤1 个 service 域；全局恰允许 1 个 len==2 的登记项
-/// （`repo.rs` = 主域 `repo` + 子资源域 `git`，由 `/repos/{id}/git/*` 路径前缀证明其非跨域编排）。
+/// 默认每文件 ≤1 个 service 域族；全局恰允许 1 个「2 族」登记项
+/// （`repo.rs` = 主族 `repo` + 子资源族 `git`，由 `/repos/{id}/git/*` 路径前缀证明其非跨域编排）。
 const ROUTE_SERVICE_MAP: &[(&str, &[&str], &str)] = &[
     ("agent.rs", &["agent"], "agent"),
     ("chat.rs", &["chat"], "chat"),
     ("dev_docs.rs", &["task"], "task"),
-    ("map.rs", &["map"], "map"),
+    // c-arch-13 R2：map 资源的三条写流程各自收口（patrol/submap/reinduce_start），
+    // 但仍同属 **map 资源域族**（见 SERVICE_DOMAIN_FAMILY）——扇出按族计，主族仍是 `map`。
+    ("map.rs", &["map", "patrol", "reinduce_start", "submap"], "map"),
     ("repo.rs", &["repo", "git"], "repo"),
     ("sessions.rs", &["sessions"], "sessions"),
     ("settings.rs", &["settings"], "settings"),
     ("task.rs", &["task"], "task"),
 ];
 const FANOUT_EXCEPTION_MAX: usize = 1;
+
+/// service 域族（c-arch-13）：`service/map.rs` 的三条写流程按流程各自收口为独立文件
+/// （`patrol.rs` / `submap.rs` / `reinduce_start.rs`，R2 走 ΔS2 扁平支），但它们同属
+/// **map 资源域族**——`routes/map.rs` 是这四者的唯一 HTTP 面。故扇出判据按「族」计
+/// （族内多文件不算跨域编排），「每 route 文件 = 一个资源域」的不变量不变。
+const SERVICE_DOMAIN_FAMILY: &[(&str, &[&str])] =
+    &[("map", &["map", "patrol", "reinduce_start", "submap"])];
+
+/// 归并 service 域 id 到其资源域族（未登记者自成一族，保持既有判据语义）。
+fn service_family(domain: &str) -> String {
+    for (fam, members) in SERVICE_DOMAIN_FAMILY {
+        if members.contains(&domain) {
+            return (*fam).to_string();
+        }
+    }
+    domain.to_string()
+}
+
+/// 声明项的「族集」（排序去重）：扇出与例外按族计。
+fn declared_families(decl: &[&str]) -> Vec<String> {
+    let mut v: Vec<String> = decl.iter().map(|d| service_family(d)).collect();
+    v.sort();
+    v.dedup();
+    v
+}
 
 #[test]
 fn routes_service_fanout_is_declared() {
@@ -963,14 +1054,15 @@ fn routes_service_fanout_is_declared() {
     domain_keys.sort();
     assert_eq!(domain_keys, declared, "ROUTE_SERVICE_MAP 键集必须与 FROZEN_DOMAIN_ROUTES（除 router.rs）全等");
 
-    let exception_count = ROUTE_SERVICE_MAP.iter().filter(|(_, d, _)| d.len() == 2).count();
+    let exception_count = ROUTE_SERVICE_MAP.iter().filter(|(_, d, _)| declared_families(d).len() == 2).count();
     assert!(
         exception_count <= FANOUT_EXCEPTION_MAX,
-        "len==2 的扇出例外有 {exception_count} 个 > {FANOUT_EXCEPTION_MAX}——例外只降不升（R7 G3′）"
+        "2 族扇出例外有 {exception_count} 个 > {FANOUT_EXCEPTION_MAX}——例外只降不升（R7 G3′）"
     );
 
     for (file, decl, primary) in ROUTE_SERVICE_MAP {
-        assert!(decl.len() <= 2, "routes/{file} 声明的 service 域 {} 个 > 2（R7 G3′）", decl.len());
+        let fams = declared_families(decl);
+        assert!(fams.len() <= 2, "routes/{file} 声明的 service 域族 {} 个 > 2（R7 G3′）", fams.len());
         let raw = read(&format!("routes/{file}"));
         let txt = strip_comments(&raw);
         // 去 `use X as _;` 别名绕过面
@@ -994,8 +1086,8 @@ fn routes_service_fanout_is_declared() {
         if decl.is_empty() {
             assert!(!uses_root && actual.is_empty(), "routes/{file} 声明零 service 域却仍在编排（R7 G3′）");
         }
-        // 子资源域证明：len==2 只能是「主域 + 其子资源路径前缀」，不是任意跨域编排
-        if decl.len() == 2 {
+        // 子资源域证明：2 族只能是「主域 + 其子资源路径前缀」，不是任意跨域编排
+        if fams.len() == 2 {
             let sub = decl.iter().find(|d| **d != *primary).expect("非主域项");
             let routes = FROZEN_DOMAIN_ROUTES.iter().find(|(f, _)| f == file).map(|(_, r)| *r).unwrap_or(&[]);
             let sub_routes = routes.iter().filter(|r| r.contains(&format!("/{sub}/"))).count();

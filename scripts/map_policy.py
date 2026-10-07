@@ -255,6 +255,11 @@ def validate_policy(policy: dict) -> list:
             problems.append("F0 module %s files 为空" % m.get("id"))
     for key in ("edges.expect_count", "edges.sha256", "edges.retired_ids",
                 "gates.dv_max", "gates.scc_max", "gates.expect_shell_deps", "gates.retired_concerns",
+                # c-arch-13：出边数上界（I9）、单文件行数上界与棘轮（I10）、直连集中度（I11a/b/c）
+                "gates.server_api_out_edges_max", "gates.server_api_out_edges",
+                "gates.single_file_loc_max", "gates.single_file_loc_caps",
+                "gates.db_direct_total", "gates.db_direct_focus_max",
+                "gates.db_direct_focus_files_max",
                 "granularity.console.grid", "granularity.console.caps",
                 "granularity.console.allowed_import_prefixes",
                 "granularity.renderer.grids", "granularity.renderer.caps",

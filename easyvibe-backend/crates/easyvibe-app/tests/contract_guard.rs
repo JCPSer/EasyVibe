@@ -150,7 +150,11 @@ const JSON_RATCHET: &[(&str, usize)] = &[
     ("routes/task.rs", 1),
     ("service/agent.rs", 7),
     ("service/chat.rs", 14),
-    ("service/map.rs", 7),
+    // c-arch-13 R2：service/map.rs 按流程拆分，内联 json! 随函数原样搬迁（聚合 7 不变，只改落点）。
+    ("service/map.rs", 3),
+    ("service/patrol.rs", 2),
+    ("service/reinduce_start.rs", 1),
+    ("service/submap.rs", 1),
     ("service/sessions.rs", 9),
     ("service/settings.rs", 8),
     ("service/task.rs", 13),

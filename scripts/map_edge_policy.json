@@ -325,8 +325,30 @@
     "retired_concerns": [
       "c-arch-2",
       "c-arch-12",
-      "c-map-toolchain-2"
-    ]
+      "c-map-toolchain-2",
+      "c-arch-13",
+      "c-server-api-3",
+      "c-server-api-4"
+    ],
+    "server_api_out_edges_max": 9,
+    "server_api_out_edges": [
+      "contract-foundation",
+      "persistence",
+      "map-domain",
+      "agent-runtime",
+      "event-bus",
+      "task-engine",
+      "easyvibe-git",
+      "easyvibe-pipeline",
+      "map-toolchain"
+    ],
+    "single_file_loc_max": 400,
+    "single_file_loc_caps": {
+      "easyvibe-backend/crates/easyvibe-app/src/service/chat.rs": 490
+    },
+    "db_direct_total": 91,
+    "db_direct_focus_max": 22,
+    "db_direct_focus_files_max": 10
   },
   "granularity": {
     "console": {

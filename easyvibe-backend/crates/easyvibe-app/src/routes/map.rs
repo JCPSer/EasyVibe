@@ -77,19 +77,19 @@ pub(crate) async fn get_progress(State(st): State<AppState>, Path(id): Path<Stri
 /// 此处把缺口变为能力：透明 agent 扫描模块文件产出子图，落盘 .easyvibe/modules/<id>.json，
 /// 与归纳共用写互斥/会话机制。读时拉取无需 watcher，产出后重新展开即见）
 pub(crate) async fn analyze_submap(State(st): State<AppState>, Path((id, module_id)): Path<(String, String)>) -> Result<Response, AppError> {
-    let session = crate::service::map::analyze_submap(&st, &id, &module_id).await?;
+    let session = crate::service::submap::analyze_submap(&st, &id, &module_id).await?;
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
 /// 触发重新归纳（写路径，M2-3）：spawn 外部 agent 按 v2.2 协议执行，
 /// 三通道（progress/growth.log/map.json）由 watcher 自动直播，前端无需轮询
 pub(crate) async fn start_reinduce(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let session = crate::service::map::start_reinduce(&st, &id, false).await?;
+    let session = crate::service::reinduce_start::start_reinduce(&st, &id, false).await?;
     Ok((axum::http::StatusCode::ACCEPTED, Json(session)).into_response())
 }
 
 /// 触发巡检（M2-4，实弹 #2 修订）：两条执行路径（Stub / Anthropic）编排在 service。
 pub(crate) async fn start_patrol(State(st): State<AppState>, Path(id): Path<String>) -> Result<Response, AppError> {
-    let body = crate::service::map::start_patrol(&st, &id).await?;
+    let body = crate::service::patrol::start_patrol(&st, &id).await?;
     Ok((axum::http::StatusCode::ACCEPTED, Json(body)).into_response())
 }

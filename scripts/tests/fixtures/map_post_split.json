@@ -2,13 +2,13 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-07T16:53:10+08:00",
+    "generated_at": "2026-10-07T20:42:50+08:00",
     "stats": {
-      "files_total": 400,
-      "files_covered": 400,
+      "files_total": 403,
+      "files_covered": 403,
       "coverage_ratio": 1.0,
-      "edges_derived": 54,
-      "edges_inferred": 8,
+      "edges_derived": 62,
+      "edges_inferred": 0,
       "retried_modules": 0
     }
   },
@@ -80,16 +80,20 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 84,
+        "score": 82,
         "coupling": "low",
         "complexity": "high",
-        "churn": "medium",
+        "churn": "high",
         "decay_flags": [
           "dead_script"
         ],
         "concerns": [
           {
             "id": "c-map-toolchain-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-map-toolchain-3",
             "severity": "high"
           }
         ]
@@ -105,7 +109,7 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 87,
+        "score": 88,
         "coupling": "high",
         "complexity": "low",
         "churn": "low",
@@ -133,7 +137,7 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 82,
+        "score": 80,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "high",
@@ -161,7 +165,7 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 84,
+        "score": 85,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "low",
@@ -192,7 +196,7 @@
         "map-domain"
       ],
       "health": {
-        "score": 79,
+        "score": 78,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "medium",
@@ -220,7 +224,7 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 85,
+        "score": 86,
         "coupling": "medium",
         "complexity": "low",
         "churn": "low",
@@ -249,7 +253,7 @@
         "persistence"
       ],
       "health": {
-        "score": 80,
+        "score": 76,
         "coupling": "medium",
         "complexity": "high",
         "churn": "high",
@@ -287,12 +291,21 @@
         "server-api"
       ],
       "health": {
-        "score": 74,
-        "coupling": "high",
+        "score": 76,
+        "coupling": "medium",
         "complexity": "medium",
-        "churn": "medium",
+        "churn": "low",
         "decay_flags": [],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-assembly-1",
+            "severity": "high"
+          },
+          {
+            "id": "c-assembly-2",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -315,19 +328,14 @@
         "map-toolchain"
       ],
       "health": {
-        "score": 79,
+        "score": 74,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
         "decay_flags": [
           "coupling_high"
         ],
-        "concerns": [
-          {
-            "id": "c-server-api-3",
-            "severity": "high"
-          }
-        ]
+        "concerns": []
       }
     },
     {
@@ -341,7 +349,7 @@
         "contract-foundation"
       ],
       "health": {
-        "score": 86,
+        "score": 87,
         "coupling": "low",
         "complexity": "low",
         "churn": "low",
@@ -372,7 +380,7 @@
         "event-bus"
       ],
       "health": {
-        "score": 86,
+        "score": 85,
         "coupling": "medium",
         "complexity": "low",
         "churn": "low",
@@ -424,10 +432,10 @@
         "renderer-api"
       ],
       "health": {
-        "score": 82,
-        "coupling": "medium",
+        "score": 84,
+        "coupling": "high",
         "complexity": "medium",
-        "churn": "low",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
@@ -476,7 +484,7 @@
       ],
       "dependencies": [],
       "health": {
-        "score": 82,
+        "score": 80,
         "coupling": "low",
         "complexity": "high",
         "churn": "high",
@@ -552,12 +560,13 @@
         "settings-ui"
       ],
       "health": {
-        "score": 72,
+        "score": 70,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
         "decay_flags": [
-          "coupling_high"
+          "coupling_high",
+          "responsibility_overlap"
         ],
         "concerns": [
           {
@@ -584,8 +593,8 @@
         "ui-kit"
       ],
       "health": {
-        "score": 85,
-        "coupling": "low",
+        "score": 86,
+        "coupling": "medium",
         "complexity": "low",
         "churn": "low",
         "decay_flags": [],
@@ -606,7 +615,7 @@
         "task-ui"
       ],
       "health": {
-        "score": 78,
+        "score": 79,
         "coupling": "medium",
         "complexity": "medium",
         "churn": "low",
@@ -697,10 +706,10 @@
         "map-toolchain"
       ],
       "health": {
-        "score": 85,
+        "score": 86,
         "coupling": "low",
         "complexity": "low",
-        "churn": "medium",
+        "churn": "low",
         "decay_flags": [],
         "concerns": [
           {
@@ -1152,11 +1161,23 @@
     }
   ],
   "health": {
-    "score": 85,
+    "score": 76,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
-    "decay_flags": [],
-    "concerns": []
+    "decay_flags": [
+      "coupling_high",
+      "responsibility_overlap"
+    ],
+    "concerns": [
+      {
+        "id": "c-arch-14",
+        "severity": "high"
+      },
+      {
+        "id": "c-arch-15",
+        "severity": "high"
+      }
+    ]
   }
 }

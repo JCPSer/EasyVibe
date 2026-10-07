@@ -2,7 +2,7 @@
 //!
 //! c-arch-10 R2/R3：自 `bootstrap.rs` 内联闭包**纯搬运**；唯一语义修订是 auto-patrol 的
 //! 触发入口由「手工构造 axum `State`/`Path` 调 routes handler」改为直接调
-//! `crate::service::map::start_patrol`，消除装配格 → routes 的层次倒置（触发条件与日志不变）。
+//! `crate::service::patrol::start_patrol`，消除装配格 → routes 的层次倒置（触发条件与日志不变）。
 
 use crate::state::AppState;
 use easyvibe_event_bus::queue::QueueState;
@@ -88,7 +88,7 @@ pub(crate) fn spawn_auto_patrol(state: AppState) {
                 let st2 = st_for_patrol.clone();
                 let repo_id = repo.id.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = crate::service::map::start_patrol(&st2, &repo_id).await {
+                    if let Err(e) = crate::service::patrol::start_patrol(&st2, &repo_id).await {
                         tracing::warn!("[auto-patrol] {} 触发失败: {:?}", repo_id, e);
                     }
                 });
