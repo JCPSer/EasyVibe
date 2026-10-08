@@ -210,25 +210,12 @@ def g5_problems(policy, fixture, derived):
     except map_policy.PolicyMissing as e:
         return ["G5 policy 缺字段（fail-closed）: %s" % e.dotted_key]
     pairs_n = esc.get("expected_module_pairs")
-    raw_n = esc.get("expected_raw_lines")
-    pseudo = esc.get("host_pseudo_edges")
     nonimp_reg = esc.get("expected_non_import_edges")
-    if not isinstance(pairs_n, int) or not isinstance(raw_n, int):
-        return ["G5 edge_scan.expected_raw_lines/expected_module_pairs 非整数（fail-closed）"]
-    if not isinstance(pseudo, list) or not pseudo:
-        return ["G5 edge_scan.host_pseudo_edges 非非空列表（fail-closed）"]
-    if not isinstance(nonimp_reg, list):
-        return ["G5 edge_scan.expected_non_import_edges 非列表（fail-closed）"]
-    # 口径自洽
-    if pairs_n != raw_n - len(pseudo):
-        problems.append("G5 口径不自洽：模块对 %d != 原始行 %d − 伪边 %d" % (pairs_n, raw_n, len(pseudo)))
-    try:
-        total = map_policy.expect_edges(policy)
-    except map_policy.PolicyMissing as e:
-        return ["G5 policy 缺字段（fail-closed）: %s" % e.dotted_key]
-    if pairs_n + len(nonimp_reg) != total:
-        problems.append("G5 口径不自洽：模块对 %d + 非 import %d != edges.expect_count %d"
-                        % (pairs_n, len(nonimp_reg), total))
+    if not isinstance(pairs_n, int) or not isinstance(nonimp_reg, list):
+        return ["G5 edge_scan.expected_module_pairs/expected_non_import_edges 形状非法（fail-closed）"]
+    # 口径自洽（P3-7 返修：单一实现 = map_policy.edge_scan_consistency，与 F0 不再各持一份算术）
+    for p in map_policy.edge_scan_consistency(policy):
+        problems.append("G5 %s" % p)
     # 复算的 import 模块对
     if len(derived) != pairs_n:
         problems.append("G5 复算 import 模块对 %d != 登记 %d（新边/消失边须显式重登记）"

@@ -120,7 +120,6 @@ def quantity_problems(policy, live):
     """K：note 不得含滑动窗口量的精确值（families 来自 policy，fail-closed）。"""
     try:
         rules = map_policy.prose_quantity_rules(policy)
-        ppk = map_policy.prose_provenance_keys(policy)
     except map_policy.PolicyMissing as e:
         return ["F 口径字段缺失（fail-closed）: %s" % e.dotted_key]
     if rules.get("mode") != "digits-forbidden":
@@ -152,7 +151,14 @@ _SHA = re.compile(r"HEAD\s+([0-9a-f]{7,40})")
 
 
 def provenance_problems(policy, live):
-    """L：叙事基准（HEAD <sha>）必须与 meta.provenance 同代（fail-closed）。"""
+    """L：叙事基准（HEAD <sha>）必须与 meta.provenance 同代（fail-closed）。
+
+    返修加固（P0-1）：
+      L-1 任何受判 prose 单元不得残留模板 token（`{{provenance.*}}`）——authoring 面持 token、
+          交付面必须已由生成期注入；残留即红（防「模板态被原样交付」）。
+      L-2 顶层 arch note **必须**至少含一个 `HEAD <sha>` 基准（占位符/漏写都会 fail-closed 红），
+          且与 `provenance.head_short` 一致——旧实现只匹配合法 sha，对 `HEAD %s` 静默通过。
+    """
     try:
         keys = map_policy.prose_provenance_keys(policy)
     except map_policy.PolicyMissing as e:
@@ -167,11 +173,19 @@ def provenance_problems(policy, live):
     head = prov.get("head_short") or ""
     if head and not re.fullmatch(r"[0-9a-f]{7,40}", head):
         problems.append("L meta.provenance.head_short 格式非法: %r" % head)
+    top_seen = False
     for owner, note in _prose_units(live):
-        for m in _SHA.finditer(note or ""):
+        for tok in map_policy.unresolved_prose_tokens(note):
+            problems.append("L 模板 token 未解析@%s: %s（生成期须注入 provenance）" % (owner, tok))
+        hits = list(_SHA.finditer(note or ""))
+        if owner == "arch":
+            top_seen = top_seen or bool(hits)
+        for m in hits:
             if m.group(1) != head:
                 problems.append("L 叙事基准与 provenance 不同代@%s: note=%s provenance=%s"
                                 % (owner, m.group(1), head or "<缺失>"))
+    if not top_seen:
+        problems.append("L 顶层 arch note 无 `HEAD <sha>` 叙事基准（fail-closed；占位符亦不豁免）")
     return problems
 
 
@@ -187,7 +201,8 @@ def projection_problems(policy, proj):
         keys = map_policy.prose_provenance_keys(policy)
     except map_policy.PolicyMissing as e:
         return ["F 摘要字段缺失（fail-closed）: %s" % e.dotted_key]
-    for key in ("notes_projection", "notes_sha256", "notes_sha256_by_module", "provenance"):
+    for key in ("notes_projection", "notes_sha256", "notes_sha256_by_module",
+                "provenance", "arch_concerns"):
         if key not in proj:
             problems.append("P 投影快照缺 %s（fail-closed）" % key)
     if proj.get("notes_projection") != want_proj:
@@ -213,6 +228,26 @@ def projection_problems(policy, proj):
         head = prov.get("head_short") or ""
         if head and not re.fullmatch(r"[0-9a-f]{7,40}", head):
             problems.append("P 投影 provenance.head_short 格式非法: %r" % head)
+    # P0-2 返修：架构级在册 concern 集纳入受控投影面——「架构级关注点在交付面消失」须必红。
+    try:
+        want_active = sorted(map_policy.active_concerns(policy))
+    except map_policy.PolicyMissing as e:
+        return problems + ["F 口径字段缺失（fail-closed）: %s" % e.dotted_key]
+    arch = proj.get("arch_concerns")
+    if not isinstance(arch, list) or not all(isinstance(x, dict) for x in arch):
+        problems.append("P 投影 arch_concerns 缺失/非对象列表（fail-closed）")
+    else:
+        ids = [x.get("id") for x in arch]
+        if any(not isinstance(i, str) or not i for i in ids):
+            problems.append("P 投影 arch_concerns 含空 id")
+        if len(set(ids)) != len(ids):
+            problems.append("P 投影 arch_concerns 存在重复 id")
+        if sorted(ids) != want_active:
+            problems.append("P 投影 arch_concerns 与 policy.gates.active_concerns 不同代: policy=%s snapshot=%s"
+                            % (want_active, sorted(ids)))
+        bad = sorted(x.get("id") for x in arch if x.get("severity") not in ("critical", "high"))
+        if bad:
+            problems.append("P 投影 arch_concerns 含非法 severity（仅 critical/high）: %s" % bad)
     bands = proj.get("churn_bands")
     if not isinstance(bands, dict) or not bands:
         problems.append("P 投影 churn_bands 缺失/为空（fail-closed）")
@@ -271,6 +306,7 @@ def run_check(map_path):
     report = {"ok": not problems, "map": os.path.relpath(map_path, REPO),
               "modules": len((live or {}).get("modules", [])),
               "arch_digest": map_policy.prose_arch_digest(live) if live else None,
+              "arch_concerns": [c.get("id") for c in ((live or {}).get("health") or {}).get("concerns", [])],
               "problems": problems}
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
@@ -310,11 +346,13 @@ _RULES = {"mode": "digits-forbidden",
 
 def _synth():
     live = {"meta": {"provenance": {"head_short": "abcdef0", "generated_at": "2026-10-08T11:23:07+08:00"}},
-            "health": {"review_note": "顶层叙事 A"},
+            "health": {"review_note": "顶层叙事 A（HEAD abcdef0 巡检）",
+                       "concerns": [{"id": "c-arch-99", "severity": "high"}]},
             "modules": [{"id": "m1", "notes": "格一注记", "health": {"review_note": "格一叙事"}},
                         {"id": "m2", "notes": "格二注记", "health": {"review_note": "格二叙事"}}]}
     policy = {"gates": {
         "retired_concerns": ["c-x-1"],
+        "active_concerns": ["c-arch-99"],
         "notes_sha256": map_policy.prose_arch_digest(live),
         "notes_sha256_by_module": {m["id"]: map_policy.prose_module_digest(m["id"], live)
                                    for m in live["modules"]},
@@ -357,7 +395,7 @@ def selfcheck():
         "; ".join(probs[:1]))
 
     messy = json.loads(json.dumps(live))
-    messy["health"]["review_note"] = "顶层叙事 A\r\n   \r\n"
+    messy["health"]["review_note"] = "顶层叙事 A（HEAD abcdef0 巡检）\r\n   \r\n"
     add("n6 规范化等价（CRLF/尾随空格/空行）→ 必绿",
         map_policy.prose_arch_digest(messy) == policy["gates"]["notes_sha256"])
 
@@ -445,6 +483,34 @@ def selfcheck():
     l_miss.pop("meta")
     add("l2 meta.provenance 缺失 → 必红（fail-closed）", bool(provenance_problems(policy, l_miss)))
 
+    # l3：顶层 note 无 `HEAD <sha>` 基准（占位符/漏写）→ 必红（P0-1 返修）
+    l_topless = json.loads(json.dumps(live))
+    l_topless["health"]["review_note"] = "顶层叙事无基准"
+    add("l3 顶层 note 无 HEAD 基准 → 必红（fail-closed）",
+        any("无 `HEAD <sha>`" in p for p in provenance_problems(policy, l_topless)),
+        "; ".join(provenance_problems(policy, l_topless)[:1]))
+
+    # l3b：顶层 note 回落到模板占位符（旧 `HEAD %s` 形态）→ 必红
+    l_placeholder = json.loads(json.dumps(live))
+    l_placeholder["health"]["review_note"] = "本轮巡检在 HEAD %s（工作区干净）复核全图"
+    add("l3b 顶层 note 为 `HEAD %s` 占位符 → 必红（P0-1 复现负例）",
+        bool(provenance_problems(policy, l_placeholder)),
+        "; ".join(provenance_problems(policy, l_placeholder)[:1]))
+
+    # l4：任何 prose 单元残留模板 token → 必红（未注入即交付）
+    l_token = json.loads(json.dumps(live))
+    l_token["modules"][0]["notes"] = "本模块条目在 HEAD {{provenance.head_short}} 逐条复核"
+    add("l4 残留模板 token（未注入）→ 必红",
+        any("模板 token 未解析" in p for p in provenance_problems(policy, l_token)),
+        "; ".join(provenance_problems(policy, l_token)[:1]))
+
+    # l5：模块 note 不含 HEAD 基准（顶层含）→ 必绿（不误伤短 note）
+    l_modless = json.loads(json.dumps(live))
+    l_modless["modules"][0]["notes"] = "c-arch-14 外提（归属重划，产品源码零改动）"
+    add("l5 模块 note 无基准（顶层有）→ 必绿（不误伤）",
+        not provenance_problems(policy, l_modless),
+        "; ".join(provenance_problems(policy, l_modless)[:1]))
+
     # ---- R1 投影快照 ↔ policy 同代 ----
     proj = {"notes_projection": {"fields": ["health.review_note", "notes"],
                                  "normalize": "eol+rstrip+collapse-blank+strip",
@@ -452,6 +518,7 @@ def selfcheck():
             "notes_sha256": policy["gates"]["notes_sha256"],
             "notes_sha256_by_module": policy["gates"]["notes_sha256_by_module"],
             "provenance": live["meta"]["provenance"],
+            "arch_concerns": live["health"]["concerns"],
             "churn_bands": {"m1": "high", "m2": "low"}}
     pol2 = json.loads(json.dumps(policy))
     pol2["gates"]["notes_projection"] = proj["notes_projection"]
@@ -474,11 +541,21 @@ def selfcheck():
     add("p2 投影 churn_bands 键集 != policy.modules → 必红",
         any("churn_bands" in p for p in projection_problems(pol2, proj_noband)))
 
+    # P0-2 返修：架构级在册 concern 集纳入投影受控面
+    proj_noconcern = json.loads(json.dumps(proj))
+    proj_noconcern.pop("arch_concerns")
+    add("n17 投影缺 arch_concerns → 必红（fail-closed）",
+        any("fail-closed" in p for p in projection_problems(pol2, proj_noconcern)))
+    proj_concern_drift = json.loads(json.dumps(proj))
+    proj_concern_drift["arch_concerns"] = []
+    add("n18 投影 arch_concerns 与 policy 不同代（架构级关注点消失）→ 必红",
+        any("active_concerns" in p for p in projection_problems(pol2, proj_concern_drift)))
+
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
         print("  %s %s  %s" % ("PASS" if passed else "FAIL", name, detail))
-    print("n1–n16 / k1–k5 / l0–l2 / p1–p2 %s" % ("全 PASS" if ok else "有 FAIL"))
+    print("n1–n18 / k1–k5 / l0–l5 / p1–p2 %s" % ("全 PASS" if ok else "有 FAIL"))
     return ok
 
 

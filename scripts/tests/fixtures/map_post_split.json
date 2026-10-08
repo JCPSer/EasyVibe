@@ -3,8 +3,8 @@
   "meta": {
     "repo": "EasyVibe",
     "stats": {
-      "files_total": 423,
-      "files_covered": 423,
+      "files_total": 424,
+      "files_covered": 424,
       "coverage_ratio": 1.0,
       "edges_derived": 67,
       "edges_inferred": 0,
@@ -1248,6 +1248,19 @@
     "decay_flags": [
       "coupling_high"
     ],
-    "concerns": []
+    "concerns": [
+      {
+        "id": "c-arch-18",
+        "severity": "high"
+      },
+      {
+        "id": "c-arch-19",
+        "severity": "high"
+      },
+      {
+        "id": "c-arch-20",
+        "severity": "high"
+      }
+    ]
   }
 }

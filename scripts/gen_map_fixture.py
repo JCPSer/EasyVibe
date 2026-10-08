@@ -94,11 +94,16 @@ def project_prose(policy, live):
         proj, arch, by_mod, keys = {}, None, {}, []
     prov = meta.get("provenance") or {}
     churn = {m.get("id"): (m.get("health") or {}).get("churn") for m in live.get("modules", [])}
+    # P0-2 返修：架构级在册 concern（id+severity）纳入受控投影面——「架构级关注点在交付面消失」必红。
+    arch_concerns = [{"id": c.get("id"), "severity": c.get("severity")}
+                     for c in (live.get("health") or {}).get("concerns", [])]
+    arch_concerns.sort(key=lambda c: str(c.get("id")))
     return {
         "version": "1.0",
         "notes_projection": proj,
         "notes_sha256": arch,
         "notes_sha256_by_module": {k: by_mod.get(k) for k in sorted(by_mod)},
+        "arch_concerns": arch_concerns,
         "churn_bands": {k: churn.get(k) for k in sorted(churn)},
         "provenance": {k: prov.get(k) for k in keys},
         "stats": {"files_total": stats.get("files_total"),

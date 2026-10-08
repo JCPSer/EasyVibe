@@ -300,6 +300,41 @@ def prose_provenance_keys(policy: dict) -> list:
     return _string_list(policy, "gates.prose_provenance_keys")
 
 
+# ---------------------------------------------------------------- prose 模板注入（c-arch-18 / R6②）
+# 唯一真值：authoring 面（parts/**）里的 prose 携带下列 token，**生成期**由 `meta.provenance` 填充；
+# 交付地图（live / fixture 投影）不得残留任何 token。CLI（run/easyvibe_map_cli.py）与本模块共用本实现，
+# 判据 L 亦据此 fail-closed（残留 token 即红）——杜绝「模板态被原样交付」。
+PROSE_TEMPLATE_TOKENS = ("{{provenance.head_short}}", "{{provenance.generated_at}}")
+
+
+def prose_template_tokens() -> tuple:
+    return PROSE_TEMPLATE_TOKENS
+
+
+def inject_prose(text, prov):
+    """把 prose 模板 token 按 `prov`（provenance 字典）填充（幂等；非字符串/无 prov 原样返回）。"""
+    if not isinstance(text, str) or not isinstance(prov, dict):
+        return text
+    for tok in PROSE_TEMPLATE_TOKENS:
+        key = tok[len("{{provenance."):-len("}}")]
+        text = text.replace(tok, str(prov.get(key, "")))
+    return text
+
+
+def unresolved_prose_tokens(text) -> list:
+    """返回文本中**残留**的模板 token（空列表 = 已解析）。"""
+    return [t for t in PROSE_TEMPLATE_TOKENS if t in (text or "")]
+
+
+def active_concerns(policy: dict) -> list:
+    """架构级**在册** concern id（`gates.active_concerns`）：交付地图 `health.concerns` 的唯一真值。
+
+    fail-closed：缺失/非字符串列表即抛 PolicyMissing。与 `retired_concerns`（已闭环、禁复现）互斥，
+    由 validate_policy F0 断言。「架构级关注点」因此从 prose 断言升级为受控事实（P0-2 复修）。
+    """
+    return _string_list(policy, "gates.active_concerns")
+
+
 def coupling_ratchet(policy: dict) -> dict:
     """耦合棘轮（`gates.coupling_ratchet`）：coupling_high 载体计数上限 + 枢纽出入度上限（只降不升）。"""
     return dict(require(policy, "gates.coupling_ratchet"))
@@ -313,6 +348,42 @@ def accepted_coupling(policy: dict) -> dict:
 def edge_scan(policy: dict) -> dict:
     """边扫描口径登记（`gates.edge_scan`）：命令 / 原始行数 / 宿主伪边 / 模块对数 / 非 import 边集。"""
     return dict(require(policy, "gates.edge_scan"))
+
+
+def edge_scan_consistency(policy: dict) -> list:
+    """`gates.edge_scan` 口径自洽（**唯一实现**，P3-7 返修：消除 g5 与 F0 的两份算术）。
+
+    返回问题消息列表（**不带前缀**，调用方按语境加 `F0`/`G5`）：
+      · pairs == raw_lines − len(host_pseudo_edges)
+      · pairs + len(non_import_edges) == edges.expect_count
+    形状非法（非整数/空列表/缺 expect_count）亦在此 fail-closed 报告。
+    """
+    problems = []
+    try:
+        esc = require(policy, "gates.edge_scan")
+    except PolicyMissing as e:
+        return ["%s" % e]
+    pairs_n = esc.get("expected_module_pairs")
+    raw_n = esc.get("expected_raw_lines")
+    pseudo = esc.get("host_pseudo_edges")
+    nonimp = esc.get("expected_non_import_edges")
+    if not isinstance(raw_n, int) or not isinstance(pairs_n, int):
+        problems.append("gates.edge_scan.expected_raw_lines/expected_module_pairs 须为整数")
+    if not isinstance(pseudo, list) or not pseudo:
+        problems.append("gates.edge_scan.host_pseudo_edges 须为非空列表")
+    if not isinstance(nonimp, list):
+        problems.append("gates.edge_scan.expected_non_import_edges 须为列表")
+    try:
+        expect_count = int(require(policy, "edges.expect_count"))
+    except (PolicyMissing, TypeError, ValueError):
+        problems.append("gates.edge_scan 口径不自洽：edges.expect_count 缺失/非整数")
+        expect_count = None
+    if isinstance(raw_n, int) and isinstance(pairs_n, int) and isinstance(pseudo, list):
+        if pairs_n != raw_n - len(pseudo):
+            problems.append("gates.edge_scan 口径不自洽：module_pairs != raw_lines - len(host_pseudo_edges)")
+        if isinstance(nonimp, list) and expect_count is not None and pairs_n + len(nonimp) != expect_count:
+            problems.append("gates.edge_scan 口径不自洽：module_pairs + non_import != edges.expect_count")
+    return problems
 
 
 def normalize_review_note(text) -> str:
@@ -413,7 +484,9 @@ def validate_policy(policy: dict) -> list:
                 # c-arch-18：计数型 prose 规则（R2）/ 叙事基准（R6）/ 耦合棘轮与已接受裁定（R5）/
                 # 边扫描口径（R8）——叙事与耦合趋势同样要有机器判据
                 "gates.prose_quantity_rules", "gates.prose_provenance_keys",
-                "gates.coupling_ratchet", "gates.accepted_coupling", "gates.edge_scan"):
+                "gates.coupling_ratchet", "gates.accepted_coupling", "gates.edge_scan",
+                # c-arch-18 返修（P0-2）：架构级在册 concern 集（交付地图 health.concerns 的唯一真值）
+                "gates.active_concerns"):
         try:
             require(policy, key)
         except PolicyMissing as e:
@@ -542,26 +615,27 @@ def validate_policy(policy: dict) -> list:
         ppk = None
     if isinstance(ppk, list) and not ppk:
         problems.append("F0 gates.prose_provenance_keys 须为非空列表")
+    # c-arch-18 返修（P0-2）：架构级在册 concern 集（`gates.active_concerns`）——形状断言 +
+    # 与 retired_concerns 互斥（同一 id 不得既在册又已闭环）。空列表合法（全部闭环时显式留空）。
     try:
-        esc = require(policy, "gates.edge_scan")
+        ac = require(policy, "gates.active_concerns")
     except PolicyMissing:
-        esc = None
-    if isinstance(esc, dict):
-        pairs_n = esc.get("expected_module_pairs")
-        raw_n = esc.get("expected_raw_lines")
-        pseudo = esc.get("host_pseudo_edges")
-        nonimp = esc.get("expected_non_import_edges")
-        if not isinstance(raw_n, int) or not isinstance(pairs_n, int):
-            problems.append("F0 gates.edge_scan.expected_raw_lines/expected_module_pairs 须为整数")
-        if not isinstance(pseudo, list) or not pseudo:
-            problems.append("F0 gates.edge_scan.host_pseudo_edges 须为非空列表")
-        if not isinstance(nonimp, list):
-            problems.append("F0 gates.edge_scan.expected_non_import_edges 须为列表")
-        elif isinstance(raw_n, int) and isinstance(pairs_n, int) and isinstance(pseudo, list):
-            if pairs_n != raw_n - len(pseudo):
-                problems.append("F0 gates.edge_scan 口径不自洽：module_pairs != raw_lines - len(host_pseudo_edges)")
-            if isinstance(nonimp, list) and pairs_n + len(nonimp) != int(require(policy, "edges.expect_count")):
-                problems.append("F0 gates.edge_scan 口径不自洽：module_pairs + non_import != edges.expect_count")
+        ac = None
+    if ac is not None and (not isinstance(ac, list)
+                           or any((not isinstance(v, str)) or not v.strip() for v in ac)):
+        problems.append("F0 gates.active_concerns 须为字符串列表（可为空）")
+    elif isinstance(ac, list):
+        if len(set(ac)) != len(ac):
+            problems.append("F0 gates.active_concerns 存在重复条目")
+        try:
+            both = sorted(set(ac) & set(require(policy, "gates.retired_concerns")))
+        except PolicyMissing:
+            both = []
+        if both:
+            problems.append("F0 gates.active_concerns 与 retired_concerns 重叠: %s" % both)
+    # P2-5/P3-7 返修：edge_scan 口径自洽走**唯一实现**（缺失字段不再抛异常，返回结构化问题）
+    for p in edge_scan_consistency(policy):
+        problems.append("F0 %s" % p)
     # c-arch-18 F0：耦合棘轮与已接受裁定（R5）——上限为正整数、载体 id 属图、裁定与棘轮逐分量互证
     try:
         rat = require(policy, "gates.coupling_ratchet")

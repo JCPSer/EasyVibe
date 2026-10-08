@@ -73,6 +73,23 @@ def head_short():
         return 'unknown'
     return r.stdout.strip()
 
+
+def head_committed_at():
+    """所复核 HEAD 的 committer date（ISO 8601 strict，确定性）。
+
+    叙事基准的**时间戳半边**（R6「双写」）：刻意取**提交时间**而非生成墙钟——同一 HEAD 反复
+    finalize 得到逐字节相同的 prose / provenance，故「重放 == 组装」与「重生成 == 已提交」在
+    二次重采下仍成立（可复检性），并给 churn 窗口终点一个确定的锚点。取不到时回落墙钟。
+    """
+    try:
+        r = subprocess.run(['git', 'show', '-s', '--format=%cI', 'HEAD'],
+                           cwd=REPO, capture_output=True, text=True)
+    except OSError:
+        return now_iso()
+    if r.returncode != 0 or not r.stdout.strip():
+        return now_iso()
+    return r.stdout.strip()
+
 def load_schema():
     with open(SCHEMA, encoding='utf-8') as f:
         return json.load(f)
@@ -364,7 +381,27 @@ def cmd_append_log():
     print(json.dumps({'ok': True, 'appended': len(lines)}, ensure_ascii=False))
 
 # ---------------------------------------------------------------- finalize
-def assemble():
+def _inject_health(h, prov):
+    """prose 模板注入（c-arch-18 / R6②）：把 health.review_note 里的 token 按 provenance 填充。
+
+    唯一实现 = scripts/map_policy.py::inject_prose（CLI 与守卫共用）。
+    """
+    h = dict(h or {})
+    if 'review_note' in h:
+        h['review_note'] = map_policy.inject_prose(h['review_note'], prov)
+    return h
+
+
+def _inject_module(m, prov):
+    """模块级 prose 注入：`notes` 与 `health.review_note`（authoring 面持 token，交付面持真值）。"""
+    m = dict(m)
+    m['notes'] = map_policy.inject_prose(m.get('notes'), prov)
+    if isinstance(m.get('health'), dict):
+        m['health'] = _inject_health(m['health'], prov)
+    return m
+
+
+def assemble(prov=None):
     order = json.load(open(ORDER, encoding='utf-8'))
     # R6/c-arch-12：退役边 id 的唯一真值来自 policy（不再读 untracked emit_order.json）
     try:
@@ -390,7 +427,7 @@ def assemble():
                 e.pop('direction_violation', None)
             edges.append(e)
         m['dependencies'] = [e['to'] for e in out]
-        modules.append(m)
+        modules.append(_inject_module(m, prov))
     layers = sorted(order['layers'], key=lambda l: l['order'])
     return layers, modules, edges
 
@@ -414,7 +451,7 @@ def apply_module_correction(modules, edges, mid, patch):
     m['dependencies'] = derived
 
 
-def replay_from_log():
+def replay_from_log(prov=None):
     lines = [json.loads(l) for l in open(GROWTH, encoding='utf-8') if l.strip()]
     layers, modules, edges, health = [], [], [], None
     for ev in lines:
@@ -426,9 +463,9 @@ def replay_from_log():
             out = m.pop('out_edges')
             m['dependencies'] = [e['to'] for e in out]   # ★ 派生：与 assemble 同源，不再信日志原值
             edges.extend(out)
-            modules.append(m)
+            modules.append(_inject_module(m, prov))      # ★ 与 assemble 同源注入（R6②）
         elif t == 'arch_health':
-            health = ev['health']
+            health = _inject_health(ev['health'], prov)
         elif t == 'correction':                          # 追加式校正（append-only，未知类型仍静默跳过）
             tgt = ev.get('target', '')
             if tgt == 'arch_health':
@@ -481,7 +518,10 @@ def gate_same_generation(policy, layers, modules, edges, health):
 def cmd_finalize():
     set_progress('assembling', percent=95)
     schema = load_schema()
-    layers, modules, edges = assemble()
+    # c-arch-18 / R6：叙事基准**生成期注入**（不再手写）——prose 里的模板 token 由本 provenance
+    # 填充；assemble 与 replay_from_log **同源同一份 prov**，故「重放 == 组装」在注入后仍逐字成立。
+    prov = {'head_short': head_short(), 'generated_at': head_committed_at()}
+    layers, modules, edges = assemble(prov)
     meta_new = json.load(open(META, encoding='utf-8')) if os.path.exists(META) else {}
     files = product_files()
     patterns = [p for m in modules for p in m['files']]
@@ -497,9 +537,10 @@ def cmd_finalize():
         'languages': meta_new.get('languages', []),
         'loc': meta_new.get('loc', 0),
         'map_freshness': 'fresh',
-        # c-arch-18 / R6：叙事基准**生成期注入**（不再手写）——prose 里的 `HEAD <sha>` 由判据 L
-        # 与 provenance.head_short 比对；prose 住在 gitignored 面，手工 sha 会在每次提交后过期。
-        'provenance': {'head_short': head_short(), 'generated_at': now_iso()},
+        # 叙事基准（R6）：head_short = 所复核 HEAD 短 sha；generated_at = 该 HEAD 的**提交时间**
+        # （确定性，非墙钟）——prose 的模板 token 由此填充，故同一 HEAD 反复 finalize 逐字节相同，
+        # 判据 L 与「重放 == 组装」「重生成 == 已提交」在二次重采下仍绿。meta.generated_at 另记墙钟。
+        'provenance': dict(prov),
         'stats': {
             'files_total': len(files),
             'files_covered': len(covered),
@@ -509,7 +550,7 @@ def cmd_finalize():
             'retried_modules': 0,
         },
     }
-    ah = json.load(open(os.path.join(PARTS, '_arch_health.json'), encoding='utf-8'))
+    ah = _inject_health(json.load(open(os.path.join(PARTS, '_arch_health.json'), encoding='utf-8')), prov)
     out = {'version': '1.0', 'meta': meta, 'layers': layers, 'modules': modules,
            'edges': edges, 'health': ah}
 
@@ -538,7 +579,7 @@ def cmd_finalize():
                          ensure_ascii=False))
         sys.exit(1)
     # replay compare
-    rl, rm, re_, rh = replay_from_log()
+    rl, rm, re_, rh = replay_from_log(prov)
     rl_sorted = sorted(rl, key=lambda l: l['order'])
     problems = []
     if rl_sorted != layers:

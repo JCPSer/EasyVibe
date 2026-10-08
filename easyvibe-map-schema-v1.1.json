@@ -105,6 +105,27 @@
             "stale"
           ],
           "description": "fresh=与代码一致；drifting=存在漂移；stale=已明显过期"
+        },
+        "provenance": {
+          "type": "object",
+          "title": "MapProvenance",
+          "additionalProperties": false,
+          "description": "叙事基准（生成期注入，非手写）：prose 中 HEAD <sha> 与生成时间戳的真值源；finalize 用本块填充 prose 模板 token",
+          "required": [
+            "head_short",
+            "generated_at"
+          ],
+          "properties": {
+            "head_short": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{7,40}$",
+              "description": "生成期 HEAD 短 sha（git rev-parse --short HEAD）"
+            },
+            "generated_at": {
+              "type": "string",
+              "description": "ISO 8601；生成期时间戳（与 prose 内基准同源）"
+            }
+          }
         }
       }
     },

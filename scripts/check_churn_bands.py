@@ -10,7 +10,8 @@ server-api / console-ui 读数全变）未写进任何守卫或 policy，同一�
   复算 = 在 `cli.product_files()` 的产品文件上按 `git log --since=<window_days>d --name-only`
          统计 (commit × file) 触点，按模块 `files` glob 聚合，套 `bands`（≥high → high；≥medium → medium；否则 low），
          再与 live map 各模块 `health.churn` 逐格比对。
-  取不到 git 时回落到 `.easyvibe/map/repo_profile.json::churn`（同一口径的快照），并在输出标注 source。
+  取不到 git 时回落到 `.easyvibe/map/repo_profile.json::churn`（同一口径的快照）；
+  窗口终点固化为生成期 `provenance.generated_at`（P3-8 返修），使复算在 CI 上确定、不随运行时刻滑移。
 
 诚实声明：churn 是**随时间漂移的量**，本判据比对的是**档位**（登记的离散字段）而非精确触点；
 精确触点只作输出参考（note 里的计数是描述性的，不进受控面）。
@@ -65,10 +66,18 @@ def _product_files(root):
     return set(cli.product_files())
 
 
-def _git_touches(root, window_days):
+def _git_touches(root, window_days, until=None):
+    """统计 92 天窗口内 (commit × file) 触点。
+
+    `until`（P3-8 返修）：把窗口**终点**固化为生成期 `provenance.generated_at`，使「投影档位 ↔ 复算」
+    在 CI 上**确定**（不随运行时刻滑移）——否则边界格（如 desktop-shell 32 / medium 线 30）会在
+    无代码变更时自然掉档而假红。缺 `until` 时退化为「截至现在」（旧行为）。
+    """
+    cmd = ["git", "log", "--since=%d.days" % window_days, "--name-only", "--pretty=format:"]
+    if until:
+        cmd.append("--until=%s" % until)
     try:
-        r = subprocess.run(["git", "log", "--since=%d.days" % window_days, "--name-only",
-                            "--pretty=format:"], cwd=root, capture_output=True, text=True)
+        r = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
     except OSError:
         return None
     if r.returncode != 0:
@@ -83,17 +92,36 @@ def _profile_touches(root):
     return collections.Counter(ch) if isinstance(ch, dict) else None
 
 
-def gather_touches(root, window_days):
-    """返回 (Counter(file→touches), source)；限定在产品文件上（口径的唯一可行解释）。"""
-    counter = _git_touches(root, window_days)
-    source = "git"
+def gather_touches(root, window_days, until=None):
+    """返回 Counter(file→touches) 或 None；限定在产品文件上（口径的唯一可行解释）。
+
+    `until` = 窗口终点（生成期 provenance.generated_at）；提供时复算**确定**（P3-8 返修）。
+    取不到 git 时回落 `.easyvibe/map/repo_profile.json::churn`（同口径快照）。
+    """
+    counter = _git_touches(root, window_days, until)
     if counter is None:
         counter = _profile_touches(root)
-        source = "profile"
     if counter is None:
-        return None, "none"
+        return None
     files = _product_files(root)
-    return collections.Counter({f: n for f, n in counter.items() if f in files}), source
+    return collections.Counter({f: n for f, n in counter.items() if f in files})
+
+
+def _asof_of(obj):
+    """取生成期时间戳（`meta.provenance.generated_at`）作为 churn 窗口终点；缺则 None。
+
+    `obj` 可以是 live map（`{meta:{...}}`）或叙事投影快照（顶层即 `provenance`）。
+    """
+    if not isinstance(obj, dict):
+        return None
+    prov = obj.get("provenance")
+    if not isinstance(prov, dict):
+        prov = (obj.get("meta") or {}).get("provenance")
+    if isinstance(prov, dict):
+        v = prov.get("generated_at")
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
 
 
 def module_touches(policy, counter):
@@ -114,9 +142,9 @@ def check(policy, live, root, touches=None):
     problems += basis_problems(basis)
     if problems:
         return problems, {}
-    source = "injected"
     if touches is None:
-        touches, source = gather_touches(root, int(basis["window_days"]))
+        asof = _asof_of(live)
+        touches = gather_touches(root, int(basis["window_days"]), asof)
         if touches is None:
             return ["P 无法取得 churn 触点（git 与 repo_profile 均不可用）"], {}
         touches = module_touches(policy, touches)
@@ -155,11 +183,10 @@ def projection_problems(policy, proj, fixture, touches=None):
     if problems:
         return problems
     if touches is None:
-        touches, source = gather_touches(REPO, int(basis["window_days"]))
+        asof = _asof_of(proj)
+        touches = gather_touches(REPO, int(basis["window_days"]), asof)
         if touches is not None:
             touches = module_touches(policy, touches)
-    else:
-        source = "injected"
     if touches is None:
         # Q1-丁退路：零 git 依赖——只比「投影档位 ↔ fixture health.churn」（两者同为受控面）
         registered = {m.get("id"): (m.get("health") or {}).get("churn") for m in fixture.get("modules", [])}
@@ -266,12 +293,21 @@ def selfcheck():
     probs7 = projection_problems(pol2, None, fx_ok, touches={"m1": 10})
     add("s9b 投影快照缺失（None）→ 必红（fail-closed）",
         any("fail-closed" in p for p in probs7), "; ".join(probs7[:1]))
+    # P3-8 返修：窗口终点固化（_asof_of 从 live / 投影两侧取 provenance.generated_at）
+    add("s10 live 侧 asof = meta.provenance.generated_at",
+        _asof_of({"meta": {"provenance": {"generated_at": "2026-10-08T11:23:07+08:00"}}})
+        == "2026-10-08T11:23:07+08:00")
+    add("s10b 投影侧 asof = provenance.generated_at",
+        _asof_of({"provenance": {"generated_at": "2026-10-08T11:23:07+08:00"}})
+        == "2026-10-08T11:23:07+08:00")
+    add("s10c 无 provenance → asof=None（退回截至现在）",
+        _asof_of({"meta": {}}) is None and _asof_of(None) is None)
 
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
         print("  %s %s  %s" % ("PASS" if passed else "FAIL", name, detail))
-    print("s1–s9b %s" % ("全 PASS" if ok else "有 FAIL"))
+    print("s1–s10c %s" % ("全 PASS" if ok else "有 FAIL"))
     return ok
 
 

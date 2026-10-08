@@ -91,6 +91,16 @@ def policy_vs_map(policy, m, label):
     hit = sorted(present & pretired_ids)
     if hit:
         problems.append("F1[%s] 退役边 id 仍在图内: %s" % (label, hit))
+    # 架构级在册 concern 集（P0-2）：交付地图顶层 health.concerns 的 id 集 == policy.gates.active_concerns。
+    # 这使「架构级关注点在交付面消失」（live=[] 而 authoring=3）成为红——不再依赖人工纪律。
+    try:
+        pactive = set(map_policy.active_concerns(policy))
+    except map_policy.PolicyMissing as e:
+        return ["F1[%s] policy 缺字段: %s" % (label, e.dotted_key)]
+    top_ids = _concern_ids(m.get("health"))
+    if top_ids != pactive:
+        problems.append("F1[%s] 顶层在册 concern 集不等: policy=%s map=%s"
+                        % (label, sorted(pactive), sorted(top_ids)))
     # concern ∩ retired_concerns（顶层 + 逐模块）
     top_hit = _concern_ids(m.get("health")) & pretired_concerns
     if top_hit:
@@ -162,6 +172,12 @@ def selfcheck():
     ]:
         probs = policy_vs_map(_inject(policy, kind), fx, "fixture")
         results.append((name, bool(probs), "; ".join(probs[:1])))
+    # inj6（P0-2 返修）：交付地图顶层 health.concerns 与 policy.gates.active_concerns 不一致 → 必红
+    fx_empty = copy.deepcopy(fx)
+    fx_empty.setdefault("health", {})["concerns"] = []
+    probs6 = policy_vs_map(policy, fx_empty, "fixture")
+    results.append(("inj6 顶层在册 concern 集清空（架构级关注点消失）→ 必红",
+                    bool(probs6), "; ".join(probs6[:1])))
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
