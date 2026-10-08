@@ -2,7 +2,7 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-08T10:08:26+08:00",
+    "generated_at": "2026-10-08T10:44:24+08:00",
     "stats": {
       "files_total": 421,
       "files_covered": 421,
@@ -140,7 +140,7 @@
         "score": 80,
         "coupling": "medium",
         "complexity": "medium",
-        "churn": "high",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
@@ -323,14 +323,19 @@
         "map-toolchain"
       ],
       "health": {
-        "score": 74,
+        "score": 76,
         "coupling": "high",
         "complexity": "high",
         "churn": "high",
         "decay_flags": [
           "coupling_high"
         ],
-        "concerns": []
+        "concerns": [
+          {
+            "id": "c-server-api-5",
+            "severity": "high"
+          }
+        ]
       }
     },
     {
@@ -482,7 +487,7 @@
         "score": 80,
         "coupling": "low",
         "complexity": "high",
-        "churn": "high",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
@@ -667,15 +672,11 @@
         "score": 79,
         "coupling": "medium",
         "complexity": "medium",
-        "churn": "low",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {
             "id": "c-chat-ui-2",
-            "severity": "high"
-          },
-          {
-            "id": "c-chat-ui-3",
             "severity": "high"
           }
         ]
@@ -702,10 +703,6 @@
         "concerns": [
           {
             "id": "c-task-ui-2",
-            "severity": "high"
-          },
-          {
-            "id": "c-task-ui-3",
             "severity": "high"
           }
         ]
@@ -758,7 +755,7 @@
         "score": 86,
         "coupling": "low",
         "complexity": "low",
-        "churn": "low",
+        "churn": "medium",
         "decay_flags": [],
         "concerns": [
           {

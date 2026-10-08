@@ -258,6 +258,74 @@ def is_test_face(policy: dict, path) -> bool:
     return any(glob_match(p, g) for g in test_face_globs(policy))
 
 
+# ---------------------------------------------------------------- 叙事（prose）投影与摘要（c-arch-17 / R3）
+def churn_basis(policy: dict) -> dict:
+    """churn 口径登记（`gates.churn_basis`）：files / metric / window_days / bands / source。
+
+    fail-closed：缺失即抛 PolicyMissing——避免「口径只活在 note 措辞里」，下轮再判歧义（Δ9/R5）。
+    """
+    return dict(require(policy, "gates.churn_basis"))
+
+
+def notes_projection(policy: dict) -> dict:
+    """prose 摘要投影口径（`gates.notes_projection`）：fields / normalize / algo。"""
+    return dict(require(policy, "gates.notes_projection"))
+
+
+def notes_sha256(policy: dict) -> str:
+    """顶层 arch note 的规范化摘要（`gates.notes_sha256`）。"""
+    return str(require(policy, "gates.notes_sha256"))
+
+
+def notes_sha256_by_module(policy: dict) -> dict:
+    """逐模块 review_note 的规范化摘要（`gates.notes_sha256_by_module`）：键集 == policy.modules。"""
+    return dict(require(policy, "gates.notes_sha256_by_module"))
+
+
+def normalize_review_note(text) -> str:
+    """prose 摘要前规范化：EOL→\\n ▸ 逐行 rstrip ▸ 连续空行折叠为单空行 ▸ 首尾 strip。
+
+    目的：只对**实质文本变化**敏感，CRLF / 尾随空格 / 空行差异不得造成「假漂移」。
+    """
+    s = "" if text is None else str(text)
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    out, blank = [], False
+    for line in s.split("\n"):
+        line = line.rstrip()
+        if line == "":
+            if out and not blank:
+                out.append("")
+            blank = True
+        else:
+            out.append(line)
+            blank = False
+    return "\n".join(out).strip()
+
+
+def _canonical_sha(obj) -> str:
+    """规范化 JSON（sort_keys + 固定分隔符）的 sha256 —— 与 edge_fingerprint 同构，跨平台稳定。"""
+    text = json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def prose_arch_digest(live_map: dict) -> str:
+    """顶层 arch note 的摘要（口径见 notes_projection）。"""
+    note = ((live_map or {}).get("health") or {}).get("review_note")
+    return _canonical_sha({"arch": normalize_review_note(note)})
+
+
+def prose_module_digest(module_id: str, live_map: dict) -> str:
+    """某模块 review_note 的摘要（含模块 id，防跨格串扰）。"""
+    for m in (live_map or {}).get("modules", []):
+        if m.get("id") == module_id:
+            return _canonical_sha({"module": module_id,
+                                   "note": normalize_review_note((m.get("health") or {}).get("review_note"))})
+    return _canonical_sha({"module": module_id, "note": None})
+
+
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
 def validate_policy(policy: dict) -> list:
     """policy 自洽性（F0）：返回问题列表，空 = 自洽。字段缺失亦记为问题。"""
     problems = []
@@ -299,7 +367,10 @@ def validate_policy(policy: dict) -> list:
                 "granularity.console.grids", "granularity.console.caps",
                 "granularity.console.import_prefixes_by_grid",
                 "granularity.renderer.grids", "granularity.renderer.caps",
-                "granularity.host.probe_owner"):
+                "granularity.host.probe_owner",
+                # c-arch-17：churn 口径（R5）与 prose 摘要闸门（R3）——叙事面同样有受控落点与判据
+                "gates.churn_basis", "gates.notes_projection",
+                "gates.notes_sha256", "gates.notes_sha256_by_module"):
         try:
             require(policy, key)
         except PolicyMissing as e:
@@ -352,4 +423,51 @@ def validate_policy(policy: dict) -> list:
         strings = [v for v in tff if isinstance(v, str)]
         if len(set(strings)) != len(strings):
             problems.append("F0 gates.test_face_files 存在重复条目")
+    # c-arch-17 F0：churn 口径（R5）与 prose 摘要闸门（R3）的形状断言（CI 可跑；缺失即已由上面登记）
+    try:
+        cb = require(policy, "gates.churn_basis")
+    except PolicyMissing:
+        cb = None
+    if isinstance(cb, dict):
+        for k in ("files", "metric", "window_days", "bands", "source"):
+            if k not in cb:
+                problems.append("F0 gates.churn_basis 缺 %s" % k)
+        bands = cb.get("bands")
+        if not isinstance(bands, dict) or not isinstance(bands.get("high"), int) \
+                or not isinstance(bands.get("medium"), int):
+            problems.append("F0 gates.churn_basis.bands 须为 {high:int, medium:int}")
+        elif bands["high"] <= bands["medium"]:
+            problems.append("F0 gates.churn_basis.bands 非单调（high <= medium）")
+        if not isinstance(cb.get("window_days"), int) or cb.get("window_days", 0) <= 0:
+            problems.append("F0 gates.churn_basis.window_days 须为正整数")
+        for k in ("files", "metric", "source"):
+            if not isinstance(cb.get(k), str) or not cb.get(k, "").strip():
+                problems.append("F0 gates.churn_basis.%s 须为非空字符串" % k)
+    try:
+        nproj = require(policy, "gates.notes_projection")
+    except PolicyMissing:
+        nproj = None
+    if isinstance(nproj, dict):
+        flds = nproj.get("fields")
+        if not isinstance(flds, list) or not flds or not all(isinstance(x, str) and x.strip() for x in flds):
+            problems.append("F0 gates.notes_projection.fields 须为非空字符串列表")
+        for k in ("normalize", "algo"):
+            if not isinstance(nproj.get(k), str) or not nproj.get(k, "").strip():
+                problems.append("F0 gates.notes_projection.%s 须为非空字符串" % k)
+    try:
+        nsha = require(policy, "gates.notes_sha256")
+        nbym = require(policy, "gates.notes_sha256_by_module")
+    except PolicyMissing:
+        nsha = nbym = None
+    if nsha is not None and (not isinstance(nsha, str) or not _HEX64.match(nsha)):
+        problems.append("F0 gates.notes_sha256 须为 64 位小写 hex（fail-closed）")
+    if isinstance(nbym, dict):
+        if set(nbym.keys()) != mset:
+            problems.append("F0 gates.notes_sha256_by_module 键集 != modules: policy-only=%s module-only=%s"
+                            % (sorted(set(nbym) - mset), sorted(mset - set(nbym))))
+        bad = sorted(k for k, v in nbym.items() if not isinstance(v, str) or not _HEX64.match(v))
+        if bad:
+            problems.append("F0 gates.notes_sha256_by_module 非 64hex 的格: %s" % bad)
+    elif nbym is not None:
+        problems.append("F0 gates.notes_sha256_by_module 须为 dict")
     return problems

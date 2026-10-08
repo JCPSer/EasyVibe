@@ -557,36 +557,15 @@ def cmd_finalize():
                      ensure_ascii=False))
 
 # ---------------------------------------------------------------- normalize-edges（R1/R5 迁移）
-ARCH_REVIEW_NOTE = (
-    "本轮整体结构面较上轮（18 模块 / 9 层 / 48 边）显著收敛：模拟量归并为 14 模块 31 边，"
-    "后端 0 组双向依赖、前端 0 组双向依赖，全库 direction_violation 边仅剩 1 条"
-    "（renderer-core → desktop-shell，即 host.ts 门面，已被 archGuard 断言组 6 白名单化）。"
-    "上轮点名的宿主能力越界已整体闭环——src/runtime/host.ts 成为全库唯一 import '@tauri-apps/*' 处，"
-    "console-ui 的 AppShell / useBackendConnection / lib/updater / runtime/notify 四处直连全部收敛，"
-    "console-ui → desktop-shell 边因此摘除。"
-    "原 c-arch-2 所述『三模块环』经复核为 6 模块 SCC"
-    "（chat-ui/console-ui/desktop-shell/map-canvas/renderer-core/task-ui），由单边割集 {e20, e31} 各自支撑"
-    "（非唯一钥匙边）；本轮按策略选择剥离构建期托管边 e31"
-    "（保 c-arch-3 受控适配点 e20，理由是 e20 为全库唯一宿主能力落点），SCC 归零、全库成 DAG。"
-    "宿主门面 e20 仍为受控 direction_violation（白名单在册、不再参与任何环）。"
-    "余下架构级问题集中在 server-api（c-arch-1 双向枢纽与业务规则内驻）与前端组件归属（c-arch-3），"
-    "由后续轮次处理。分数 74 低于模块均分：模块级都健康，但架构级的耦合集中是模块分看不见的。"
-)
-
-
-def correct_arch_health(ah):
-    """R5：闭环 c-arch-2 + 订正 review_note（幂等）。"""
-    out = dict(ah)
-    out['review_note'] = ARCH_REVIEW_NOTE
-    out['concerns'] = [c for c in ah.get('concerns', []) if c.get('id') != 'c-arch-2']
-    return out
-
-
 def cmd_normalize_edges():
     """把命中策略 must_drop 的存量依赖边按「同一事务」剥离（幂等，fail-closed，可回滚）。
 
     步骤：备份 → parts/*.edges.json 过滤 → parts/*.json dependencies 派生 →
           retired_edge_ids 合并 → growth.log append correction → 重跑 finalize。
+
+    叙事单源（INV-5）：arch note 的唯一写入方是 live map 的 `parts/_arch_health.json`；
+    本命令**不再**写回任何 arch review note——旧代的硬编码常量与写回路径已删除，
+    使任何迁移路径都不可能再用旧叙事覆盖已纠正的 note。
     """
     order = json.load(open(ORDER, encoding='utf-8'))
     policy = map_policy.load_policy(REPO)
@@ -620,7 +599,6 @@ def cmd_normalize_edges():
     for ch in changes:
         backup(os.path.join(PARTS, ch['mid'] + '.edges.json'))
         backup(os.path.join(PARTS, ch['mid'] + '.json'))
-    backup(os.path.join(PARTS, '_arch_health.json'))
     backup(ORDER)
     try:
         # [1] 过滤出边（保持相对顺序，不重排）+ [2] dependencies 派生
@@ -631,24 +609,19 @@ def cmd_normalize_edges():
             m = json.load(open(mp, encoding='utf-8'))
             m['dependencies'] = [e['to'] for e in ch['kept']]
             write_json_atomic(mp, m)
-        # [2b] 健康块写回（finalize 的 rh != ah 直读本文件）
-        ahp = os.path.join(PARTS, '_arch_health.json')
-        ah_new = correct_arch_health(json.load(open(ahp, encoding='utf-8')))
-        write_json_atomic(ahp, ah_new)
+        # [2b] ✂ 已删除：arch note 写回（INV-5 叙事单源）——不再有可覆盖已纠正 note 的路径
         # [3] 退役 id 合并（永久腾空，INV-4）
         retired = sorted(set(order.get('retired_edge_ids', [])) |
                          {e['id'] for ch in changes for e in ch['removed'] if e.get('id')})
         order['retired_edge_ids'] = retired
         write_json_atomic(ORDER, order)
-        # [4] append-only correction
+        # [4] append-only correction（仅 module 面；arch note 不再入日志——见 [2b]）
         corr = []
         for ch in changes:
             corr.append({'type': 'correction', 'target': 'module:' + ch['mid'],
                          'patch': {'out_edges': ch['kept'],
                                    'dependencies': [e['to'] for e in ch['kept']]},
                          'reason': 'R1 build-time hosting is not a dependency edge'})
-        corr.append({'type': 'correction', 'target': 'arch_health', 'patch': ah_new,
-                     'reason': 'R5 c-arch-2 corrected'})
         append_lines(corr)
         # [5] 重生成 map.json（内部自带 R4 关口 A/B/C + replay 校验）
         cmd_finalize()

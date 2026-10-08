@@ -360,7 +360,9 @@
       "c-console-ui-5",
       "c-arch-15",
       "c-task-engine-3",
-      "c-arch-16"
+      "c-arch-16",
+      "c-chat-ui-3",
+      "c-task-ui-3"
     ],
     "server_api_out_edges_max": 7,
     "server_api_out_edges": [
@@ -451,7 +453,53 @@
       "easyvibe-renderer/src/runtime/__tests__/terminalBuffer.test.ts",
       "easyvibe-renderer/src/shared/logic/__tests__/layout.test.ts",
       "scripts/tests/asset_guard_selfcheck.sh"
-    ]
+    ],
+    "churn_basis": {
+      "files": "cli.product_files()",
+      "metric": "commit×file touches",
+      "window_days": 92,
+      "bands": {
+        "high": 80,
+        "medium": 30
+      },
+      "aggregation": "sum(touch(f) for f in module.files glob hits)",
+      "source": "git log --since=<window_days>d --name-only"
+    },
+    "notes_projection": {
+      "fields": [
+        "health.review_note"
+      ],
+      "normalize": "eol+rstrip+collapse-blank+strip",
+      "algo": "sha256+canonical-json"
+    },
+    "notes_sha256": "9050f333196c1178bf84cbb1aa19c923a8f0136645ff985bd808af07b8f17310",
+    "notes_sha256_by_module": {
+      "map-toolchain": "2c3e5f4d852aebe9243132548e0045a1d702517940a05fd6920da358a538f782",
+      "contract-foundation": "5d0cdb13f513e44a81257cd6e6d77b13886def5845e50923559206ba8f7e7e56",
+      "persistence": "7e8e2ffab7b146286ac35bae92575071f887273b4b4adbaa89119660813ed779",
+      "map-domain": "05d109140980a62fc47dacab80bb4a39d303ef457516d56130bb0a14aa383db2",
+      "agent-runtime": "6f9e7d5bbf53f7f1f740dc3f967f72612feb50b24ca93e210303a04524d96c73",
+      "event-bus": "6b6e38aae9993a5f283271547b3dcfa612601e1ad8f6842f549fc06226c3db25",
+      "task-engine": "fc17aba341b58afa263377ea6c325ce94d1adb0c355092bd32e160467fb7dafb",
+      "assembly": "6053ad0e8177335f23a9d8e723324f3fb33af349b4f0b41239715da79a087e52",
+      "server-api": "97b6690b3c6e720e88057d6285571f1e1d29a7691636aec894801f251fb6ec74",
+      "easyvibe-git": "6ae02b95f3dc413a6ce1560869e119a72ff0f99af286602e038ae89b46b8620f",
+      "easyvibe-pipeline": "a1b45195a21688e3f71942a479bea2735c4deddd08390c6375cf3b5b3b5db1d1",
+      "renderer-shared": "f4d10cd9a2755588a1965f2418bd1f3f46d7d8b92a66ff713d8611147cc8d138",
+      "renderer-runtime": "45e3b675affac204db660258845fe04d6d27a83c199b5742f821c13020420ef4",
+      "renderer-api": "880854459545329cbd78452f3bf2dc98be7752cfdc50896879d87be62755d041",
+      "ui-kit": "16d1a3f77c5e00be39572d633c4686b1b27e9d45c30b9b69583e0f20652aa98f",
+      "health-report": "0c6b23e55cb92df3720e9a4d9b7abd3d89074ee5abbda0221ccc74a9983cc049",
+      "onboarding-state": "b16b453ead817dc22906511585a5a4a19b8968e6a8f7d0978d96797309e9f981",
+      "app-updater": "d92e911004267460e2e46270ce3a2952e55bf3f0f251aa0512edddca58c257f2",
+      "host-adapter": "bc8a476c62640f0382dab8a827377003e07e09c3ecd2539b5d0068fb0bc64696",
+      "console-ui": "22980ebd84d154223a7af4551d472f284f95fbdb0c7e0c506a9f5a74331eb010",
+      "settings-ui": "b3621840b29afa45a328acc139862e54cab78e5fc10cc7410a8834a65944c5a4",
+      "chat-ui": "b9fe1b512f947eef0c2abf091884140e40e529ae1db431f56c3708be869541ef",
+      "task-ui": "5f2c67e684bcdea74272a718b2dba0e182694e2a4c2c0809188444ddf37f61ba",
+      "map-canvas": "7cc70dac365ce8104603719db6577ed9359b5c71aeec6e1e21882d3bce0cecb5",
+      "desktop-shell": "16f511e6304a650bab7e7c2a77895d5aaba86831c30f7d2c87862b431030063f"
+    }
   },
   "granularity": {
     "console": {
