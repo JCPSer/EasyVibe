@@ -32,6 +32,12 @@
      I11a 守恒律：`easyvibe_db::` 出现总数 == gates.db_direct_total
      I11b 集中度：单文件最大 == gates.db_direct_focus_max（**双边全等**，不是 ≤）
      I11c 落点面：有直连的文件数 == gates.db_direct_focus_files_max
+  I13 组合根（assembly）唯一性 + 出边登记（c-arch-16 R5）：
+     I13a 图内 `{e | e.to == "assembly"} == ∅`（唯一组合根，无上游；违反即红）
+     I13b `gates.assembly_out_edges` 存在且非空（缺失/空 ⇒ fail-closed 红），
+          且 `{e.to | e.from == "assembly"} == set(登记)`（允许增长但禁静默）
+     I13c 语义（注释）：判据对象是「**边界/编排层**（server-api）的出边数」，不是「谁度数居首」；
+          组合根知道全部后端域是正当的（这正是它的唯一职责）。
 
 口径（c-arch-13 R11）：
   · 「非测试面直连」= 产品文件 − `tests/` − `task_exec*` − `assembly/**`；**焦点面** = `db_ports/**` + `state.rs`。
@@ -79,28 +85,38 @@ LOC_MIN_DROP = 1000
 # c-arch-13（2026-10-07）第三次重登记（走 ΔS2 降级支）：db_ports.rs → db_ports/** 目录化
 #   （10 文件 = +9）与 service/{patrol,submap,reinduce_start}.rs（+3）⇒ files 34 → 46。
 #   同轮必落对冲判据 I9（出边数）/ I10（单文件 ≤400）/ I11a·b·c（直连集中度），否则不受理。
+# c-arch-16（2026-10-08）第四次重登记：db_ports 内 task_engine.rs 按端口域拆 4 文件
+#   （task_engine_approval.rs / session_attribution.rs / agent_slot.rs，纯搬家零语义新增）
+#   ⇒ files 46 → 49；loc 为 src 落齐后由 inventory() 实测（含端口注入面上增加的字段/端口 trait）。
+#   同批必落对冲判据 I11b·c 重登记（15 / 13）与 R6 单端口域断言，否则不受理。
 C7_RATCHET = {
-    "files": 46,
-    # loc = 拆分后实测（主 agent 校正；与 inventory() 真值一致，只降不升）。
-    "loc": 6547,
+    "files": 49,
+    # loc = 实测（2026-10-08；同事 agent 落齐 13 db_ports 文件 + assembly/ports.rs 后由 inventory() 数准）。
+    # ★ 待主 agent 复核：同事 agent 仍在同工作区改 src/**，loc 可能再漂移；R8 终局刷新时以 inventory() 复测为准。
+    "loc": 6702,
     "_registered_at": "2026-10-07",
     "_registered_additions": [
         "c-arch-10：bootstrap.rs 外提 assembly/**（server-api −1 文件），装配格另立 C7_ASSEMBLY_RATCHET",
         "c-arch-13：为分散单点新增 3 个文件（service/{patrol,submap,reinduce_start}.rs）；"
         "db_ports.rs → db_ports/** 目录化 +9（10 − 1）⇒ 合计 files 34 → 46；"
         "loc 增量仅为 mod 声明 / 文件头 / import 开销（零逻辑新增），由主 agent 实测校正。",
-        "对冲判据（本轮同时落地，否则不受理）：I9 出边数上界、I10 单文件 ≤400、I11a/b/c 直连集中度。",
+        "c-arch-16：db_ports/task_engine.rs 按端口域拆 4（+3 文件）⇒ files 46 → 49；"
+        "loc 为落盘后实测值（含端口注入面：GitPort/RepoPipelinePort + AppState 字段）。",
+        "对冲判据（本轮同时落地，否则不受理）：I9 出边数上界、I10 单文件 ≤400、I11a/b/c 直连集中度、"
+        "I13 组合根唯一性/出边登记、R6 db_ports 单端口域断言。",
     ],
 }
 C7_RATCHET_MAX_FILES = C7_RATCHET["files"]
 C7_RATCHET_MAX_LOC = C7_RATCHET["loc"]
 
 # c-arch-10：装配格（assembly/**）棘轮——本轮**新登记**的一格（非抬升既有棘轮）。只降不升。
+# c-arch-16：新增 ports.rs（GitAdapter + PipelineAdapter 两个端口适配器）⇒ files 5 → 6；
+#   loc 为落盘后实测值（原 746 为 5 文件实测和）。
 C7_ASSEMBLY_RATCHET = {
-    "files": 5,
-    "loc": 746,
+    "files": 6,
+    "loc": 857,
     "_registered_at": "2026-10-07",
-    "_files": ["mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs"],
+    "_files": ["mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs", "ports.rs"],
 }
 
 
@@ -344,6 +360,9 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=Non
     db_focus_max = None
     db_focus_file_count = None
     db_by_file = None
+    # c-arch-16 R5（I13）：组合根出边登记 / 入边（唯一性）
+    assembly_out_edges = None
+    assembly_in_edges = None
 
     if gates is not None:
         sa_mod = mods_by_id.get("server-api") or {}
@@ -418,6 +437,28 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=Non
                 problems.append("I11c 有直连的焦点面文件数 %d ≠ 登记 %d（落点面漂移）"
                                 % (db_focus_file_count, want_files))
 
+        # I13（c-arch-16 R5）：组合根唯一性 + 组合根出边逐条登记
+        #   I13a 图内无指向 assembly 的入边（组合根无上游；违反即红）
+        #   I13b gates.assembly_out_edges 存在且非空（缺失/空 ⇒ fail-closed），
+        #        且 assembly 出边目标集 == 登记集（允许增长但禁静默，新增/替换须显式重登记）
+        #   I13c 语义（注释，非可执行判据）：判据对象是「**边界/编排层**（server-api）的出边数」，
+        #        不是「谁度数居首」。组合根知道全部后端域是正当的（这正是它的唯一职责）；
+        #        console-ui 出边 11 是 c-arch-14 已登记的呈现层代价。
+        #        与 verify_map_acyclic D（dependencies == 出边目标集）职责不同：D 管图内自洽，
+        #        I13b 管与 policy 登记表同代——两者叠加，缺一不可。
+        assembly_in = [e for e in m.get("edges", []) if e.get("to") == "assembly"]
+        assembly_out_edges = sorted({e.get("to") for e in m.get("edges", []) if e.get("from") == "assembly"})
+        assembly_in_edges = sorted(e.get("from") for e in assembly_in)
+        if assembly_in:
+            problems.append("I13a 组合根 assembly 出现入边 %s——唯一组合根被破坏（无上游）"
+                            % assembly_in_edges)
+        declared_asm = gates.get("assembly_out_edges")
+        if not declared_asm:
+            problems.append("I13b gates.assembly_out_edges 缺失/为空（fail-closed；组合根出边须逐条登记）")
+        elif set(assembly_out_edges) != set(declared_asm):
+            problems.append("I13b 组合根出边集漂移：实际 %s ≠ 登记 %s（允许增长但禁静默，须显式重登记）"
+                            % (assembly_out_edges, sorted(declared_asm)))
+
     report = {
         "server_api_files": len(files), "server_api_files_baseline": baseline["server_api_files"],
         "server_api_loc": loc, "server_api_loc_baseline": baseline["server_api_loc"],
@@ -445,6 +486,9 @@ def check(m, files, loc, baseline, present, mods, emit_modules=None, ratchet=Non
         "db_direct_focus_max": db_focus_max,
         "db_direct_focus_files_max": db_focus_file_count,
         "db_direct_by_file": db_by_file,
+        # c-arch-16 R5：组合根（assembly）出边登记集（I13b）与入边（I13a，期望空）
+        "assembly_out_edges": assembly_out_edges,
+        "assembly_in_edges": assembly_in_edges,
     }
     return problems, report
 
@@ -484,9 +528,11 @@ def synthetic_case(present=(), mods=(), coverage=1.0, concerns=(), decay=None, c
 
 # ---- c-arch-13：I9/I10/I11 的合成输入（不读仓库、不依赖 live map）----
 # 合成 gates：出边登记 1 条（与合成图一致）、单文件上限 400（无棘轮）、焦点面 91/22/10。
+# c-arch-16 R5：再补组合根出边登记 1 条（与合成图一致；I13b 正例所需）。
 BASE_GATES = {
     "server_api_out_edges_max": 1,
     "server_api_out_edges": ["contract-foundation"],
+    "assembly_out_edges": ["contract-foundation"],
     "single_file_loc_max": 400,
     "single_file_loc_caps": {},
     "db_direct_total": 91,
@@ -503,7 +549,11 @@ def focus_ok():
 
 def gates_case(gates, edges_extra=None, files=None, loc_by_file=None,
                db_focus=None, test_fixtures=()):
-    """selfcheck 合成输入（I9/I10/I11）：合成图 + gates 注入，可逐面注入漂移。"""
+    """selfcheck 合成输入（I9/I10/I11/I13）：合成图 + gates 注入，可逐面注入漂移。
+
+    c-arch-16 R5：合成图纳入组合根 `assembly`（零入边）与其一条出边（与 BASE_GATES 登记一致），
+    使 I13a/I13b 的正负例不依赖仓库状态。
+    """
     modules = [
         {"id": "server-api", "layer": "application", "dependencies": ["contract-foundation"],
          "health": {"decay_flags": [], "concerns": []}},
@@ -511,10 +561,15 @@ def gates_case(gates, edges_extra=None, files=None, loc_by_file=None,
          "health": {"decay_flags": [], "concerns": []}},
         {"id": "easyvibe-pipeline", "layer": "application", "dependencies": [],
          "health": {"decay_flags": [], "concerns": []}},
+        {"id": "assembly", "layer": "application", "dependencies": ["contract-foundation"],
+         "health": {"decay_flags": [], "concerns": []}},
         {"id": "contract-foundation", "layer": "foundation", "dependencies": [],
          "health": {"decay_flags": [], "concerns": []}},
     ]
-    edges = [{"id": "e1", "from": "server-api", "to": "contract-foundation"}]
+    edges = [
+        {"id": "e1", "from": "server-api", "to": "contract-foundation"},
+        {"id": "eA", "from": "assembly", "to": "contract-foundation"},
+    ]
     if edges_extra:
         edges.append(edges_extra)
     m = {"layers": [{"id": "application", "order": 3}, {"id": "foundation", "order": 7}],
@@ -606,6 +661,28 @@ def selfcheck():
     results.append(("N18 文件数超 C7 棘轮 → I2 必红",
                     any(x.startswith("I2") for x in p18), "; ".join(p18[:1])))
 
+    # ---- c-arch-16 R5：I13 组合根唯一性 + 出边登记 自检 ----
+    # N19 I13a 负例（注入 X → assembly 入边；组合根出现上游）
+    p19, _ = gates_case(BASE_GATES,
+                        edges_extra={"id": "eBad", "from": "easyvibe-git", "to": "assembly"})
+    results.append(("N19 注入 X → assembly 入边 → I13a 必红",
+                    any(x.startswith("I13a") for x in p19), "; ".join(p19[:1])))
+    # N20 I13b 负例（登记集漂移：多登记一个图内不存在的目标）
+    g20 = dict(BASE_GATES)
+    g20["assembly_out_edges"] = ["contract-foundation", "map-domain"]
+    p20, _ = gates_case(g20)
+    results.append(("N20 组合根出边集与登记漂移 → I13b 必红",
+                    any(x.startswith("I13b") for x in p20), "; ".join(p20[:1])))
+    # N21 I13 正例（一致的 assembly 出边 + 零入边）
+    p21, _ = gates_case(BASE_GATES)
+    results.append(("N21 一致组合根出边 + 零入边 → 必绿",
+                    not any(x.startswith("I13") for x in p21), "; ".join(p21[:1])))
+    # N22 I13b fail-closed（gates.assembly_out_edges 缺失）
+    g22 = {k: v for k, v in BASE_GATES.items() if k != "assembly_out_edges"}
+    p22, _ = gates_case(g22)
+    results.append(("N22 gates.assembly_out_edges 缺失 → I13b 必红（fail-closed）",
+                    any(x.startswith("I13b") for x in p22), "; ".join(p22[:1])))
+
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
@@ -614,7 +691,7 @@ def selfcheck():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="c-arch-1 边界/领域分离验收（I1–I11）")
+    ap = argparse.ArgumentParser(description="c-arch-1 边界/领域分离验收（I1–I13）")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--map", default=None)
@@ -622,7 +699,7 @@ def main():
     args = ap.parse_args()
     root = os.path.abspath(args.root)
     if args.selfcheck:
-        print("▶ 边界/领域分离验收自检 N1–N18")
+        print("▶ 边界/领域分离验收自检 N1–N22")
         return 0 if selfcheck() else 1
 
     with open(os.path.join(root, BASELINE_FIXTURE), encoding="utf-8") as fh:

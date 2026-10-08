@@ -9,10 +9,12 @@
 
 mod bridges;
 mod logging;
+mod ports;
 mod schedulers;
 pub(crate) mod static_host;
 
 use crate::router::build_router;
+use crate::service::repo::RepoPipelinePort;
 use crate::state::{data_dir, AppState, LlmMode};
 use crate::task_exec;
 use easyvibe_api_types::SessionStatusChanged;
@@ -39,9 +41,15 @@ pub(crate) async fn run() {
     // M3-3/S1-3：harness 装载上移到管线挂载之前——spawn_repo_pipeline 注入点 #8 需要持有它
     let harness = Arc::new(tokio::sync::RwLock::new(task_exec::load_harness().expect("harness 装载失败")));
 
+    // c-arch-16 R3（ΔS4）：管线端口适配器**在启动循环前构造一次**——启动期（AppState 尚不存在）
+    // 直接复用该 Arc，运行期经 `build_state` 注入**同一 Arc** 落 `AppState.pipeline_port`；
+    // 启动顺序不变量（harness 装载 → 管线挂载 → 建库 → build_state）保持不变。
+    let pipeline_port: Arc<dyn RepoPipelinePort> = Arc::new(ports::PipelineAdapter);
+
     // 每个仓库一个地图 watcher，变更翻译为总线事件（启动挂载与 POST /api/repos 共用同一管线）
     for r in repos {
         crate::service::repo::spawn_pipeline(
+            &pipeline_port,
             map_service.clone(),
             event_bus.clone(),
             session_manager.clone(),
@@ -119,6 +127,7 @@ pub(crate) async fn run() {
         event_bus,
         pool: database.pool().clone(),
         harness,
+        pipeline_port,
     })
     .await;
 
@@ -158,6 +167,8 @@ struct BuildInputs {
     event_bus: broadcast::Sender<BusEvent>,
     pool: easyvibe_db::sqlx::SqlitePool,
     harness: Arc<tokio::sync::RwLock<task_exec::Harness>>,
+    /// c-arch-16 R3（ΔS4）：启动循环已复用过的**同一**管线端口 Arc，原样落 `AppState`。
+    pipeline_port: Arc<dyn RepoPipelinePort>,
 }
 
 /// 构造 `AppState`（含执行引擎装配、重启收尸、pending 重入队、保鲜定时器）。
@@ -229,5 +240,8 @@ async fn build_state(i: BuildInputs) -> AppState {
         agent_test: Default::default(),
         agent_test_lock: Default::default(),
         session_queue: Default::default(),
+        // c-arch-16 R2/R3：两个出边端口适配器（唯一 easyvibe-git / easyvibe-pipeline 落点）。
+        git: Arc::new(ports::GitAdapter),
+        pipeline_port: i.pipeline_port,
     }
 }

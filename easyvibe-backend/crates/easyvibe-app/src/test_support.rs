@@ -1,13 +1,71 @@
 //! main.rs 内联测试的共享夹具（仅测试编译）。
 
 use easyvibe_api_types::SessionStatusChanged;
-use easyvibe_map::{repo_from_root, MapService};
+use easyvibe_common::ApiError;
+use easyvibe_event_bus::BusEvent;
+use easyvibe_map::{repo_from_root, MapService, Repo};
 use easyvibe_session::SessionManager;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use crate::service::git::GitPort;
+use crate::service::repo::RepoPipelinePort;
 use crate::state::*;
 use crate::task_exec;
 use tower::ServiceExt;
+
+/// c-arch-16 R2：`GitPort` 测试替身——读操作返回空对象（合理空值），
+/// `commit_all` 返回短 hash 占位；写操作一律 `Ok(())`，不触碰真实工作树。
+pub(crate) struct FakeGitPort;
+
+#[async_trait::async_trait]
+impl GitPort for FakeGitPort {
+    async fn status(&self, _root: &std::path::Path) -> Result<serde_json::Value, ApiError> {
+        Ok(serde_json::json!({}))
+    }
+    async fn log(&self, _root: &std::path::Path, _limit: i64) -> Result<serde_json::Value, ApiError> {
+        Ok(serde_json::json!([]))
+    }
+    async fn show_commit(&self, _root: &std::path::Path, _hash: &str) -> Result<serde_json::Value, ApiError> {
+        Ok(serde_json::json!({}))
+    }
+    async fn diff(&self, _root: &std::path::Path, _path: &str, _staged: bool) -> Result<serde_json::Value, ApiError> {
+        Ok(serde_json::json!({}))
+    }
+    async fn commit_all(&self, _root: &std::path::Path, _message: &str) -> Result<String, ApiError> {
+        Ok("0000000".into())
+    }
+    async fn pull(&self, _root: &std::path::Path) -> Result<(), ApiError> {
+        Ok(())
+    }
+    async fn push(&self, _root: &std::path::Path) -> Result<(), ApiError> {
+        Ok(())
+    }
+    async fn discard(&self, _root: &std::path::Path, _path: &str) -> Result<(), ApiError> {
+        Ok(())
+    }
+    async fn discard_all(&self, _root: &std::path::Path) -> Result<(), ApiError> {
+        Ok(())
+    }
+}
+
+/// c-arch-16 R3：`RepoPipelinePort` 测试替身——spawn 空实现（测试不拉真实 watcher 管线）。
+pub(crate) struct FakePipelinePort;
+
+#[async_trait::async_trait]
+impl RepoPipelinePort for FakePipelinePort {
+    async fn spawn(
+        &self,
+        _repo: Repo,
+        _map_service: Arc<MapService>,
+        _event_bus: broadcast::Sender<BusEvent>,
+        _session_manager: Arc<SessionManager>,
+        _prompt_template: String,
+        _auto_init_suffix: String,
+        _agent_command: String,
+        _agent_args: Vec<String>,
+    ) {
+    }
+}
 
     /// 样例地图（与 ai-agent 测试同构：validate_minimum 可通过，stub 问答可命中）
     pub(crate) const SAMPLE_MAP: &str = r#"{
@@ -99,6 +157,8 @@ use tower::ServiceExt;
             agent_test: Default::default(),
             agent_test_lock: Default::default(),
             session_queue: Default::default(),
+            git: Arc::new(FakeGitPort),
+            pipeline_port: Arc::new(FakePipelinePort),
         }
     }
 

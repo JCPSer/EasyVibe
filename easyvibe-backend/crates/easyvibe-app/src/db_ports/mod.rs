@@ -8,16 +8,20 @@
 //! `pub(crate) use` 再导出**保持全等**，service/**、routes/** 调用点零改动。
 //! 每个适配器文件只承载**单一端口域**，改任一表字段无需通读整个组合根。
 
+mod agent_slot;
 mod approval;
 mod conversation;
 mod dto;
 mod event;
 mod health;
 mod repo;
+mod session_attribution;
 mod settings;
 mod task;
 mod task_engine;
+mod task_engine_approval;
 
+pub(crate) use agent_slot::*;
 pub(crate) use approval::*;
 pub(crate) use conversation::*;
 pub(crate) use dto::*;
@@ -26,7 +30,14 @@ pub(crate) use health::*;
 pub(crate) use repo::*;
 pub(crate) use settings::*;
 pub(crate) use task::*;
+// c-arch-16 R7：以下三个单域文件只含 trait impl（无可 `pub` 再导出的项）——保留 glob 与
+// 其余域同形、维持 `crate::db_ports::<Port|DTO>` 路径全等语义；无可导出项故显式放行该 lint。
+#[allow(unused_imports)]
+pub(crate) use session_attribution::*;
+#[allow(unused_imports)]
 pub(crate) use task_engine::*;
+#[allow(unused_imports)]
+pub(crate) use task_engine_approval::*;
 
 // ============================================================================
 // c-arch-10 R4：service/** 编排层消费的持久化端口（**扩展 trait**）与本地 DTO

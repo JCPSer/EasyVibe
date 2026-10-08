@@ -14,10 +14,39 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
+/// 仓库 watcher 管线出边端口（c-arch-16 R3）：把 easyvibe-pipeline crate 的
+/// `spawn_repo_pipeline` 唯一调用点收成端口，适配器落装配格（`assembly/ports.rs`）——
+/// 本 trait 是 server-api 侧的**唯一**消费面，故 server-api 零 easyvibe-pipeline 路径字面量。
+///
+/// **无返回值**：语义与现行 `tokio::spawn(spawn_repo_pipeline(...))` 逐条一致（spawn 即返回）。
+/// 8 个具名入参的顺序与 `spawn_repo_pipeline` 形参**逐条对齐**，无 pipeline 类型外泄
+/// （参数全是 map / session / event-bus 类型与 String）。
+///
+/// **生命周期约束（ΔS4）**：本端口有**两个生命周期不同**的调用点——启动期（`assembly::run`，
+/// `AppState` 尚不存在）与运行期（`add_repo`，持 `&AppState`）。故适配器须在装配格内**先构造一次**，
+/// 启动循环直接复用该 `Arc`，并把**同一 `Arc`** 注入 `AppState.pipeline_port`；启动顺序不变量
+/// （harness 装载 → 管线挂载 → 建库 → build_state）保持不变。
+#[async_trait::async_trait]
+pub trait RepoPipelinePort: Send + Sync + 'static {
+    async fn spawn(
+        &self,
+        repo: Repo,
+        map_service: Arc<MapService>,
+        event_bus: broadcast::Sender<BusEvent>,
+        session_manager: Arc<SessionManager>,
+        prompt_template: String,
+        auto_init_suffix: String,
+        agent_command: String,
+        agent_args: Vec<String>,
+    );
+}
+
 /// D5：单仓库 watcher 管线挂载（启动装配与 `POST /api/repos` 共用）。
-/// 注入点 #8：spawn 前读锁解析 custom global 块，以**显式字符串**传给 `easyvibe-pipeline`，
+/// 注入点 #8：spawn 前读锁解析 custom global 块，以**显式字符串**传给 easyvibe-pipeline crate，
 /// 从而切断 `easyvibe-pipeline → task-engine` 反向依赖（pipeline 不感知 Harness 类型）。
+/// 参数解析（harness 读锁）留在 server-api 侧；领域调用经 `port` 走装配格适配器。
 pub(crate) async fn spawn_pipeline(
+    port: &Arc<dyn RepoPipelinePort>,
     map_service: Arc<MapService>,
     event_bus: broadcast::Sender<BusEvent>,
     session_manager: Arc<SessionManager>,
@@ -28,7 +57,7 @@ pub(crate) async fn spawn_pipeline(
     repo: Repo,
 ) {
     let auto_init_suffix = crate::task_exec::custom_block(&harness.read().await.custom_neutral.global);
-    tokio::spawn(easyvibe_pipeline::spawn_repo_pipeline(
+    port.spawn(
         repo,
         map_service,
         event_bus,
@@ -37,7 +66,8 @@ pub(crate) async fn spawn_pipeline(
         auto_init_suffix,
         agent_command,
         agent_args,
-    ));
+    )
+    .await;
 }
 
 /// 注销返回（HTTP `data` 形状：`{wiped}`，与原内联字面量逐字段一致）。
@@ -61,6 +91,7 @@ pub(crate) async fn add_repo(st: &AppState, path: &str) -> Result<RepoInfo, ApiE
         write_desktop_repos(&roots);
     }
     spawn_pipeline(
+        &st.pipeline_port,
         st.map_service.clone(),
         st.event_bus.clone(),
         st.session_manager.clone(),

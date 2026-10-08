@@ -12,6 +12,8 @@ use easyvibe_session::SessionManager;
 use easyvibe_ai_agent::agent_conf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use crate::service::git::GitPort;
+use crate::service::repo::RepoPipelinePort;
 use crate::task_exec;
 use easyvibe_db::SettingsRepository as _;
 
@@ -65,6 +67,12 @@ pub struct AppState {
     /// （S4：重启后首帧 GET 自然清态，无需额外机制）。队列状态机在 easyvibe-event-bus，
     /// 执行入口经 `impl QueueHost for AppState` 回调注入（解环：不再 crate:: 反向引用）。
     pub session_queue: Arc<QueueState>,
+    /// c-arch-16 R2：git 域出边端口（适配器 = 装配格 `assembly/ports.rs::GitAdapter`）。
+    /// 边界层只见本端口，零 easyvibe-git 字面量 ⇒ `server-api → easyvibe-git` 出边消失。
+    pub git: Arc<dyn GitPort>,
+    /// c-arch-16 R3：仓库 watcher 管线出边端口（适配器 = 装配格 `assembly/ports.rs::PipelineAdapter`）。
+    /// 启动期与运行期**共用同一 `Arc`**（ΔS4）；见 `service::repo::RepoPipelinePort` 注释。
+    pub pipeline_port: Arc<dyn RepoPipelinePort>,
 }
 
 /// LLM 客户端来源：stub（零成本验证）或 anthropic（真实 API）

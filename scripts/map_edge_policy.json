@@ -337,7 +337,7 @@
   ],
   "edges": {
     "expect_count": 67,
-    "sha256": "f469c6a977a4d20b85f6517591173148c55b21af9d9860909a1e3b75e1d3babd",
+    "sha256": "dbaf0a384fd0433c0ad361e45f5f60fa89a0028067db8839b1495be8532e5a32",
     "retired_ids": [
       "e31"
     ]
@@ -359,10 +359,20 @@
       "c-arch-14",
       "c-console-ui-5",
       "c-arch-15",
-      "c-task-engine-3"
+      "c-task-engine-3",
+      "c-arch-16"
     ],
-    "server_api_out_edges_max": 9,
+    "server_api_out_edges_max": 7,
     "server_api_out_edges": [
+      "contract-foundation",
+      "persistence",
+      "map-domain",
+      "agent-runtime",
+      "event-bus",
+      "task-engine",
+      "map-toolchain"
+    ],
+    "assembly_out_edges": [
       "contract-foundation",
       "persistence",
       "map-domain",
@@ -371,15 +381,15 @@
       "task-engine",
       "easyvibe-git",
       "easyvibe-pipeline",
-      "map-toolchain"
+      "server-api"
     ],
     "single_file_loc_max": 400,
     "single_file_loc_caps": {
       "easyvibe-backend/crates/easyvibe-app/src/service/chat.rs": 490
     },
     "db_direct_total": 91,
-    "db_direct_focus_max": 22,
-    "db_direct_focus_files_max": 10,
+    "db_direct_focus_max": 15,
+    "db_direct_focus_files_max": 13,
     "test_face_globs": [
       "**/*.spec.js",
       "**/*.spec.mjs",

@@ -2,10 +2,10 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-08T01:31:06+08:00",
+    "generated_at": "2026-10-08T10:08:26+08:00",
     "stats": {
-      "files_total": 417,
-      "files_covered": 417,
+      "files_total": 421,
+      "files_covered": 421,
       "coverage_ratio": 1.0,
       "edges_derived": 67,
       "edges_inferred": 0,
@@ -283,7 +283,9 @@
         "agent-runtime",
         "event-bus",
         "task-engine",
-        "server-api"
+        "server-api",
+        "easyvibe-git",
+        "easyvibe-pipeline"
       ],
       "health": {
         "score": 76,
@@ -318,8 +320,6 @@
         "agent-runtime",
         "event-bus",
         "task-engine",
-        "easyvibe-git",
-        "easyvibe-pipeline",
         "map-toolchain"
       ],
       "health": {
@@ -895,59 +895,59 @@
     },
     {
       "id": "e18",
+      "from": "assembly",
+      "to": "easyvibe-git",
+      "type": "import",
+      "strength": "normal"
+    },
+    {
+      "id": "e19",
+      "from": "assembly",
+      "to": "easyvibe-pipeline",
+      "type": "call",
+      "strength": "normal"
+    },
+    {
+      "id": "e20",
       "from": "server-api",
       "to": "contract-foundation",
       "type": "import",
       "strength": "strong"
     },
     {
-      "id": "e19",
+      "id": "e21",
       "from": "server-api",
       "to": "persistence",
       "type": "db",
       "strength": "strong"
     },
     {
-      "id": "e20",
+      "id": "e22",
       "from": "server-api",
       "to": "map-domain",
       "type": "call",
       "strength": "strong"
     },
     {
-      "id": "e21",
+      "id": "e23",
       "from": "server-api",
       "to": "agent-runtime",
       "type": "call",
       "strength": "strong"
     },
     {
-      "id": "e22",
+      "id": "e24",
       "from": "server-api",
       "to": "event-bus",
       "type": "event",
       "strength": "strong"
     },
     {
-      "id": "e23",
+      "id": "e25",
       "from": "server-api",
       "to": "task-engine",
       "type": "call",
       "strength": "strong"
-    },
-    {
-      "id": "e24",
-      "from": "server-api",
-      "to": "easyvibe-git",
-      "type": "import",
-      "strength": "normal"
-    },
-    {
-      "id": "e25",
-      "from": "server-api",
-      "to": "easyvibe-pipeline",
-      "type": "call",
-      "strength": "normal"
     },
     {
       "id": "e26",
@@ -1245,18 +1245,13 @@
     }
   ],
   "health": {
-    "score": 76,
+    "score": 80,
     "coupling": "medium",
     "complexity": "high",
     "churn": "high",
     "decay_flags": [
       "coupling_high"
     ],
-    "concerns": [
-      {
-        "id": "c-arch-16",
-        "severity": "high"
-      }
-    ]
+    "concerns": []
   }
 }

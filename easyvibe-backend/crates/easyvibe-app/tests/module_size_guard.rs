@@ -612,7 +612,10 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     // —— c-arch-13：db_ports.rs → db_ports/** 目录化（按端口域拆分；10 文件，含 mod 门面）——
     (SrcClass::CompositionRoot, "db_ports/mod.rs", "c-arch-7/c-arch-10 组合根：按端口域拆分…（mod 声明 + pub(crate) use 再导出 + 零 dyn 论证）"),
     (SrcClass::CompositionRoot, "db_ports/dto.rs", "c-arch-13：按端口域拆分…（本地 DTO 五型 + to_message_rows）"),
-    (SrcClass::CompositionRoot, "db_ports/task_engine.rs", "c-arch-13：按端口域拆分…（into_record + TaskStore/ApprovalStore/SessionAttribution/AgentSlotResolver）"),
+    (SrcClass::CompositionRoot, "db_ports/task_engine.rs", "c-arch-16 R7：按端口域拆分…（TaskStore → TaskRepository/TaskRow/SqliteTaskRepository，单域）"),
+    (SrcClass::CompositionRoot, "db_ports/task_engine_approval.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（ApprovalStore → ApprovalRepository/ApprovalRow/SqliteApprovalRepository；纯搬家零语义改动）"),
+    (SrcClass::CompositionRoot, "db_ports/session_attribution.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（SessionAttribution → AgentSessionRepo；纯搬家零语义改动）"),
+    (SrcClass::CompositionRoot, "db_ports/agent_slot.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（AgentSlotResolver → SqliteSettingsRepository；另引 easyvibe_ai_agent::agent_conf，非 easyvibe_db 面）"),
     (SrcClass::CompositionRoot, "db_ports/task.rs", "c-arch-13：按端口域拆分…（TaskPort）"),
     (SrcClass::CompositionRoot, "db_ports/settings.rs", "c-arch-13：按端口域拆分…（SettingsPort）"),
     (SrcClass::CompositionRoot, "db_ports/approval.rs", "c-arch-13：按端口域拆分…（ApprovalPort）"),
@@ -626,6 +629,7 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::Assembly, "assembly/bridges.rs", "c-arch-10：5 条落库/直播桥（自 bootstrap.rs 内联闭包搬运）"),
     (SrcClass::Assembly, "assembly/schedulers.rs", "c-arch-10：定时器/启动探测/队列宿主（自 bootstrap.rs 内联闭包搬运）"),
     (SrcClass::Assembly, "assembly/static_host.rs", "c-arch-10：静态回落 + 内嵌 dist + MIME（自 router.rs/assets.rs 外提）"),
+    (SrcClass::Assembly, "assembly/ports.rs", "c-arch-16：组合根端口适配器（GitPort/PipelinePort 的 impl；承接 server-api 外移的两条单点出边，唯一 easyvibe_git/easyvibe_pipeline 字面量面）"),
     // —— HTTP/WS 边界 ——
     (SrcClass::HttpBoundary, "ws.rs", "命题点名：WS 面（事件名契约由 contract_guard 冻结）"),
     (SrcClass::HttpBoundary, "assets.rs", "命题未点名：受管资产解析（编译期 include 清单 + 启动期读取），零业务规则"),
@@ -663,14 +667,18 @@ const APP_SRC_CLASSES: &[SrcClass] = &[
 ];
 
 /// c-arch-10：装配格文件集（显式冻结；磁盘 `src/assembly/*.rs` 必须与之全等）。
+/// c-arch-16：新增 `ports.rs`（GitAdapter + PipelineAdapter 两个端口适配器）⇒ 5 → 6。
 const ASSEMBLY_FROZEN_FILES: &[&str] = &[
-    "mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs",
+    "mod.rs", "logging.rs", "bridges.rs", "schedulers.rs", "static_host.rs", "ports.rs",
 ];
 
 /// c-arch-13：组合根适配器族文件集（显式冻结；磁盘 `src/db_ports/*.rs` 必须与之全等）。
+/// c-arch-16 R7：`task_engine.rs` 按端口域拆 4 ⇒ 10 → 13（`task_engine.rs` 保留，新增
+/// `task_engine_approval.rs` / `session_attribution.rs` / `agent_slot.rs`）。
 const DB_PORTS_FROZEN_FILES: &[&str] = &[
-    "mod.rs", "dto.rs", "task_engine.rs", "task.rs", "settings.rs",
-    "approval.rs", "conversation.rs", "health.rs", "event.rs", "repo.rs",
+    "mod.rs", "dto.rs", "task_engine.rs", "task_engine_approval.rs", "session_attribution.rs",
+    "agent_slot.rs", "task.rs", "settings.rs", "approval.rs", "conversation.rs", "health.rs",
+    "event.rs", "repo.rs",
 ];
 
 /// 顶层文件集（由归属表派生：非 task-engine 切片、非装配格项——后两者按目录单独登记）。

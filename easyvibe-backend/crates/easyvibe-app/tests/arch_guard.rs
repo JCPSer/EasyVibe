@@ -427,10 +427,13 @@ const DB_DIRECT_LITERAL: &str = "easyvibe_db::";
 const DB_DIRECT_TOTAL: usize = 91;
 
 /// 焦点面**单文件最大**直连数（双边全等：登记值必须 == 实测最大值，不是 `<=`）。
-const DB_DIRECT_FOCUS_MAX: usize = 22;
+/// c-arch-16 R7：`task_engine.rs` 按 4 端口域拆分后，单文件最大 22 → **15**（`conversation.rs` 15
+/// 反超，`task_engine.rs` 降至 14）；总数守恒仍 91（I11a 不变），落点文件数 10 → 13。
+const DB_DIRECT_FOCUS_MAX: usize = 15;
 
 /// 焦点面**有直连的落点文件数**（双边全等）。
-const DB_DIRECT_FOCUS_FILES_MAX: usize = 10;
+/// c-arch-16 R7：db_ports 拆 4（10 → 13 文件）。登记 13（13 为本次登记值，只允许在拆分方向变化）。
+const DB_DIRECT_FOCUS_FILES_MAX: usize = 13;
 
 /// c-arch-10 R4：service/** 去注释后零 `easyvibe_db`、零具体仓储类型名。
 #[test]
@@ -521,5 +524,94 @@ fn only_main_declares_assembly_module() {
             !code.contains(ASSEMBLY_REVERSE),
             "{rel} 出现 `{ASSEMBLY_REVERSE}`——server-api 反向引用装配格（c-arch-10 R5）"
         );
+    }
+}
+
+// ============================================================================
+// c-arch-16 R6：db_ports/** 单端口域断言（「只依赖本域仓储方法」）
+// ----------------------------------------------------------------------------
+// 背景：db_ports 目录化只把直连面从 1 个 513 行文件搬到 13 个适配器文件（总处数守恒 91），
+// 「任何领域改动都要先读懂」的单点并未消除，只是粒度变了。缺一条**禁止适配器跨域**的断言。
+// 本表 = 每个 `db_ports/*.rs` 允许出现的 `easyvibe_db::<符号>` 集合（**显式登记、禁 glob、
+// 与磁盘文件集双向全等**）。CI 镜像 `scripts/check_app_db_boundary.py` 解析本常量
+// （单一事实源，零双写；解析失败 fail-closed）。
+//
+// 口径边界（诚实记录）：本断言**只**约束 `easyvibe_db::` 前缀符号，**不**约束
+// `easyvibe_ai_agent::` 等其它域引用——如 `agent_slot.rs` 引
+// `easyvibe_ai_agent::agent_conf::resolve_agent`（**非** easyvibe_db，不在本断言面内；
+// 其保留理由见 c-arch-16 §R1 的 agent-runtime 裁决）。默认**不**加「单文件只可出现一个
+// `impl …Port for`」的结构判据（会误伤 dto.rs / mod.rs）。
+// ============================================================================
+
+/// db_ports 单端口域归属（显式登记；键集必须 == 磁盘 `src/db_ports/*.rs`，双向全等）。
+const DB_PORTS_DOMAIN_OWNERSHIP: &[(&str, &[&str])] = &[
+    // 纯 mod 声明 + pub(crate) use 再导出：零 easyvibe_db 符号。
+    ("mod.rs", &[]),
+    // DTO 文件（本地 DTO 五型 + to_message_rows）：只承载会话消息 DTO 的转换，
+    // 唯一触及的仓储行类型 = ConversationMessageRow（并非跨域适配器）。
+    ("dto.rs", &["ConversationMessageRow"]),
+    ("repo.rs", &["wipe_repo", "sqlx"]),
+    ("task.rs", &["TaskRepository", "TaskRow", "SqliteTaskRepository"]),
+    ("settings.rs", &["SettingsRepository", "SettingRow", "SqliteSettingsRepository"]),
+    ("approval.rs", &["ApprovalRepository", "ApprovalRow", "SqliteApprovalRepository"]),
+    (
+        "conversation.rs",
+        &[
+            "ConversationRepository",
+            "ConversationRow",
+            "ConversationMessageRow",
+            "SqliteConversationRepository",
+        ],
+    ),
+    (
+        "health.rs",
+        &["HealthRepository", "ModuleHealthRow", "RunModuleAvg", "PatrolRunRow", "SqliteHealthRepository"],
+    ),
+    ("event.rs", &["EventRepository", "EventCountRow", "SqliteEventRepository"]),
+    // c-arch-16 R7：task_engine.rs 按端口域拆 4（以下四行各自单域，合计 22 处守恒）。
+    ("task_engine.rs", &["TaskRepository", "TaskRow", "SqliteTaskRepository"]),
+    ("task_engine_approval.rs", &["ApprovalRepository", "ApprovalRow", "SqliteApprovalRepository"]),
+    ("session_attribution.rs", &["AgentSessionRepo"]),
+    ("agent_slot.rs", &["SqliteSettingsRepository"]),
+];
+
+/// 抓取源码中 `easyvibe_db::<符号>` 的符号名（去重升序）。
+fn easyvibe_db_symbols(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find(DB_DIRECT_LITERAL) {
+        let after = &rest[pos + DB_DIRECT_LITERAL.len()..];
+        let sym: String =
+            after.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if !sym.is_empty() {
+            out.push(sym);
+        }
+        rest = after;
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// c-arch-16 R6：db_ports/** 单端口域断言——磁盘文件集与冻结表**双向全等**，且每个文件中出现的
+/// `easyvibe_db::<符号>` 必须落在该文件的允许集内（跨域巨型适配器复发即红）。
+#[test]
+fn db_ports_files_only_reach_their_own_domain_symbols() {
+    let mut declared: Vec<String> =
+        DB_PORTS_DOMAIN_OWNERSHIP.iter().map(|(f, _)| f.to_string()).collect();
+    declared.sort();
+    let disk = rs_files("src/db_ports");
+    assert_eq!(
+        disk, declared,
+        "db_ports 文件集与 DB_PORTS_DOMAIN_OWNERSHIP 不一致（双向全等；新增/删除/改名须同步登记）"
+    );
+    for (file, allowed) in DB_PORTS_DOMAIN_OWNERSHIP {
+        let text = read_src(&format!("src/db_ports/{file}"));
+        for sym in easyvibe_db_symbols(&text) {
+            assert!(
+                allowed.contains(&sym.as_str()),
+                "db_ports/{file} 出现跨域符号 `easyvibe_db::{sym}`——单端口域断言破（c-arch-16 R6；允许集 {allowed:?}）"
+            );
+        }
     }
 }

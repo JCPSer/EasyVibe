@@ -288,6 +288,8 @@ def validate_policy(policy: dict) -> list:
                 "gates.dv_max", "gates.scc_max", "gates.expect_shell_deps", "gates.retired_concerns",
                 # c-arch-13：出边数上界（I9）、单文件行数上界与棘轮（I10）、直连集中度（I11a/b/c）
                 "gates.server_api_out_edges_max", "gates.server_api_out_edges",
+                # c-arch-16：组合根（assembly）出边登记（I13b；缺失即 fail-closed）
+                "gates.assembly_out_edges",
                 "gates.single_file_loc_max", "gates.single_file_loc_caps",
                 "gates.db_direct_total", "gates.db_direct_focus_max",
                 "gates.db_direct_focus_files_max",
