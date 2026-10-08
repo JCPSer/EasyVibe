@@ -118,8 +118,14 @@ const TASK_ENGINE_PROD: &[&str] = &[
 ];
 
 /// task_exec **测试夹具**豁免集（显式冻结；磁盘 `src/task_exec/*.rs` 必须 == PROD ∪ EXEMPT）。
-/// 豁免理由：测试夹具构造真实 SQLite 仓储，以验证 `try_advance_gate` 的原子并发语义与
-/// 状态机流转（换内存 fake 会降级测试保真度）；这些构造非生产耦合。
+/// 豁免理由（c-arch-15 订正）：这些文件仅 `#[cfg(test)]` 编译，持久化改经**切片内内存端口**
+/// （`task_exec::ports` 的 `InMemoryTaskStore` / `InMemoryApprovalStore`），不再直连任何具体仓储，
+/// 故本清单的作用是「文件集双向全等」的登记面，而**不是** DB 直连豁免面（预算已归零）。
+/// 关于 `try_advance_gate`：其**单线程原子语义**由 N27 用例
+/// （`tests_flow::decide_is_atomic_against_double_submit`：双击第二发必 409、留痕恰 1 条）
+/// 经生产路径（`decide` → `TaskStore::try_advance_gate`）间接覆盖，内存 double 已按同一条件
+/// UPDATE（`status='awaiting_approval' AND gate IS ?` + 影响行数 0/1，同一把锁内 check-then-act）
+/// 忠实复刻；**真多线程并发**至今仍无覆盖，属另立需求，本条不承担。
 const TASK_ENGINE_TEST_EXEMPT: &[&str] = &[
     "src/task_exec/test_util.rs",
     "src/task_exec/tests_changes.rs",
@@ -130,8 +136,10 @@ const TASK_ENGINE_TEST_EXEMPT: &[&str] = &[
     "src/task_exec/tests_prompt.rs",
 ];
 
-/// 豁免集 `easyvibe_db` 出现次数预算（棘轮：只降不升；值 = c-arch-7 实施后实测）。
-const TASK_ENGINE_TEST_BUDGET: usize = 37;
+/// 豁免集 `easyvibe_db` 出现次数预算（棘轮：只降不升）。
+/// c-arch-15：测试夹具改走切片内内存端口后实测为 0——**本棘轮已归零**，任何测试面直连
+/// 具体仓储即红（含注释/字符串口径，去注释前的最严判据见 task_engine_test_exempt_budget_only_shrinks）。
+const TASK_ENGINE_TEST_BUDGET: usize = 0;
 
 /// routes handler 冻结规则（R1）：handler 只做 HTTP 边界，不得直取组合根仓储句柄。
 /// 命中即红——跨域读写必须经 `crate::service::<域>`。

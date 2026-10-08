@@ -336,8 +336,8 @@
     }
   ],
   "edges": {
-    "expect_count": 68,
-    "sha256": "80b926b0bbb0ead07e9b695aea7e67b10e09090193c798336113a6fcb0c946c4",
+    "expect_count": 67,
+    "sha256": "f469c6a977a4d20b85f6517591173148c55b21af9d9860909a1e3b75e1d3babd",
     "retired_ids": [
       "e31"
     ]
@@ -357,7 +357,9 @@
       "c-server-api-3",
       "c-server-api-4",
       "c-arch-14",
-      "c-console-ui-5"
+      "c-console-ui-5",
+      "c-arch-15",
+      "c-task-engine-3"
     ],
     "server_api_out_edges_max": 9,
     "server_api_out_edges": [
@@ -377,7 +379,69 @@
     },
     "db_direct_total": 91,
     "db_direct_focus_max": 22,
-    "db_direct_focus_files_max": 10
+    "db_direct_focus_files_max": 10,
+    "test_face_globs": [
+      "**/*.spec.js",
+      "**/*.spec.mjs",
+      "**/*.spec.ts",
+      "**/*.spec.tsx",
+      "**/*.test.js",
+      "**/*.test.mjs",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*_test.rs",
+      "**/__mocks__/**",
+      "**/__tests__/**",
+      "**/test_support.rs",
+      "**/test_util.rs",
+      "**/tests.rs",
+      "**/tests/**",
+      "**/tests_*.rs"
+    ],
+    "test_face_files": [
+      "easyvibe-backend/crates/easyvibe-ai-agent/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/test_util.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_changes.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_contract.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_flow.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_gates.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_harness.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/task_exec/tests_prompt.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/test_support.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/tests_a.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/tests_b.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/tests_c.rs",
+      "easyvibe-backend/crates/easyvibe-app/src/tests_d.rs",
+      "easyvibe-backend/crates/easyvibe-app/tests/arch_guard.rs",
+      "easyvibe-backend/crates/easyvibe-app/tests/asset_guard.rs",
+      "easyvibe-backend/crates/easyvibe-app/tests/contract_guard.rs",
+      "easyvibe-backend/crates/easyvibe-app/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-db/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-git/src/tests.rs",
+      "easyvibe-backend/crates/easyvibe-git/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-map/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-pipeline/tests/module_size_guard.rs",
+      "easyvibe-backend/crates/easyvibe-session/tests/module_size_guard.rs",
+      "easyvibe-renderer/src/__tests__/archGuard.test.ts",
+      "easyvibe-renderer/src/components/__tests__/componentGuard.test.ts",
+      "easyvibe-renderer/src/components/__tests__/diffView.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/appMount.test.tsx",
+      "easyvibe-renderer/src/lib/__tests__/chatUpgrade.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/depsAnalysis.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/diffStat.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/growthMerge.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/healthReport.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/inductionProgress.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/issues.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/repoLayout.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/sessionBubble.test.tsx",
+      "easyvibe-renderer/src/lib/__tests__/sessionQueue.test.ts",
+      "easyvibe-renderer/src/lib/__tests__/taskStage.test.ts",
+      "easyvibe-renderer/src/runtime/__tests__/i18n.test.ts",
+      "easyvibe-renderer/src/runtime/__tests__/terminalBuffer.test.ts",
+      "easyvibe-renderer/src/shared/logic/__tests__/layout.test.ts",
+      "scripts/tests/asset_guard_selfcheck.sh"
+    ]
   },
   "granularity": {
     "console": {

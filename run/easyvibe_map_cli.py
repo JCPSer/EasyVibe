@@ -153,6 +153,9 @@ def validate_health(h, where, errs):
 CODE_EXT = {'.rs', '.ts', '.tsx', '.js', '.mjs', '.py', '.sh', '.sql'}
 CONFIG_NAMES = {'Cargo.toml', 'tauri.conf.json', 'build.rs', 'index.html'}
 PRODUCT_ROOTS = ['easyvibe-backend', 'easyvibe-renderer', 'easyvibe-desktop', 'run', 'scripts']
+# 归属（枚举/coverage）与出边（edging 证据）**正交**：测试面文件仍被 product_files() 枚举
+# 并归属模块（故 EXC_PARTS 不排除 /tests/ 等），但按 scripts/map_policy.py::is_test_face
+# 谓词不参与出边证据提取，故不构成依赖边（c-arch-15 / R4）。coverage_ratio 因此保持 1.000。
 EXC_PARTS = ('/node_modules/', '/target/', '/dist/', '/binaries/', '/assets/', '/icons/',
              '/public/data/', '/src-tauri/gen/')
 
@@ -711,6 +714,9 @@ def cmd_self_check():
                      ensure_ascii=False))
 
 def cmd_coverage():
+    # 归属（本子命令的枚举/coverage）与出边（edging 证据）**正交**：测试面文件仍被
+    # product_files() 枚举并归属模块，但按 scripts/map_policy.py::is_test_face 谓词
+    # 不参与出边证据提取，故不构成依赖边（c-arch-15 / R4）——此处口径不变、ratio 不降。
     m = _load_map_or_die()
     files = product_files()
     patterns = [p for mod in m['modules'] for p in mod['files']]

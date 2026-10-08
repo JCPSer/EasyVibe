@@ -319,10 +319,10 @@ def cmd_selfcheck():
     d2["lib.rs"] += "pub(crate) use easyvibe_db as db;\n"
     cases.append(("N2 别名再导出 use easyvibe_db as db", d2, True, consts, None))
 
-    # N3 豁免文件含 easyvibe_db → 不红（在豁免面内，且计数在预算内）
+    # N3 豁免文件含 easyvibe_db → 必红（c-arch-15：预算已归零，棘轮对任何测试面直连生效）
     d3 = dict(base)
     d3[_src_rel(consts["task_engine_test_exempt"][0])] += "let r = easyvibe_db::SqliteTaskRepository::new(pool);\n"
-    cases.append(("N3 豁免文件 easyvibe_db（预算内）不红", d3, False, consts, None))
+    cases.append(("N3 豁免文件 easyvibe_db → 必红（预算归零后棘轮生效）", d3, True, consts, None))
 
     # N4 新增未登记 src/task_exec/tests_new.rs → 必红（清单双向）
     d4 = dict(base)

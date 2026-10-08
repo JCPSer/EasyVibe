@@ -32,8 +32,7 @@ use super::test_util::*;
         // 未跟踪必须被 porcelain 捕获（diff --stat 会漏，新建文件恰是最常见越界形态）
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
         let sessions = SessionManager::new(tx);
-        let db = easyvibe_db::Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
         let repo = std::env::temp_dir().join("ev-contract-test");
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(repo.join("allowed")).unwrap();
@@ -49,7 +48,7 @@ use super::test_util::*;
         let mut task = sample_task("running");
         task.id = "task-contract".into();
         task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
 
         // 界内修改 + 越界未跟踪新文件
         std::fs::write(repo.join("allowed/base.txt"), "1\n2\n").unwrap();
@@ -68,7 +67,7 @@ use super::test_util::*;
         let mut clean = sample_task("running");
         clean.id = "task-contract-clean".into();
         clean.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        db_create(task_repo.as_ref(), &clean).await;
+        seed_task(task_repo.as_ref(), &clean);
         let json = collect_task_result(&sessions, "no-such-session", &repo, "task-contract-clean", task_repo.as_ref(), &[]).await.expect("有 diff 即应采集");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["contractViolations"].as_array().unwrap().is_empty(), "界内改动零误报: {v}");
@@ -81,8 +80,7 @@ use super::test_util::*;
         // 否则红线出冤案：陈年脏仓库里每个任务都被误报
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
         let sessions = SessionManager::new(tx);
-        let db = easyvibe_db::Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
         let repo = std::env::temp_dir().join("ev-contract-baseline-test");
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(repo.join("allowed")).unwrap();
@@ -106,7 +104,7 @@ use super::test_util::*;
         let mut task = sample_task("running");
         task.id = "task-baseline".into();
         task.context = r#"{"contract":{"patterns":["allowed/**"]}}"#.into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
         // 基线 = 启动时脏文件（legacy/old.txt）——spawn 路径由 dirty_files 提供，测试直接给等价快照
         let baseline = vec!["legacy/old.txt".to_string()];
         let json = collect_task_result(&sessions, "no-such-session", &repo, "task-baseline", task_repo.as_ref(), &baseline).await.expect("有 diff 即应采集");
@@ -122,8 +120,7 @@ use super::test_util::*;
         // 实弹#3 防线：会话成功但无 RESULT 行 + 有 git 改动 → 采集带警告（审批人警惕空执行/归因错位）
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
         let sessions = SessionManager::new(tx); // 无此会话 → 无输出 → 解析不到 RESULT
-        let db = easyvibe_db::Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(easyvibe_db::SqliteTaskRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
         let repo = std::env::temp_dir().join("ev-git-repo-warn-test");
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(&repo).unwrap();

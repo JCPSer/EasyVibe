@@ -168,3 +168,13 @@ jobs:
 
       - name: app 编排层端口化守卫自检（负例必红，含解析失败 fail-closed）
         run: python3 scripts/check_app_service_boundary.py --selfcheck
+
+      # c-arch-15 / R4+R7 地图 edging 口径守卫：测试面引用不构成依赖边。归属（枚举/coverage）
+      # 与出边（edging 证据）正交——测试面文件仍被 product_files() 枚举并归属模块，但按
+      # scripts/map_policy.py::is_test_face 谓词不参与出边证据提取。本仓 CI 无 .easyvibe/ live
+      # map，故只读受版本控制文件（policy 冻结表 + fixture + product_files()）；G0–G4 任一红即红。
+      - name: 地图边测试面守卫（测试面引用不构成依赖边）
+        run: python3 scripts/check_map_edge_test_face.py --check
+
+      - name: 地图边测试面守卫自检（三类真实测试面负例必红）
+        run: python3 scripts/check_map_edge_test_face.py --selfcheck

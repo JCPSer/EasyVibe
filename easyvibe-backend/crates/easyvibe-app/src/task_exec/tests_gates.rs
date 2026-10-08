@@ -5,13 +5,11 @@ use super::test_util::*;
 
     #[tokio::test]
     async fn auto_task_runs_straight_with_skipped_trace() {
-        use easyvibe_db::{Database, SqliteApprovalRepository, SqliteTaskRepository};
         let dir = std::env::temp_dir().join("ev-task-exec-test2");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
-        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
+        let approvals = Arc::new(InMemoryApprovalStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
@@ -29,7 +27,7 @@ use super::test_util::*;
         task.id = "task-auto".into();
         task.repo = "ev-task-exec-test2".into();
         task.trust = "auto".into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
         executor.clone().enqueue_pending(Some("ev-task-exec-test2")).await;
         let mut t = task_repo.get("task-auto").await.unwrap().unwrap();
         for _ in 0..10 {
@@ -38,19 +36,17 @@ use super::test_util::*;
             t = task_repo.get("task-auto").await.unwrap().unwrap();
         }
         assert_eq!(t.status, "done");
-        let aps = db_approvals(approvals.as_ref(), "task-auto").await;
+        let aps = approvals_of(approvals.as_ref(), "task-auto").await;
         assert_eq!(aps.iter().filter(|a| a.decision == "skipped").count(), 3);
     }
 
     #[tokio::test]
     async fn auto_task_collects_result_and_archives() {
-        use easyvibe_db::{Database, SqliteTaskRepository};
         let dir = std::env::temp_dir().join("ev-task-collect-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir.join(".easyvibe/map")).unwrap();
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
-        let approvals = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
+        let approvals = Arc::new(InMemoryApprovalStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
@@ -69,7 +65,7 @@ use super::test_util::*;
         task.id = "task-collect".into();
         task.repo = "ev-task-collect-test".into();
         task.trust = "auto".into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
         executor.clone().enqueue_pending(Some("ev-task-collect-test")).await;
         let mut t = task_repo.get("task-collect").await.unwrap().unwrap();
         for _ in 0..10 {
@@ -94,10 +90,8 @@ use super::test_util::*;
 
     #[tokio::test]
     async fn supervised_low_risk_runs_high_risk_stops_at_plan() {
-        use easyvibe_db::{Database, SqliteApprovalRepository, SqliteTaskRepository};
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
-        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
+        let approvals = Arc::new(InMemoryApprovalStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let dir = std::env::temp_dir().join("ev-supervised-test");
@@ -120,7 +114,7 @@ use super::test_util::*;
         low.id = "task-low".into();
         low.repo = "ev-supervised-test".into();
         low.trust = "supervised".into();
-        db_create(task_repo.as_ref(), &low).await;
+        seed_task(task_repo.as_ref(), &low);
         executor.clone().enqueue_pending(Some("ev-supervised-test")).await;
         let mut t = task_repo.get("task-low").await.unwrap().unwrap();
         for _ in 0..10 {
@@ -130,7 +124,7 @@ use super::test_util::*;
         }
         assert_eq!(t.status, "awaiting_approval", "低危执行完成后必须停 diff 关（盲测 P0：监督要有真审批）");
         assert_eq!(t.gate.as_deref(), Some("diff"), "停在 diff 关");
-        let aps = db_approvals(approvals.as_ref(), "task-low").await;
+        let aps = approvals_of(approvals.as_ref(), "task-low").await;
         assert!(aps.iter().any(|a| a.decision == "skipped" && a.note.as_deref().unwrap_or("").contains("计划关自动通过")), "低危计划关自动通过须留痕带理由");
         // diff 关通过 → 报告关；报告关通过 → done
         executor.decide("task-low", "approved", None, Some("diff")).await.unwrap();
@@ -146,21 +140,19 @@ use super::test_util::*;
         high.trust = "supervised".into();
         high.modules = "[\"a\",\"b\",\"c\",\"d\"]".into();
         high.description = "整体重构".into();
-        db_create(task_repo.as_ref(), &high).await;
+        seed_task(task_repo.as_ref(), &high);
         executor.clone().enqueue_pending(Some("ev-supervised-test")).await;
         let t = task_repo.get("task-high").await.unwrap().unwrap();
         assert_eq!(t.status, "awaiting_approval", "高危应停计划关");
         assert_eq!(t.gate.as_deref(), Some("plan"));
-        let aps = db_approvals(approvals.as_ref(), "task-high").await;
+        let aps = approvals_of(approvals.as_ref(), "task-high").await;
         assert!(aps.iter().any(|a| a.decision == "flagged" && a.note.as_deref().unwrap_or("").contains("风险预评估")), "高危须 flagged 留痕带理由");
     }
 
     #[tokio::test]
     async fn reject_requires_reason() {
-        use easyvibe_db::{Database, SqliteApprovalRepository, SqliteTaskRepository};
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
-        let approvals = Arc::new(SqliteApprovalRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
+        let approvals = Arc::new(InMemoryApprovalStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let maps = MapService::new(vec![]);
@@ -176,7 +168,7 @@ use super::test_util::*;
  );
         let mut task = sample_task("pending");
         task.trust = "manual".into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
         executor.clone().enqueue_pending(Some("demo")).await;
         // M4-2：驳回无理由 → 400；有理由 → 终止且留痕
         let err = executor.decide("task-t1", "rejected", None, None).await.unwrap_err();
@@ -186,7 +178,7 @@ use super::test_util::*;
         executor.decide("task-t1", "rejected", Some("方案风险过大"), None).await.unwrap();
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "rejected");
-        let aps = db_approvals(approvals.as_ref(), "task-t1").await;
+        let aps = approvals_of(approvals.as_ref(), "task-t1").await;
         assert_eq!(aps.len(), 1);
         assert_eq!(aps[0].decision, "rejected");
         assert_eq!(aps[0].note.as_deref(), Some("方案风险过大"));
@@ -194,13 +186,11 @@ use super::test_util::*;
 
     #[tokio::test]
     async fn executes_to_terminal_with_stub() {
-        use easyvibe_db::{Database, SqliteTaskRepository};
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let maps = MapService::new(vec![]);
-        let approvals = Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone()));
+        let approvals = Arc::new(InMemoryApprovalStore::new());
         let executor = TaskExecutor::new(
      task_repo.clone(),
      approvals,
@@ -214,7 +204,7 @@ use super::test_util::*;
  );
         let mut task = sample_task("pending");
         task.trust = "auto".into(); // auto 直通 → spawn_and_watch → 仓库未注册 → failed
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
         executor.clone().enqueue_pending(Some("demo")).await;
         let t = task_repo.get("task-t1").await.unwrap().unwrap();
         assert_eq!(t.status, "failed");
@@ -225,12 +215,10 @@ use super::test_util::*;
         // R3 P0-1 回归：写互斥（仓库已有活动会话）时 spawn_and_watch 必须把任务退回 pending——
         // execute 已置 running，若不退回，retry 循环只扫 pending，任务假活 running 至重启
         // （N25 幽灵任务在 permits 满路径防过、Conflict 路径漏掉的孪生 bug）
-        use easyvibe_db::{Database, SqliteTaskRepository};
         let dir = std::env::temp_dir().join("ev-conflict-arm-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let db = Database::connect_memory().await.unwrap();
-        let task_repo = Arc::new(SqliteTaskRepository::new(db.pool().clone()));
+        let task_repo = Arc::new(InMemoryTaskStore::new());
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         let sessions = SessionManager::new(tx);
         let repo = easyvibe_map::repo_from_root(&dir);
@@ -247,7 +235,7 @@ use super::test_util::*;
             .unwrap();
         let executor = TaskExecutor::new(
      task_repo.clone(),
-     Arc::new(easyvibe_db::SqliteApprovalRepository::new(db.pool().clone())),
+     Arc::new(InMemoryApprovalStore::new()),
      sessions,
      maps,
      harness_stub("框架"),
@@ -259,7 +247,7 @@ use super::test_util::*;
         task.repo = repo_id.clone();
         task.id = "task-conflict".into();
         task.trust = "auto".into();
-        db_create(task_repo.as_ref(), &task).await;
+        seed_task(task_repo.as_ref(), &task);
 
         executor.clone().execute(task).await;
         // 第一时间：execute 曾把状态推进 running，Conflict 臂必须已退回 pending
@@ -279,7 +267,7 @@ use super::test_util::*;
         task2.id = "task-conflict-phase".into();
         task2.trust = "manual".into();
         task2.gate = Some("p:implement".into());
-        db_create(task_repo.as_ref(), &task2).await;
+        seed_task(task_repo.as_ref(), &task2);
         executor.clone().execute(task2).await;
         let t2 = task_repo.get("task-conflict-phase").await.unwrap().unwrap();
         assert_eq!(t2.status, "pending", "互斥退回 pending");
