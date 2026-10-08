@@ -21,6 +21,12 @@
   G4 本命题闭环：① fixture 存储边集**不得**存在 task-engine → persistence 边；② 以 fixture 的
                 模块宇宙 + 同一 `extract_edges` 谓词重推的边集亦不得再推出该边（证明该边已无
                 任何非测试面供证 ⇒ 在「测试面引用不构成依赖边」口径下消失）。任一含即红。
+  G5 扫描口径登记（R8）：以 policy.modules 作归属 + 同一 `extract_edges` 谓词重推的 import 模块对
+                必须等于 `gates.edge_scan.expected_module_pairs`；fixture 边集中「不属该对集」的边必须
+                恰为 `gates.edge_scan.expected_non_import_edges`（8 条）；口径自洽
+                （raw − 伪边 = 模块对；模块对 + 非 import = edges.expect_count）否则红。
+                这一条把「import 面 59 对 = 扫描器原始 60 行 − 1 条宿主能力伪边」写进 CI，
+                使下一轮不会以「60 ≠ 59」误判漂移。
 
 --selfcheck（合成输入，不读仓库源码；逐条 PASS/FAIL + 汇总）：
   S1 src 内夹具（tests_*.rs）→ is_test_face 命中且不产边；抹掉谓词则产边（红绿差异只来自谓词）。
@@ -28,6 +34,8 @@
   S3 前端 __tests__/*.test.ts → 命中且不产边；抹掉谓词则产边。
   S4 生产文件（state.rs → easyvibe_db::）→ 产边（谓词不误伤）。
   S5 抹掉 policy.gates.test_face_files ⇒ test_face_files/is_test_face 抛 PolicyMissing（fail-closed 必红）。
+  S6 扫描口径（`gates.edge_scan`）：口径自洽（raw − 伪边 = 模块对；模块对 + 非 import = 边数）必绿；
+     口径改一位 / 字段缺失 ⇒ 必红（fail-closed）。
 
 退出码：--check 绿=0 / 红=1；--selfcheck 全 PASS=0 / 任一 FAIL=1。
 """
@@ -186,6 +194,55 @@ def load_fixture():
         return json.load(f)
 
 
+def _edge_scan_ok(policy):
+    try:
+        map_policy.edge_scan(policy)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def g5_problems(policy, fixture, derived):
+    """G5（R8）：扫描口径登记 —— import 模块对 59 + 非 import 边 8 = 图内 67 逐条可复算。"""
+    problems = []
+    try:
+        esc = map_policy.edge_scan(policy)
+    except map_policy.PolicyMissing as e:
+        return ["G5 policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    pairs_n = esc.get("expected_module_pairs")
+    raw_n = esc.get("expected_raw_lines")
+    pseudo = esc.get("host_pseudo_edges")
+    nonimp_reg = esc.get("expected_non_import_edges")
+    if not isinstance(pairs_n, int) or not isinstance(raw_n, int):
+        return ["G5 edge_scan.expected_raw_lines/expected_module_pairs 非整数（fail-closed）"]
+    if not isinstance(pseudo, list) or not pseudo:
+        return ["G5 edge_scan.host_pseudo_edges 非非空列表（fail-closed）"]
+    if not isinstance(nonimp_reg, list):
+        return ["G5 edge_scan.expected_non_import_edges 非列表（fail-closed）"]
+    # 口径自洽
+    if pairs_n != raw_n - len(pseudo):
+        problems.append("G5 口径不自洽：模块对 %d != 原始行 %d − 伪边 %d" % (pairs_n, raw_n, len(pseudo)))
+    try:
+        total = map_policy.expect_edges(policy)
+    except map_policy.PolicyMissing as e:
+        return ["G5 policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    if pairs_n + len(nonimp_reg) != total:
+        problems.append("G5 口径不自洽：模块对 %d + 非 import %d != edges.expect_count %d"
+                        % (pairs_n, len(nonimp_reg), total))
+    # 复算的 import 模块对
+    if len(derived) != pairs_n:
+        problems.append("G5 复算 import 模块对 %d != 登记 %d（新边/消失边须显式重登记）"
+                        % (len(derived), pairs_n))
+    stored = {(e.get("from"), e.get("to")) for e in fixture.get("edges", [])}
+    nonimp_got = sorted("%s->%s" % (a, b) for (a, b) in stored if (a, b) not in derived)
+    if nonimp_got != sorted(set(nonimp_reg)):
+        problems.append("G5 非 import 边集漂移：实际 %s != 登记 %s" % (nonimp_got, sorted(set(nonimp_reg))))
+    new_pairs = sorted(derived - stored)
+    if new_pairs:
+        problems.append("G5 复算推出图内不存在的 import 对（漏登记）: %s" % new_pairs)
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # --check
 # ---------------------------------------------------------------------------
@@ -286,6 +343,13 @@ def cmd_check():
                     "task_engine_persistence_in_fixture": in_stored,
                     "task_engine_persistence_in_derived": in_derived}
 
+    # ---- G5 扫描口径登记（R8）----
+    g5 = g5_problems(policy, fx, derived)
+    problems += g5
+    detail["G5"] = {"derived_module_pairs": len(derived),
+                    "expected_module_pairs": (map_policy.edge_scan(policy).get("expected_module_pairs")
+                                              if _edge_scan_ok(policy) else None)}
+
     report = {"ok": not problems, "product_files": len(files_all), "detail": detail,
               "problems": problems}
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -368,11 +432,33 @@ def cmd_selfcheck():
             ok5, d5 = True, "test_face_files/is_test_face 均抛 PolicyMissing: %s" % e.dotted_key
     results.append(("S5 抹掉 gates.test_face_files → PolicyMissing（fail-closed）", ok5, d5))
 
+    # S6 扫描口径（R8）：口径自洽必绿；口径改一位 / 字段缺失必红
+    try:
+        fx = load_fixture()
+        mods = [{"id": mid, "files": mv["files"]}
+                for mid, mv in map_policy.modules_map(policy).items()]
+        own_all = owners_of(mods, easyvibe_map_cli.product_files())
+        der = extract_edges(read_texts(own_all.keys()), own_all, policy)
+        base = g5_problems(policy, fx, der)
+        results.append(("S6 扫描口径自洽（59 对 + 8 非 import = 67）→ 必绿", not base, "; ".join(base[:1])))
+        p6 = copy.deepcopy(policy)
+        p6["gates"]["edge_scan"]["expected_module_pairs"] = p6["gates"]["edge_scan"]["expected_module_pairs"] + 1
+        results.append(("S6b 口径 expected_module_pairs +1 → 必红",
+                        bool(g5_problems(p6, fx, der)),
+                        "; ".join(g5_problems(p6, fx, der)[:1])))
+        p6b = copy.deepcopy(policy)
+        del p6b["gates"]["edge_scan"]
+        results.append(("S6c 缺 gates.edge_scan → fail-closed 必红",
+                        any("fail-closed" in p for p in g5_problems(p6b, fx, der)),
+                        "; ".join(g5_problems(p6b, fx, der)[:1])))
+    except Exception as e:  # noqa: BLE001
+        results.append(("S6 扫描口径自举失败", False, str(e)))
+
     failed = 0
     for name, ok, detail in results:
         failed += 0 if ok else 1
         print("%s %s  %s" % ("PASS" if ok else "FAIL", name, detail))
-    print("S1–S5 %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
+    print("S1–S6c %s" % ("全 PASS" if failed == 0 else "%d 项 FAIL" % failed))
     return 0 if failed == 0 else 1
 
 

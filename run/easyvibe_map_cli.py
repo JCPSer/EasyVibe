@@ -9,7 +9,7 @@
 `scripts/gen_map_cli.py` 逐字节生成，sha256 一致性由 `scripts/verify_assets.py` 守卫。
 本文件在 run/，不在守卫扫描面内。
 """
-import json, os, sys, re, datetime, shutil
+import json, os, sys, re, datetime, shutil, subprocess
 
 # REPO 不再硬编码：默认 cwd，运行器通过 REPO_ROOT 环境变量显式指定（见 build_easyvibe_map.py）
 REPO = os.environ.get('REPO_ROOT', os.getcwd())
@@ -58,6 +58,20 @@ def write_json_atomic(path, obj):
 
 def now_iso():
     return datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def head_short():
+    """生成期HEAD短 sha（叙事基准的注入源，c-arch-18 / R6）。
+    取不到（无 git / 非仓库）时回落 'unknown'——判据 L 会因格式非法而红，绝不静默通过。
+    """
+    try:
+        r = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'],
+                           cwd=REPO, capture_output=True, text=True)
+    except OSError:
+        return 'unknown'
+    if r.returncode != 0 or not r.stdout.strip():
+        return 'unknown'
+    return r.stdout.strip()
 
 def load_schema():
     with open(SCHEMA, encoding='utf-8') as f:
@@ -483,6 +497,9 @@ def cmd_finalize():
         'languages': meta_new.get('languages', []),
         'loc': meta_new.get('loc', 0),
         'map_freshness': 'fresh',
+        # c-arch-18 / R6：叙事基准**生成期注入**（不再手写）——prose 里的 `HEAD <sha>` 由判据 L
+        # 与 provenance.head_short 比对；prose 住在 gitignored 面，手工 sha 会在每次提交后过期。
+        'provenance': {'head_short': head_short(), 'generated_at': now_iso()},
         'stats': {
             'files_total': len(files),
             'files_covered': len(covered),

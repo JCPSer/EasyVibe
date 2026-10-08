@@ -12,7 +12,11 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0（c-arch-18 / R1，ΔS8）：churn 档位复算走 `git log --since=92.days`，
+      # 默认浅克隆（fetch-depth: 1）会把 92 天窗口塌成 1 个提交 ⇒ 档位整体失真、判据假红。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -178,3 +182,29 @@ jobs:
 
       - name: 地图边测试面守卫自检（三类真实测试面负例必红）
         run: python3 scripts/check_map_edge_test_face.py --selfcheck
+
+      # c-arch-18 / R1：叙事面进 CI。live map（`.easyvibe/**`）整目录 gitignored ⇒ 叙事面此前
+      # 在 CI 面前**不可见**。本轮把「受控叙事投影快照」（只存摘要/档位/计数，无正文）入版本控制，
+      # 使「结构面零漂移 + 叙事面在漂」不再能在 CI 全绿下溜过。快照与结构投影由同一生成器
+      # 单趟产出（`gen_map_fixture.py`），「同代」由构造保证；快照 ↔ policy 不同代即红。
+      - name: 叙事投影同代（快照 ↔ policy：摘要口径/arch/逐格）
+        run: python3 scripts/check_notes_freshness.py --projection scripts/tests/fixtures/map_prose_projection.json
+
+      - name: 叙事同代守卫自检（摘要漂移/缺字段/计数规则/基准负例必红）
+        run: python3 scripts/check_notes_freshness.py --selfcheck
+
+      # c-arch-18 / R1：churn 档位同代（口径真值 = gates.churn_basis；需 fetch-depth: 0）。
+      - name: churn 档位同代（投影档位 ↔ 复算）
+        run: python3 scripts/check_churn_bands.py --projection scripts/tests/fixtures/map_prose_projection.json
+
+      - name: churn 档位守卫自检（档位漂移/口径缺失负例必红）
+        run: python3 scripts/check_churn_bands.py --selfcheck
+
+      # c-arch-18 / R5：「架构级问题不再复现」的机器落点——coupling_high 载体计数与枢纽出入度
+      # 只降不升（gates.coupling_ratchet），且每个载体都有显式「已接受」裁定（理由 + 复核时点）。
+      # 新增/消失载体、任一枢纽度上涨、空头接受 ⇒ 必红。
+      - name: 耦合趋势/棘轮（coupling_high 上限不涨 + 已接受裁定）
+        run: python3 scripts/check_coupling_trend.py --check
+
+      - name: 耦合趋势守卫自检（新增载体/度数上涨/空头接受负例必红）
+        run: python3 scripts/check_coupling_trend.py --selfcheck

@@ -278,8 +278,41 @@ def notes_sha256(policy: dict) -> str:
 
 
 def notes_sha256_by_module(policy: dict) -> dict:
-    """逐模块 review_note 的规范化摘要（`gates.notes_sha256_by_module`）：键集 == policy.modules。"""
+    """逐模块 prose 的规范化摘要（`gates.notes_sha256_by_module`）：键集 == policy.modules。
+
+    口径（c-arch-18 / R3）：逐格摘要 = sha256(canonical_json({module, review_note, notes}))——
+    `notes`（模块注记）与 `health.review_note` 一并纳入，故任一字段改一位即红、删字段亦红
+    （缺失以 None 参与摘要，不静默跳过）。
+    """
     return dict(require(policy, "gates.notes_sha256_by_module"))
+
+
+def prose_quantity_rules(policy: dict) -> dict:
+    """计数型 prose 规则（`gates.prose_quantity_rules`）：mode / families / whitelist / exempt_marker。
+
+    fail-closed：缺失即抛 PolicyMissing——否则「叙事不得写滑动窗口量」这条判据会静默消失。
+    """
+    return dict(require(policy, "gates.prose_quantity_rules"))
+
+
+def prose_provenance_keys(policy: dict) -> list:
+    """叙事基准（`gates.prose_provenance_keys`）：`meta.provenance` 必须具备的键（fail-closed）。"""
+    return _string_list(policy, "gates.prose_provenance_keys")
+
+
+def coupling_ratchet(policy: dict) -> dict:
+    """耦合棘轮（`gates.coupling_ratchet`）：coupling_high 载体计数上限 + 枢纽出入度上限（只降不升）。"""
+    return dict(require(policy, "gates.coupling_ratchet"))
+
+
+def accepted_coupling(policy: dict) -> dict:
+    """显式「已接受」裁定（`gates.accepted_coupling`）：载体 id / 理由 / 上限 / 复核时点。"""
+    return dict(require(policy, "gates.accepted_coupling"))
+
+
+def edge_scan(policy: dict) -> dict:
+    """边扫描口径登记（`gates.edge_scan`）：命令 / 原始行数 / 宿主伪边 / 模块对数 / 非 import 边集。"""
+    return dict(require(policy, "gates.edge_scan"))
 
 
 def normalize_review_note(text) -> str:
@@ -315,12 +348,18 @@ def prose_arch_digest(live_map: dict) -> str:
 
 
 def prose_module_digest(module_id: str, live_map: dict) -> str:
-    """某模块 review_note 的摘要（含模块 id，防跨格串扰）。"""
+    """某模块 prose 的摘要（review_note + notes 合并，含模块 id，防跨格串扰）。
+
+    R3 扩面：此前只投影 `health.review_note`，21 格 `notes`（含已失真的产品文件读数）在闸门之外。
+    现按 `gates.notes_projection.fields` 的口径把 `notes` 一并纳入；缺失字段以 None 参与摘要，
+    故「删字段」同样必红（与「改一位」同责）。
+    """
     for m in (live_map or {}).get("modules", []):
         if m.get("id") == module_id:
             return _canonical_sha({"module": module_id,
-                                   "note": normalize_review_note((m.get("health") or {}).get("review_note"))})
-    return _canonical_sha({"module": module_id, "note": None})
+                                   "review_note": normalize_review_note((m.get("health") or {}).get("review_note")),
+                                   "notes": normalize_review_note(m.get("notes"))})
+    return _canonical_sha({"module": module_id, "review_note": None, "notes": None})
 
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -370,7 +409,11 @@ def validate_policy(policy: dict) -> list:
                 "granularity.host.probe_owner",
                 # c-arch-17：churn 口径（R5）与 prose 摘要闸门（R3）——叙事面同样有受控落点与判据
                 "gates.churn_basis", "gates.notes_projection",
-                "gates.notes_sha256", "gates.notes_sha256_by_module"):
+                "gates.notes_sha256", "gates.notes_sha256_by_module",
+                # c-arch-18：计数型 prose 规则（R2）/ 叙事基准（R6）/ 耦合棘轮与已接受裁定（R5）/
+                # 边扫描口径（R8）——叙事与耦合趋势同样要有机器判据
+                "gates.prose_quantity_rules", "gates.prose_provenance_keys",
+                "gates.coupling_ratchet", "gates.accepted_coupling", "gates.edge_scan"):
         try:
             require(policy, key)
         except PolicyMissing as e:
@@ -470,4 +513,92 @@ def validate_policy(policy: dict) -> list:
             problems.append("F0 gates.notes_sha256_by_module 非 64hex 的格: %s" % bad)
     elif nbym is not None:
         problems.append("F0 gates.notes_sha256_by_module 须为 dict")
+    # c-arch-18 F0：计数型 prose 规则（R2）形状（缺失已由 key 循环登记）
+    try:
+        pqr = require(policy, "gates.prose_quantity_rules")
+    except PolicyMissing:
+        pqr = None
+    if isinstance(pqr, dict):
+        if pqr.get("mode") != "digits-forbidden":
+            problems.append("F0 gates.prose_quantity_rules.mode 须为 digits-forbidden")
+        fams = pqr.get("families")
+        if not isinstance(fams, dict) or not fams:
+            problems.append("F0 gates.prose_quantity_rules.families 须为非空 dict（禁悬空）")
+        else:
+            for fid, pat in fams.items():
+                if not isinstance(pat, str) or not pat.strip():
+                    problems.append("F0 gates.prose_quantity_rules.families.%s 须为非空正则" % fid)
+                    continue
+                try:
+                    re.compile(pat)
+                except re.error:
+                    problems.append("F0 gates.prose_quantity_rules.families.%s 正则不可编译" % fid)
+        if not isinstance(pqr.get("exempt_marker"), str) or not pqr.get("exempt_marker", "").strip():
+            problems.append("F0 gates.prose_quantity_rules.exempt_marker 须为非空字符串")
+    # c-arch-18 F0：叙事基准键（R6）与边扫描口径（R8）形状
+    try:
+        ppk = require(policy, "gates.prose_provenance_keys")
+    except PolicyMissing:
+        ppk = None
+    if isinstance(ppk, list) and not ppk:
+        problems.append("F0 gates.prose_provenance_keys 须为非空列表")
+    try:
+        esc = require(policy, "gates.edge_scan")
+    except PolicyMissing:
+        esc = None
+    if isinstance(esc, dict):
+        pairs_n = esc.get("expected_module_pairs")
+        raw_n = esc.get("expected_raw_lines")
+        pseudo = esc.get("host_pseudo_edges")
+        nonimp = esc.get("expected_non_import_edges")
+        if not isinstance(raw_n, int) or not isinstance(pairs_n, int):
+            problems.append("F0 gates.edge_scan.expected_raw_lines/expected_module_pairs 须为整数")
+        if not isinstance(pseudo, list) or not pseudo:
+            problems.append("F0 gates.edge_scan.host_pseudo_edges 须为非空列表")
+        if not isinstance(nonimp, list):
+            problems.append("F0 gates.edge_scan.expected_non_import_edges 须为列表")
+        elif isinstance(raw_n, int) and isinstance(pairs_n, int) and isinstance(pseudo, list):
+            if pairs_n != raw_n - len(pseudo):
+                problems.append("F0 gates.edge_scan 口径不自洽：module_pairs != raw_lines - len(host_pseudo_edges)")
+            if isinstance(nonimp, list) and pairs_n + len(nonimp) != int(require(policy, "edges.expect_count")):
+                problems.append("F0 gates.edge_scan 口径不自洽：module_pairs + non_import != edges.expect_count")
+    # c-arch-18 F0：耦合棘轮与已接受裁定（R5）——上限为正整数、载体 id 属图、裁定与棘轮逐分量互证
+    try:
+        rat = require(policy, "gates.coupling_ratchet")
+        acc = require(policy, "gates.accepted_coupling")
+    except PolicyMissing:
+        rat = acc = None
+    if isinstance(rat, dict) and isinstance(acc, dict):
+        cmax = rat.get("coupling_high_cells_max")
+        dmax = rat.get("degrees_max")
+        if not isinstance(cmax, int) or cmax < 0:
+            problems.append("F0 gates.coupling_ratchet.coupling_high_cells_max 须为非负整数")
+        if not isinstance(dmax, dict) or not dmax:
+            problems.append("F0 gates.coupling_ratchet.degrees_max 须为非空 dict")
+        else:
+            for mid, caps in dmax.items():
+                if mid not in mset:
+                    problems.append("F0 gates.coupling_ratchet.degrees_max 指向未知格: %s" % mid)
+                if not isinstance(caps, dict) or not isinstance(caps.get("out"), int) \
+                        or not isinstance(caps.get("in"), int):
+                    problems.append("F0 gates.coupling_ratchet.degrees_max.%s 须为 {out:int, in:int}" % mid)
+        cells = acc.get("cells")
+        if not isinstance(cells, list) or not cells:
+            problems.append("F0 gates.accepted_coupling.cells 须为非空列表（禁空头接受）")
+        else:
+            for c in cells:
+                if not isinstance(c, dict):
+                    problems.append("F0 gates.accepted_coupling.cells 含非对象条目")
+                    continue
+                cid = c.get("id")
+                if cid not in mset:
+                    problems.append("F0 gates.accepted_coupling 指向未知格: %s" % cid)
+                for k in ("role", "reason", "review_by"):
+                    if not isinstance(c.get(k), str) or not c.get(k, "").strip():
+                        problems.append("F0 gates.accepted_coupling.%s 缺 %s（禁空头接受）" % (cid, k))
+                caps = c.get("caps")
+                if not isinstance(caps, dict) or caps != (dmax or {}).get(cid):
+                    problems.append("F0 gates.accepted_coupling.%s.caps 与 coupling_ratchet.degrees_max 不一致" % cid)
+        if isinstance(cmax, int) and len(cells or []) != cmax:
+            problems.append("F0 coupling_high_cells_max %s != accepted_coupling.cells %d" % (cmax, len(cells or [])))
     return problems

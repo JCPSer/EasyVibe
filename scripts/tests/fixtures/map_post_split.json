@@ -2,10 +2,9 @@
   "version": "1.0",
   "meta": {
     "repo": "EasyVibe",
-    "generated_at": "2026-10-08T10:44:24+08:00",
     "stats": {
-      "files_total": 421,
-      "files_covered": 421,
+      "files_total": 423,
+      "files_covered": 423,
       "coverage_ratio": 1.0,
       "edges_derived": 67,
       "edges_inferred": 0,

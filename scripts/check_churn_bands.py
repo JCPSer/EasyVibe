@@ -131,6 +131,76 @@ def check(policy, live, root, touches=None):
     return problems, per_module
 
 
+def projection_problems(policy, proj, fixture, touches=None):
+    """R1：受控叙事投影快照的 churn 档位 ↔ 复算（有 git）或 fixture 真值（无 git，Q1-丁退路）。
+
+    fail-closed：快照缺失 / 档位键集不等 / 档位非法 / 口径缺失 ⇒ 红。
+    """
+    problems = []
+    try:
+        basis = map_policy.churn_basis(policy)
+    except map_policy.PolicyMissing as e:
+        return ["P policy 缺字段（fail-closed）: %s" % e.dotted_key]
+    problems += basis_problems(basis)
+    if not isinstance(proj, dict) or not isinstance(proj.get("churn_bands"), dict) or not proj["churn_bands"]:
+        return problems + ["P 投影快照缺 churn_bands（fail-closed）"]
+    bands = proj["churn_bands"]
+    mids = map_policy.module_ids(policy)
+    if set(bands) != set(mids):
+        problems.append("P 投影 churn_bands 键集 != policy.modules: policy-only=%s snapshot-only=%s"
+                        % (sorted(set(mids) - set(bands)), sorted(set(bands) - set(mids))))
+    bad = sorted(k for k, v in bands.items() if v not in ("high", "medium", "low"))
+    if bad:
+        problems.append("P 投影 churn_bands 含非法档位: %s" % bad)
+    if problems:
+        return problems
+    if touches is None:
+        touches, source = gather_touches(REPO, int(basis["window_days"]))
+        if touches is not None:
+            touches = module_touches(policy, touches)
+    else:
+        source = "injected"
+    if touches is None:
+        # Q1-丁退路：零 git 依赖——只比「投影档位 ↔ fixture health.churn」（两者同为受控面）
+        registered = {m.get("id"): (m.get("health") or {}).get("churn") for m in fixture.get("modules", [])}
+        for mid in sorted(bands):
+            if bands[mid] != registered.get(mid):
+                problems.append("P[fixture-退路] churn 档位漂移 @%s: 投影 %s，fixture %s"
+                                % (mid, bands[mid], registered.get(mid)))
+        return problems
+    recomputed = {mid: band_of(t, basis["bands"]) for mid, t in touches.items()}
+    for mid in sorted(bands):
+        if recomputed.get(mid) != bands[mid]:
+            problems.append("P churn 档位与复算不同代 @%s: 复算 %s，投影 %s"
+                            % (mid, recomputed.get(mid), bands[mid]))
+    return problems
+
+
+def run_projection(policy, proj_path, fixture_path):
+    problems = ["F0 %s" % p for p in map_policy.validate_policy(policy)]
+    if not os.path.isfile(proj_path):
+        problems.append("P 投影快照不存在: %s（fail-closed）" % proj_path)
+        proj = None
+    else:
+        try:
+            proj = json.load(open(proj_path, encoding="utf-8"))
+        except ValueError as e:
+            problems.append("P 投影快照不可解析: %s" % e)
+            proj = None
+    try:
+        fixture = json.load(open(fixture_path, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        problems.append("P fixture 不可读: %s" % e)
+        fixture = {}
+    if proj is not None:
+        problems += projection_problems(policy, proj, fixture)
+    report = {"ok": not problems, "mode": "projection",
+              "projection": os.path.relpath(proj_path, REPO),
+              "fixture": os.path.relpath(fixture_path, REPO), "problems": problems}
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["ok"] else 1
+
+
 def run_check(map_path):
     policy = map_policy.load_policy(REPO)
     if not os.path.isfile(map_path):
@@ -177,22 +247,49 @@ def selfcheck():
     probs4, _ = check(bad_bands, live_ok, REPO, touches={"m1": 10})
     add("s7 bands 非单调（high <= medium）→ 必红", bool(probs4), "; ".join(probs4[:1]))
 
+    # ---- R1 投影快照 ↔ churn 档位（s8/s9）----
+    pol2 = {"modules": [{"id": "m1", "name": "m1", "layer": "l", "emit_order": 0, "files": ["a/**"]}],
+            "gates": {"churn_basis": dict(pol["gates"]["churn_basis"])}}
+    fx_ok = {"modules": [{"id": "m1", "health": {"churn": "low"}}]}
+    proj_ok = {"churn_bands": {"m1": "low"}}
+    add("s8b 投影档位 == 复算 → 必绿",
+        not projection_problems(pol2, proj_ok, fx_ok, touches={"m1": 10}))
+    proj_drift = {"churn_bands": {"m1": "high"}}
+    probs5 = projection_problems(pol2, proj_drift, fx_ok, touches={"m1": 10})
+    add("s8 投影 churn 档位与复算差一档 → 必红", bool(probs5), "; ".join(probs5[:1]))
+    # 无 git（touches=None 且注入为 None）→ 退路比 fixture；fixture 与投影一致 ⇒ 绿
+    add("s8c git 不可用时退路比 fixture（一致 → 必绿）",
+        not projection_problems(pol2, proj_ok, fx_ok, touches=None))
+    probs6 = projection_problems(pol2, {"churn_bands": {}}, fx_ok, touches={"m1": 10})
+    add("s9 投影缺 churn_bands → 必红（fail-closed）",
+        any("fail-closed" in p for p in probs6), "; ".join(probs6[:1]))
+    probs7 = projection_problems(pol2, None, fx_ok, touches={"m1": 10})
+    add("s9b 投影快照缺失（None）→ 必红（fail-closed）",
+        any("fail-closed" in p for p in probs7), "; ".join(probs7[:1]))
+
     ok = True
     for name, passed, detail in results:
         ok = ok and passed
         print("  %s %s  %s" % ("PASS" if passed else "FAIL", name, detail))
-    print("s1–s7 %s" % ("全 PASS" if ok else "有 FAIL"))
+    print("s1–s9b %s" % ("全 PASS" if ok else "有 FAIL"))
     return ok
 
 
 def main():
-    ap = argparse.ArgumentParser(description="churn 口径复算与档位同代判据（c-arch-17 / R5）")
+    ap = argparse.ArgumentParser(description="churn 口径复算与档位同代判据（c-arch-17/18 / R5+R1）")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--map", default=LIVE)
+    ap.add_argument("--projection", default=None,
+                    help="只比对受版本控制的叙事投影快照的 churn 档位（CI 入口）")
+    ap.add_argument("--fixture", default=os.path.join(REPO, "scripts", "tests", "fixtures",
+                                                      "map_post_split.json"))
     args = ap.parse_args()
     if args.selfcheck:
         return 0 if selfcheck() else 1
+    if args.projection:
+        return run_projection(map_policy.load_policy(REPO), os.path.abspath(args.projection),
+                              os.path.abspath(args.fixture))
     return run_check(os.path.abspath(args.map))
 
 

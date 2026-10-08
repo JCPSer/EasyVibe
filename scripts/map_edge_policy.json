@@ -467,38 +467,121 @@
     },
     "notes_projection": {
       "fields": [
-        "health.review_note"
+        "health.review_note",
+        "notes"
       ],
       "normalize": "eol+rstrip+collapse-blank+strip",
       "algo": "sha256+canonical-json"
     },
-    "notes_sha256": "9050f333196c1178bf84cbb1aa19c923a8f0136645ff985bd808af07b8f17310",
+    "notes_sha256": "7afb2ecbfdd08e94decbc8928e4d4c36a9fcc3d7db3b3289753008916f9fed6a",
     "notes_sha256_by_module": {
-      "map-toolchain": "2c3e5f4d852aebe9243132548e0045a1d702517940a05fd6920da358a538f782",
-      "contract-foundation": "5d0cdb13f513e44a81257cd6e6d77b13886def5845e50923559206ba8f7e7e56",
-      "persistence": "7e8e2ffab7b146286ac35bae92575071f887273b4b4adbaa89119660813ed779",
-      "map-domain": "05d109140980a62fc47dacab80bb4a39d303ef457516d56130bb0a14aa383db2",
-      "agent-runtime": "6f9e7d5bbf53f7f1f740dc3f967f72612feb50b24ca93e210303a04524d96c73",
-      "event-bus": "6b6e38aae9993a5f283271547b3dcfa612601e1ad8f6842f549fc06226c3db25",
-      "task-engine": "fc17aba341b58afa263377ea6c325ce94d1adb0c355092bd32e160467fb7dafb",
-      "assembly": "6053ad0e8177335f23a9d8e723324f3fb33af349b4f0b41239715da79a087e52",
-      "server-api": "97b6690b3c6e720e88057d6285571f1e1d29a7691636aec894801f251fb6ec74",
-      "easyvibe-git": "6ae02b95f3dc413a6ce1560869e119a72ff0f99af286602e038ae89b46b8620f",
-      "easyvibe-pipeline": "a1b45195a21688e3f71942a479bea2735c4deddd08390c6375cf3b5b3b5db1d1",
-      "renderer-shared": "f4d10cd9a2755588a1965f2418bd1f3f46d7d8b92a66ff713d8611147cc8d138",
-      "renderer-runtime": "45e3b675affac204db660258845fe04d6d27a83c199b5742f821c13020420ef4",
-      "renderer-api": "880854459545329cbd78452f3bf2dc98be7752cfdc50896879d87be62755d041",
-      "ui-kit": "16d1a3f77c5e00be39572d633c4686b1b27e9d45c30b9b69583e0f20652aa98f",
-      "health-report": "0c6b23e55cb92df3720e9a4d9b7abd3d89074ee5abbda0221ccc74a9983cc049",
-      "onboarding-state": "b16b453ead817dc22906511585a5a4a19b8968e6a8f7d0978d96797309e9f981",
-      "app-updater": "d92e911004267460e2e46270ce3a2952e55bf3f0f251aa0512edddca58c257f2",
-      "host-adapter": "bc8a476c62640f0382dab8a827377003e07e09c3ecd2539b5d0068fb0bc64696",
-      "console-ui": "22980ebd84d154223a7af4551d472f284f95fbdb0c7e0c506a9f5a74331eb010",
-      "settings-ui": "b3621840b29afa45a328acc139862e54cab78e5fc10cc7410a8834a65944c5a4",
-      "chat-ui": "b9fe1b512f947eef0c2abf091884140e40e529ae1db431f56c3708be869541ef",
-      "task-ui": "5f2c67e684bcdea74272a718b2dba0e182694e2a4c2c0809188444ddf37f61ba",
-      "map-canvas": "7cc70dac365ce8104603719db6577ed9359b5c71aeec6e1e21882d3bce0cecb5",
-      "desktop-shell": "16f511e6304a650bab7e7c2a77895d5aaba86831c30f7d2c87862b431030063f"
+      "agent-runtime": "449bc397fedc92f60f2a8058c77448550b2e65796784269cadd3a91d69d0dff8",
+      "app-updater": "ac9efeea6d96ba46b4ea056316656953384c0ca9a73ffcf29b10058f7e86b453",
+      "assembly": "b1a986e34bc2b6d82e18dfcf3007d9e7116c7bcdf845dd1684e81996145430cb",
+      "chat-ui": "aff2737df44e0773ada6c8e79a704e794c2eb58a3a599e863275e65d30fabcbe",
+      "console-ui": "1b3a8ebe713edd9bab7be022978f14fb797e83160c34a25e8d11df8903e8fad8",
+      "contract-foundation": "5be032f6f8d54ba84f93a0ae4f0f32b3c3dea8b7c0157b37277d775fc7ec655a",
+      "desktop-shell": "31f53e8b953f622f71e3df29202bb81dea5e30f95fc8ee0f33996584f9b5f3d8",
+      "easyvibe-git": "9c2c6bf7c0d1a95b495e1737b909b5a7fff447278584de62f7e742bd79bccf25",
+      "easyvibe-pipeline": "edd351137e0ed326e260b7bedc1062feba340b340fc27b22e6040214aefbf07d",
+      "event-bus": "4207559f25e1e91c89b47cb497be64ac4e8694f5b7df99078d7bbb2f78191e9b",
+      "health-report": "e6e22868231617d38d4500f07ccc7507eca2b4266c981a918e25a4e8d00b86c2",
+      "host-adapter": "80ca36df35a4f6a7ed7de4e50650a0032fdb433de818bea73ede30e0e6c29235",
+      "map-canvas": "ee19ecde667476b2269afdc9795b77e6b357e3518528a193876e57df2461c039",
+      "map-domain": "0f41c24604c3f620cdb1b9e2c2a1f27c63babe4fd7beb73c945022b5c6b3013e",
+      "map-toolchain": "9d959d5f2c49c375e05858247c2775ae636dc70499fcbbc70050f783da132c04",
+      "onboarding-state": "d17c5c043d6d0d67106a74d0c1ee361941d44e940da6d759edc85874eb9af94d",
+      "persistence": "24c300e32ed234da054cbd04357d0619d0e5e8cc745b0a25860695faa6b09f4e",
+      "renderer-api": "d494ae3b16955b4a346ad977d41320d3b72ea945da0756203ada32549c054948",
+      "renderer-runtime": "c07d476fccfca381646da63c89cf60a36d6f9010fdfb91477a32d01f0bb3a262",
+      "renderer-shared": "7aff44a4bac23025de0db26a568d8c309fe27a9fef8bba039e648bfbd849efcd",
+      "server-api": "cef579752e6b44d106757cf19919e7d333bba249f15ad3d0d437dee894972a1f",
+      "settings-ui": "0cf90494ab321a3f75af9c240747d23b6f46cfc04e2237e9e248e6568b6c565f",
+      "task-engine": "418212abe90d77129ad505b34ee250a81e4cae4d74226ec04f183e8c334ac48e",
+      "task-ui": "bf2c952489038bce3e33ebd270d0de3948b6d3762ef88b09f2a49468cb3a7e4e",
+      "ui-kit": "e4656f95a53eadb469595925f3aa43bb1954dc7a1fd9a1fc0606cca941b73ea3"
+    },
+    "prose_quantity_rules": {
+      "mode": "digits-forbidden",
+      "families": {
+        "churn_touches": "churn\\s*(?:近\\s*)?\\d+\\s*[天月][^。；\\n]{0,12}?\\d+\\s*次",
+        "touches_phrase": "\\d+\\s*次文件触点",
+        "global_rank": "全库第\\s*\\d+",
+        "rank_fraction": "第\\s*\\d+/\\d+",
+        "product_files": "\\d+\\s*个产品文件",
+        "file_loc": "\\d+\\s*行"
+      },
+      "whitelist": [
+        "quoted-citation"
+      ],
+      "exempt_marker": "<!--volatile-exempt-->"
+    },
+    "prose_provenance_keys": [
+      "head_short",
+      "generated_at"
+    ],
+    "coupling_ratchet": {
+      "coupling_high_cells_max": 2,
+      "degrees_max": {
+        "server-api": {
+          "out": 7,
+          "in": 4
+        },
+        "console-ui": {
+          "out": 11,
+          "in": 1
+        },
+        "assembly": {
+          "out": 9,
+          "in": 0
+        },
+        "task-engine": {
+          "out": 4,
+          "in": 2
+        }
+      }
+    },
+    "accepted_coupling": {
+      "cells": [
+        {
+          "id": "server-api",
+          "role": "application 层装配枢纽 / 组合根边界格",
+          "reason": "组合根知道全部后端域是正当职责；出边已逐条登记于 gates.server_api_out_edges，理解成本仍是单点，故接受而不拆格",
+          "caps": {
+            "out": 7,
+            "in": 4
+          },
+          "review_by": "下一轮巡检"
+        },
+        {
+          "id": "console-ui",
+          "role": "presentation 装配壳（装配全部呈现格）",
+          "reason": "c-arch-14 拆格后职责已收敛为壳/页面/门禁三件事，出边增长是「职责清楚」的已知结构代价，故接受而不拆格",
+          "caps": {
+            "out": 11,
+            "in": 1
+          },
+          "review_by": "下一轮巡检"
+        }
+      ]
+    },
+    "edge_scan": {
+      "command": "PYTHONPATH=run:scripts python3 .easyvibe/map/_tools/scan_edges.py",
+      "expected_raw_lines": 60,
+      "host_pseudo_edges": [
+        "host-adapter|__host__"
+      ],
+      "expected_module_pairs": 59,
+      "expected_non_import_edges": [
+        "assembly->server-api",
+        "assembly->task-engine",
+        "server-api->task-engine",
+        "renderer-api->server-api",
+        "renderer-runtime->server-api",
+        "desktop-shell->server-api",
+        "server-api->map-toolchain",
+        "desktop-shell->map-toolchain"
+      ]
     }
   },
   "granularity": {
