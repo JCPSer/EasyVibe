@@ -169,8 +169,8 @@ RUSTFLAGS="-C target-feature=+crt-static" \
 
 ```
 easyvibe-backend   Rust workspace — axum REST + WS, agent sessions, LLM slots,
-                   SQLite state, map watchers (7 crates)
-easyvibe-renderer  React 18 + Vite + React Flow + Tailwind — the map UI
+                   SQLite state, map watchers (10 crates)
+easyvibe-renderer  React 19 + Vite + React Flow + Tailwind — the map UI
 easyvibe-desktop   Tauri v2 shell — macOS & Windows (Windows installer via CI)
 ```
 

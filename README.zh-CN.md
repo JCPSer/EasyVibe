@@ -169,8 +169,8 @@ RUSTFLAGS="-C target-feature=+crt-static" \
 
 ```
 easyvibe-backend   Rust workspace——axum REST + WS、agent 会话、LLM 槽位、
-                   SQLite 状态库、地图监听（7 个 crate）
-easyvibe-renderer  React 18 + Vite + React Flow + Tailwind——地图 UI
+                   SQLite 状态库、地图监听（10 个 crate）
+easyvibe-renderer  React 19 + Vite + React Flow + Tailwind——地图 UI
 easyvibe-desktop   Tauri v2 桌面壳——macOS 与 Windows（Windows 安装包走 CI）
 ```
 
