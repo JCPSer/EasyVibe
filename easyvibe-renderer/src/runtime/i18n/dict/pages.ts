@@ -224,6 +224,12 @@ export const zh = {
   'pages.health.startOk': '巡检已开始，完成后看板会自动刷新。',
   'pages.health.startOffline': '巡检启动失败（请确认后端在线后重试）。',
   'pages.health.redline': '红线60',
+  // pages.health 趋势图视窗交互（2026-10 需求：全量数据 + 滚轮缩放/拖拽平移/双击复位/档位）
+  'pages.health.trendHint': '滚轮缩放 · 拖拽平移 · 双击复位',
+  'pages.health.windowInfo': '显示 {a}–{b} / 共 {n} 次',
+  'pages.health.zoomRecent20': '最近 20',
+  'pages.health.zoomRecent50': '最近 50',
+  'pages.health.zoomAll': '全部',
   // pages.modules.*：模块目录页
   'pages.modules.title': '模块目录',
   'pages.modules.subtitle': '全部 {count} 个模块的职责与健康一览——画布的列表模式',
@@ -578,6 +584,12 @@ export const en: Record<keyof typeof zh, string> = {
   'pages.health.startOk': 'Patrol started — the dashboard refreshes when it finishes.',
   'pages.health.startOffline': 'Failed to start patrol — make sure the backend is online and retry.',
   'pages.health.redline': 'red line 60',
+  // pages.health 趋势图视窗交互（2026-10 需求：全量数据 + 滚轮缩放/拖拽平移/双击复位/档位）
+  'pages.health.trendHint': 'Scroll to zoom · drag to pan · double-click to reset',
+  'pages.health.windowInfo': 'Showing {a}–{b} / {n} total',
+  'pages.health.zoomRecent20': 'Last 20',
+  'pages.health.zoomRecent50': 'Last 50',
+  'pages.health.zoomAll': 'All',
   'pages.modules.title': 'Modules',
   'pages.modules.subtitle': 'All {count} modules with responsibility and health — the map as a list',
   'pages.modules.openMap': 'Open architecture map →',

@@ -94,12 +94,13 @@ pub(crate) async fn prune_patrol_runs(st: &AppState, id: &str, keep: i64) -> Res
     Ok(serde_json::json!({ "success": true, "data": { "deleted": deleted, "keep": keep } }))
 }
 
-/// M4-3 健康看板数据面：近 20 次巡检（含各自模块平均分）+ 最近一次成功巡检的模块明细。
+/// M4-3 健康看板数据面：近 200 次巡检（含各自模块平均分）+ 最近一次成功巡检的模块明细。
 /// 一次聚合查询代替前端 N×M 次 health-history 轮询（N 模块 × M 次巡检）。
+/// 巡检记录全量展示 + 趋势图可缩放（2026-10 需求）：窗口从 20 提到 200，与 prune 上限对齐。
 pub(crate) async fn get_health_dashboard(st: &AppState, id: &str) -> Result<serde_json::Value, ApiError> {
     st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
-    let runs = st.health_repo.list_runs(id, 20).await?;
-    let avgs = st.health_repo.list_run_averages(id, 20).await?;
+    let runs = st.health_repo.list_runs(id, 200).await?;
+    let avgs = st.health_repo.list_run_averages(id, 200).await?;
     let avg_of: std::collections::HashMap<String, (i64, i64)> = avgs
         .iter()
         .map(|a| (a.run_id.clone(), (a.module_avg, a.module_count)))

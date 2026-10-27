@@ -18,6 +18,10 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
   const [ai, setAi] = useState<{ scope: string; description: string; mode: 'ai' | 'manual'; manual: string; generating: boolean } | null>(null)
   const [showScopes, setShowScopes] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+  // 规则条目列表（2026-10 需求）：展开预览 / 删除确认 的本地态——出厂规则仍一律不展示，此列表只含自定义 slot
+  const [openPath, setOpenPath] = useState<string | null>(null)
+  const [view, setView] = useState<{ loading: boolean; content: string | null; error: boolean } | null>(null)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
 
   const load = useCallback(() => {
     customFiles()
@@ -56,6 +60,10 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
 
   const activeRules = (slots ?? []).filter((s) => s.exists && s.slot !== 'development')
   const lastGen = activeRules.reduce((m, s) => Math.max(m, s.mtimeMs), 0)
+  // 条目列表 = 全部已存在的自定义 slot（含 development 兜底行）
+  const existingRules = (slots ?? []).filter((s) => s.exists)
+  const labelOf = (slot: string) =>
+    slot === 'development' ? t('settings.harness.fallback') : t(SCOPES.find((s) => s.key === slot)?.labelKey ?? '')
 
   const openAi = (scope: string) => setAi({ scope, description: '', mode: 'ai', manual: '', generating: false })
 
@@ -125,6 +133,33 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
       .finally(() => setConfirmClear(false))
   }
 
+  // 查看 / 收起：展开时才请求 customFile(path) 拉内容；再点收起只关本地态
+  const toggleView = (path: string) => {
+    if (openPath === path) {
+      setOpenPath(null)
+      return
+    }
+    setOpenPath(path)
+    setView({ loading: true, content: null, error: false })
+    customFile(path)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { data?: { content?: string } }) => setView({ loading: false, content: d?.data?.content ?? '', error: false }))
+      .catch(() => setView({ loading: false, content: null, error: true }))
+  }
+
+  // 单个删除：二次确认后调 DELETE，成功后刷新槽位列表
+  const deleteRule = (path: string) => {
+    customFile(path, { method: 'DELETE' })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        toast(t('settings.harness.deleteDone', { label: labelOf(slots?.find((s) => s.path === path)?.slot ?? '') }), 'info')
+        if (openPath === path) setOpenPath(null)
+        setConfirmDel(null)
+        load()
+      })
+      .catch(() => toast(t('settings.harness.deleteFail'), 'error'))
+  }
+
   return (
     <div className="space-y-3">
       {/* 头部：标题 + 副文案 + 出厂版本（规则本体一律不展示） */}
@@ -186,6 +221,62 @@ export function HarnessSection({ about, onVersionChange }: { about: { backend: s
           <Sparkles size={13} /> {activeRules.length > 0 ? t('settings.harness.manage') : t('settings.harness.generate')}
         </button>
       </div>
+
+      {/* 规则条目列表：每个已存在的自定义 slot 一行（出厂规则仍不展示）；空则不渲染 */}
+      {existingRules.length > 0 && (
+        <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2">
+          <p className="py-1 text-cap font-bold text-slate-500 dark:text-slate-400">{t('settings.harness.entriesTitle')}</p>
+          {existingRules.map((s) => {
+            const isDev = s.slot === 'development'
+            return (
+              <div key={s.path} className="border-t border-slate-100 dark:border-slate-800 first:border-t-0">
+                <div className="flex items-center gap-2 py-1.5">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isDev ? 'bg-amber-400' : s.enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  <span className="w-16 shrink-0 text-[11px] font-semibold text-slate-600 dark:text-slate-300">{labelOf(s.slot)}</span>
+                  <span className="tnum min-w-0 flex-1 truncate text-cap text-slate-400 dark:text-slate-500">
+                    {t('settings.harness.entryTime', { time: s.mtimeMs ? new Date(s.mtimeMs).toLocaleString() : '—' })}
+                  </span>
+                  <button
+                    onClick={() => toggleView(s.path)}
+                    onMouseLeave={() => setConfirmDel((c) => (c === s.path ? null : c))}
+                    className="shrink-0 rounded-md px-1.5 py-0.5 text-micro font-semibold text-slate-400 hover:text-blue-500"
+                  >
+                    {openPath === s.path ? t('settings.harness.collapseRule') : t('settings.harness.viewRule')}
+                  </button>
+                  {confirmDel === s.path ? (
+                    <button onClick={() => deleteRule(s.path)} className="shrink-0 rounded-md bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 text-micro font-bold text-red-500 hover:text-red-600">
+                      {t('settings.harness.deleteConfirm')}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDel(s.path)}
+                      onMouseLeave={() => setConfirmDel((c) => (c === s.path ? null : c))}
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-micro font-semibold text-slate-300 hover:text-red-500 dark:text-slate-600"
+                    >
+                      {t('settings.harness.deleteRule')}
+                    </button>
+                  )}
+                  <IosToggle on={s.enabled} onChange={(on) => toggleCustomFile({ path: s.path, enabled: on }).then(load).catch(() => toast(t('settings.harness.toggleFail'), 'error'))} />
+                </div>
+                {/* 只读内容预览：展开时才请求；等宽小块，再点收起 */}
+                {openPath === s.path && (
+                  <div className="mb-2 rounded-lg bg-slate-50 dark:bg-slate-950/60 p-2.5">
+                    {view?.loading ? (
+                      <p className="flex items-center gap-1 text-micro text-slate-400 dark:text-slate-500">
+                        <Loader2 size={11} className="animate-spin" /> {t('settings.harness.viewLoading')}
+                      </p>
+                    ) : view?.error ? (
+                      <p className="text-micro text-red-500">{t('settings.harness.viewFail')}</p>
+                    ) : (
+                      <pre className="mono max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-slate-600 dark:text-slate-300">{view?.content ?? ''}</pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* 排查兜底微链接 */}
       <div className="flex items-center gap-3 px-1">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench, Trash2, X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/shared/logic/layout'
@@ -11,6 +11,10 @@ import { toast } from '@/runtime/toast'
 import { useLang } from '@/runtime/i18n'
 import { prunePatrolRuns, healthDashboard } from '@/api/repos'
 import { patrol } from '@/api/canvas'
+import {
+  fmtDay, initialWindow, isPresetActive, panWindow, presetWindow, zoomWindow,
+  type TrendWindow,
+} from './healthTrendZoom'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
 // KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
@@ -158,9 +162,12 @@ export function HealthPage({
   const reverseDeps = useMemo(() => map?.edges.filter((e) => e.direction_violation).length ?? null, [map])
   const coverage = map?.meta.stats?.coverage_ratio ?? null
 
-  // 趋势图：近 10 次成功巡检，旧→新
-  const trend = useMemo(() => [...succeeded].slice(0, 10).reverse(), [succeeded])
+  // 趋势图：全部成功巡检（旧→新），视窗（缩放/平移）收敛在 TrendChart 内部；
+  // 标题的「近 N 次」跟随图内实际视窗大小，由图通过 onWindow 上报
+  const trend = useMemo(() => [...succeeded].reverse(), [succeeded])
   const [hover, setHover] = useState<number | null>(null)
+  const [trendCount, setTrendCount] = useState(0)
+  const reportWindow = useCallback((n: number) => setTrendCount((c) => (c === n ? c : n)), [])
 
   const startPatrol = async () => {
     if (!backendRepo || starting) return
@@ -290,14 +297,14 @@ export function HealthPage({
         {/* 趋势图 */}
         <div className="col-span-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.health.trendTitle', { count: Math.min(10, trend.length) })}</span>
+            <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">{t('pages.health.trendTitle', { count: trendCount || Math.min(30, trend.length) })}</span>
             <div className="flex items-center gap-3 text-micro text-slate-400 dark:text-slate-500">
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-blue-500" /> {t('pages.health.legendArch')}</span>
               <span className="flex items-center gap-1"><i className="h-[3px] w-4 rounded bg-slate-300" /> {t('pages.health.legendModuleAvg')}</span>
             </div>
           </div>
           {trend.length >= 2 ? (
-            <TrendChart runs={trend} hover={hover} setHover={setHover} />
+            <TrendChart runs={trend} hover={hover} setHover={setHover} onWindow={reportWindow} />
           ) : (
             <div className="flex h-[180px] items-center justify-center text-[11px] text-slate-300 dark:text-slate-600">
               {t('pages.health.trendEmpty')}
@@ -380,9 +387,11 @@ export function HealthPage({
             </span>
           )}
         </div>
+        {/* 表体内部滚动：记录全量展示（后端上限 200 条），表头 sticky 固定 */}
+        <div className="max-h-[440px] overflow-y-auto">
         <table className="w-full text-left">
-          <thead>
-            <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
               <th className="px-4 py-2">{t('pages.health.colTime')}</th>
               <th className="px-3 py-2">{t('pages.health.colModel')}</th>
               <th className="px-3 py-2 text-right">{t('pages.health.colArch')}</th>
@@ -423,38 +432,85 @@ export function HealthPage({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )
 }
 
-/** 趋势折线图：纯 SVG，x=巡检序、y=0-100 分，悬停显示单点明细 */
-function fmtDay(iso: string): string {
-  const t = toMs(iso)
-  if (t === null) return '—'
-  const d = new Date(t)
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
-
+/** 趋势折线图：纯 SVG，x=巡检序、y=0-100 分，悬停显示单点明细。
+ *  视窗交互（2026-10 需求）：滚轮缩放（光标锚点）/ 拖拽平移 / 双击复位 / 档位快捷按钮；
+ *  视窗逻辑全部委托 ./healthTrendZoom 纯函数（缩放锚点、平移钳制、档位切换有单测）。 */
 function TrendChart({
   runs,
   hover,
   setHover,
+  onWindow,
 }: {
   runs: DashboardRun[]
   hover: number | null
   setHover: (i: number | null) => void
+  /** 视窗大小变化时上报（卡片标题「近 N 次」跟随实际视窗） */
+  onWindow?: (count: number) => void
 }) {
   const W = 640
   const H = 180
   const PAD = { l: 30, r: 12, t: 12, b: 22 }
   const iw = W - PAD.l - PAD.r
   const ih = H - PAD.t - PAD.b
-  const x = (i: number) => PAD.l + (runs.length === 1 ? iw / 2 : (i / (runs.length - 1)) * iw)
+  const { t } = useLang()
+  const total = runs.length
+  // 视窗状态：初始 = 最近 30 条（不足则全部）；数据条数变化（新巡检完成/换仓库）复位
+  const [win, setWin] = useState<TrendWindow>(() => initialWindow(total))
+  useEffect(() => setWin(initialWindow(total)), [total])
+  useEffect(() => {
+    onWindow?.(win.count)
+  }, [win, onWindow])
+  const view = useMemo(() => runs.slice(win.start, win.start + win.count), [runs, win])
+
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ x: number; start: TrendWindow } | null>(null)
+  const endDrag = () => {
+    drag.current = null
+  }
+
+  // 滚轮缩放须 preventDefault（页面本身可滚动），React onWheel 挂在根上是 passive——挂原生非 passive 监听；
+  // 锚点 = 光标在视窗内的相对位置（SVG 经 viewBox 缩放，换算回图表坐标系）
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const scale = rect.width / W
+      const ratio = Math.min(Math.max((e.clientX - rect.left - PAD.l * scale) / (iw * scale), 0), 1)
+      setWin((w) => zoomWindow(w, total, ratio, e.deltaY < 0 ? 1 / 1.25 : 1.25))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+    // PAD/iw 为常量（只依赖 W/H），仅 total 影响闭包
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total])
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    drag.current = { x: e.clientX, start: win }
+    wrapRef.current?.setPointerCapture(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    const el = wrapRef.current
+    if (!d || !el) return
+    // 内容跟随光标：向右拖 = 回看更旧的数据（start 减小）；横移按图表坐标系换算成索引位移
+    const scale = el.getBoundingClientRect().width / W
+    const delta = (-(e.clientX - d.x) / (iw * scale)) * d.start.count
+    setWin(panWindow(d.start, total, delta))
+  }
+
+  const x = (i: number) => PAD.l + (view.length === 1 ? iw / 2 : (i / (view.length - 1)) * iw)
   const y = (s: number) => PAD.t + (1 - Math.max(0, Math.min(100, Number.isFinite(s) ? s : 0)) / 100) * ih
   const line = (key: 'archScore' | 'moduleAvg') =>
     // 缺数据的点跳过（M/L 命令不带坐标），折线断开优于 NaN 坐标报错
-    runs
+    view
       .map((r, i) => {
         const v = key === 'archScore' ? r.archScore : r.moduleCount > 0 ? r.moduleAvg : null
         if (v == null || !Number.isFinite(v)) return null
@@ -462,47 +518,77 @@ function TrendChart({
       })
       .filter(Boolean)
       .join(' ')
-  const h = hover !== null ? runs[hover] : null
-  const { t } = useLang()
+  const h = hover !== null ? view[hover] : null
 
   return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        {[0, 25, 50, 75, 100].map((g) => (
-          <g key={g}>
-            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke={g === 0 ? '#e2e8f0' : '#f1f5f9'} strokeWidth={1} />
-            <text x={PAD.l - 5} y={y(g) + 3} textAnchor="end" fontSize={8} fill="#cbd5e1" className="tnum">
-              {g}
-            </text>
-          </g>
-        ))}
-        <path d={line('moduleAvg')} fill="none" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" />
-        <path d={line('archScore')} fill="none" stroke="#3b82f6" strokeWidth={2} />
-        {runs.map((r, i) => (
-          <g key={r.id}>
-            <rect x={x(i) - 14} y={0} width={28} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-            {/* ui-test P2：archScore 可缺省/moduleAvg 可无数据——NaN 坐标是控制台 cx/cy NaN 报错的来源，缺数据不画点 */}
-            {r.archScore != null && <circle cx={x(i)} cy={y(r.archScore)} r={hover === i ? 4 : 2.5} fill="#fff" stroke="#3b82f6" strokeWidth={2} />}
-            {r.moduleCount > 0 && <circle cx={x(i)} cy={y(r.moduleAvg)} r={hover === i ? 3.5 : 2} fill="#fff" stroke="#cbd5e1" strokeWidth={2} />}
-            {i % Math.ceil(runs.length / 8) === 0 && (
-              <text x={x(i)} y={H - 6} textAnchor="middle" fontSize={8} fill="#cbd5e1">
-                {/* ui-test P2：startedAt 可能是 epoch 毫秒串——slice(5,10) 会切出乱码；统一走 toMs 格式化 */}
-                {fmtDay(r.startedAt)}
+    <div>
+      <div
+        ref={wrapRef}
+        className="relative cursor-grab select-none active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={() => setWin(initialWindow(total))}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+          {[0, 25, 50, 75, 100].map((g) => (
+            <g key={g}>
+              <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke={g === 0 ? '#e2e8f0' : '#f1f5f9'} strokeWidth={1} />
+              <text x={PAD.l - 5} y={y(g) + 3} textAnchor="end" fontSize={8} fill="#cbd5e1" className="tnum">
+                {g}
               </text>
-            )}
-          </g>
+            </g>
+          ))}
+          <path d={line('moduleAvg')} fill="none" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" />
+          <path d={line('archScore')} fill="none" stroke="#3b82f6" strokeWidth={2} />
+          {view.map((r, i) => (
+            <g key={r.id}>
+              <rect x={x(i) - 14} y={0} width={28} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+              {/* ui-test P2：archScore 可缺省/moduleAvg 可无数据——NaN 坐标是控制台 cx/cy NaN 报错的来源，缺数据不画点 */}
+              {r.archScore != null && <circle cx={x(i)} cy={y(r.archScore)} r={hover === i ? 4 : 2.5} fill="#fff" stroke="#3b82f6" strokeWidth={2} />}
+              {r.moduleCount > 0 && <circle cx={x(i)} cy={y(r.moduleAvg)} r={hover === i ? 3.5 : 2} fill="#fff" stroke="#cbd5e1" strokeWidth={2} />}
+              {/* 刻度密度自适应：按视窗内点数算（视窗越窄，刻度越稀） */}
+              {i % Math.ceil(view.length / 8) === 0 && (
+                <text x={x(i)} y={H - 6} textAnchor="middle" fontSize={8} fill="#cbd5e1">
+                  {/* ui-test P2：startedAt 可能是 epoch 毫秒串——slice(5,10) 会切出乱码；统一走 toMs 格式化 */}
+                  {fmtDay(r.startedAt)}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+        {h && (
+          <div
+            className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-2.5 py-1.5 text-micro shadow-lg"
+            style={{ left: `${(x(hover!) / W) * 100}%`, top: 0, transform: `translateX(${hover! > view.length / 2 ? '-110%' : '10%'})` }}
+          >
+            <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400 dark:text-slate-500">{t('pages.health.tooltipArch')}</span></p>
+            <p className="tnum text-slate-500 dark:text-slate-400">{h.moduleCount > 0 ? h.moduleAvg : '—'} <span className="font-normal text-slate-300 dark:text-slate-600">{t('pages.health.tooltipModuleAvg')}</span></p>
+            <p className="tnum text-slate-300 dark:text-slate-600">{absTime(h.startedAt).slice(0, 10)}</p>
+          </div>
+        )}
+      </div>
+      {/* 交互提示 + 视窗读数 + 档位快捷按钮 */}
+      <div className="mt-1 flex items-center gap-1.5">
+        <span className="text-micro text-slate-300 dark:text-slate-600">{t('pages.health.trendHint')}</span>
+        <span className="tnum ml-auto mr-1 shrink-0 text-micro text-slate-400 dark:text-slate-500">
+          {t('pages.health.windowInfo', { a: win.start + 1, b: win.start + view.length, n: total })}
+        </span>
+        {([20, 50, 'all'] as const).map((p) => (
+          <button
+            key={String(p)}
+            onClick={() => setWin(presetWindow(total, p))}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-micro font-bold transition-colors ${
+              isPresetActive(win, total, p)
+                ? 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
+                : 'border-slate-200 text-slate-400 hover:text-slate-600 dark:border-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            {p === 'all' ? t('pages.health.zoomAll') : t(p === 20 ? 'pages.health.zoomRecent20' : 'pages.health.zoomRecent50')}
+          </button>
         ))}
-      </svg>
-      {h && (
-        <div
-          className="glass pointer-events-none absolute z-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-2.5 py-1.5 text-micro shadow-lg"
-          style={{ left: `${(x(hover!) / W) * 100}%`, top: 0, transform: `translateX(${hover! > runs.length / 2 ? '-110%' : '10%'})` }}
-        >
-          <p className="tnum font-bold text-blue-600">{h.archScore ?? '—'} <span className="font-normal text-slate-400 dark:text-slate-500">{t('pages.health.tooltipArch')}</span></p>
-          <p className="tnum text-slate-500 dark:text-slate-400">{h.moduleCount > 0 ? h.moduleAvg : '—'} <span className="font-normal text-slate-300 dark:text-slate-600">{t('pages.health.tooltipModuleAvg')}</span></p>
-          <p className="tnum text-slate-300 dark:text-slate-600">{absTime(h.startedAt).slice(0, 10)}</p>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
