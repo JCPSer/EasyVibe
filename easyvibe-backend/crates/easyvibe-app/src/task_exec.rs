@@ -455,11 +455,14 @@ impl TaskExecutor {
             )
             .await;
             let note = match &verdict {
-                Some(v) => {
+                ReviewOutcome::Verdict(v) => {
                     merge_review_verdict(this.tasks.as_ref(), &tid, v).await;
                     format!("人工复审：{} — {}", if v.verdict == "pass" { "通过" } else { "未通过" }, v.summary)
                 }
-                None => "人工复审：审查会话不可用（失败/超时/结论非法）——不阻断，可重试或人工审 Diff".to_string(),
+                ReviewOutcome::Unavailable(reason) => {
+                    // 不可用（失败/超时/结论非法）：不阻断，留痕写明具体原因，可重试或人工审 Diff
+                    format!("人工复审：审查会话不可用——{reason}（不阻断，可重试或人工审 Diff）")
+                }
             };
             this.record_approval(&tid, "diff", "flagged", Some(&note)).await;
             // 同状态广播——前端据 task 事件 reload，result.review 新结论（at 时间戳）随之到达
@@ -691,13 +694,25 @@ impl TaskExecutor {
                                     )
                                     .await
                                     {
-                                        Some(v) => {
+                                        ReviewOutcome::Verdict(v) => {
                                             if v.verdict == "fail" {
                                                 warn!("[task-exec] 任务 {} {}初审未通过：{}", task_id, key, v.summary);
                                             }
                                             merge_phase_review(this.tasks.as_ref(), &task_id, key, &v).await;
                                         }
-                                        None => info!("[task-exec] 任务 {} {}初审不可用，人工关照常", task_id, key),
+                                        ReviewOutcome::Unavailable(reason) => {
+                                            // 2026-10-06 实弹修正：不可用不再只留一行日志——
+                                            // 带原因落 result.phaseReviews（verdict=error），
+                                            // 前端评审卡灰横幅可见；仍不阻断，照常进人工关。
+                                            info!("[task-exec] 任务 {} {}初审不可用，人工关照常：{}", task_id, key, reason);
+                                            merge_phase_review(
+                                                this.tasks.as_ref(),
+                                                &task_id,
+                                                key,
+                                                &ReviewVerdict { verdict: "error".into(), summary: reason },
+                                            )
+                                            .await;
+                                        }
                                     }
                                     ("awaiting_approval", Some(if phase == 1 { "analysis" } else { "solution" }))
                                 } else if review_after {
@@ -719,7 +734,7 @@ impl TaskExecutor {
                                     )
                                     .await;
                                     match review_v
-                                    {Some(v) if v.verdict == "fail" => {
+                                    {ReviewOutcome::Verdict(v) if v.verdict == "fail" => {
                                             let note = format!("子agent审查未通过：{}", v.summary);
                                             warn!("[task-exec] 任务 {} 审查打回：{}", task_id, v.summary);
                                             this.record_approval(&task_id, "diff", "rejected", Some(&note)).await;
@@ -735,14 +750,22 @@ impl TaskExecutor {
                                             }
                                             ("__already_final__", None) // 状态已回写，下面的统一回写跳过
                                         }
-                                        Some(v) => {
+                                        ReviewOutcome::Verdict(v) => {
                                             // 审查通过：结论并入 result（④格"子agent初审"卡的数据源），照常进 diff 关
                                             merge_review_verdict(this.tasks.as_ref(), &task_id, &v).await;
                                             ("awaiting_approval", Some("diff"))
                                         }
-                                        None => {
-                                            // 审查不可用（会话失败/超时/结论非法）：不阻断，diff 关照常（方案：人机审查兜底）
-                                            info!("[task-exec] 任务 {} 审查不可用，照常进 diff 关", task_id);
+                                        ReviewOutcome::Unavailable(reason) => {
+                                            // 审查不可用（会话失败/超时/结论非法）：不阻断，照常进 diff 关
+                                            // （方案：人机审查兜底）；带原因落 result.review（verdict=error），
+                                            // 前端 diff 关灰横幅可见（2026-10-06 实弹修正）。
+                                            info!("[task-exec] 任务 {} 审查不可用，照常进 diff 关：{}", task_id, reason);
+                                            merge_review_verdict(
+                                                this.tasks.as_ref(),
+                                                &task_id,
+                                                &ReviewVerdict { verdict: "error".into(), summary: reason },
+                                            )
+                                            .await;
                                             ("awaiting_approval", Some("diff"))
                                         }
                                     }

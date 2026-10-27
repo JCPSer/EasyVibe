@@ -19,8 +19,10 @@ export interface TaskItem {
     diffStat?: string
     contractViolations?: string[]
     warnings?: string[]
+    /** 子 agent 审查结论：verdict 可为 'pass' | 'fail' | 'error'（error = 审查不可用占位，summary 携带失败原因） */
     review?: { verdict: string; summary: string; at?: number }
-    /** 阶段初审结论（2026-10-03）：key = analysis（需求矩阵）/ solution（方案设计） */
+    /** 阶段初审结论（2026-10-03）：key = analysis（需求矩阵）/ solution（方案设计）；
+     *  verdict 同 review：'pass' | 'fail' | 'error' */
     phaseReviews?: Record<string, { verdict: string; summary: string }>
   } | null
 }

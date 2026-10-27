@@ -271,4 +271,110 @@ use super::test_util::*;
         executor.decide("task-t1", "approved", None, None).await.unwrap(); // solution → 阶段3 实施
         let t = wait_gate2(&task_repo, "diff").await;
         assert_eq!(t.gate.as_deref(), Some("diff"), "审查不可用不得阻断 diff 关");
+        // 2026-10-06 实弹修正：不可用必须落 result.review（verdict=error + 原因），前端灰横幅可见
+        let t = task_repo.get("task-t1").await.unwrap().unwrap();
+        let result: serde_json::Value =
+            serde_json::from_str(&t.result.expect("审查不可用必须落 result.review（verdict=error）")).unwrap();
+        assert_eq!(result["review"]["verdict"], "error", "审查不可用 verdict 必须为 error");
+        assert!(
+            !result["review"]["summary"].as_str().unwrap_or("").is_empty(),
+            "审查不可用 summary 必须携带失败原因"
+        );
+    }
+
+    #[tokio::test]
+    async fn phase_review_unavailable_writes_error_verdict() {
+        // 2026-10-06 实弹修正（初审静默缺失）：初审不可用不再只留一行日志——
+        // 结论行 JSON 非法 → Unavailable(原因) → result.phaseReviews.analysis =
+        // { verdict: "error", summary: 原因 }，且仍照常进 analysis 人工关（不阻断语义不变）。
+        // echo 同时充当执行 agent 与初审 agent：打印非法 REVIEW 行——主会话成功
+        // （phase 1 跳过采集），初审会话解析失败 → Unavailable。
+        let dir = std::env::temp_dir().join("ev-phase-review-err-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let task_repo = Arc::new(InMemoryTaskStore::new());
+        let approvals = Arc::new(InMemoryApprovalStore::new());
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let maps = MapService::new(vec![easyvibe_map::repo_from_root(&dir)]);
+        let executor = TaskExecutor::new(
+     task_repo.clone(),
+     approvals,
+     sessions,
+     maps,
+     harness_stub("框架"),
+     4,
+     Arc::new(FixedAgentSlot::new(Arc::new("echo".into()), Arc::new(vec!["[EASYVIBE-REVIEW] {not-json".to_string()]))),
+     None,
+ );
+        let mut task = sample_task("pending");
+        task.repo = "ev-phase-review-err-test".into();
+        task.trust = "manual".into();
+        seed_task(task_repo.as_ref(), &task);
+        executor.clone().enqueue_pending(Some("ev-phase-review-err-test")).await;
+        // plan 关 → 通过 → 阶段1 执行（echo 成功）→ 初审会话解析非法 JSON → error 落库
+        let t0 = task_repo.get("task-t1").await.unwrap().unwrap();
+        assert_eq!(t0.gate.as_deref(), Some("plan"), "manual 任务先入 plan 关");
+        executor.decide("task-t1", "approved", None, None).await.unwrap(); // plan → 阶段1
+        let mut t = task_repo.get("task-t1").await.unwrap().unwrap();
+        for _ in 0..60 {
+            if t.status == "awaiting_approval" && t.gate.as_deref() == Some("analysis") { break }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            t = task_repo.get("task-t1").await.unwrap().unwrap();
+        }
+        assert_eq!(t.status, "awaiting_approval", "初审不可用仍须进人工关（不阻断）");
+        assert_eq!(t.gate.as_deref(), Some("analysis"));
+        let result: serde_json::Value =
+            serde_json::from_str(&t.result.expect("初审 error 结论必须落 result.phaseReviews")).unwrap();
+        assert_eq!(
+            result["phaseReviews"]["analysis"]["verdict"], "error",
+            "初审不可用 verdict 必须为 error（前端灰横幅判定依据）"
+        );
+        let summary = result["phaseReviews"]["analysis"]["summary"].as_str().unwrap_or("");
+        assert!(!summary.is_empty(), "初审不可用 summary 必须携带失败原因");
+    }
+
+    #[tokio::test]
+    async fn review_unavailable_carries_specific_reason() {
+        // 失败原因取证（2026-10-06 实弹：claude 拒模型只写 stderr，stdout 为空——
+        // 原因必须具体到可排查）：
+        //   异常终态无 stderr → 通用文案；异常终态有 stderr → 最后一条 stderr 行；
+        //   成功但无结论行 → 缺失文案；run_subagent_review 同路径。
+        let dir = std::env::temp_dir().join("ev-review-reason-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let sessions = SessionManager::new(tx);
+        let task = sample_task("running");
+        let custom = HarnessCustom::default();
+
+        // ① 异常终态、无输出（false）→ "会话异常终态"
+        let o1 = run_phase_doc_review(&sessions, "false", &[], "demo", &dir, &task, 1, &custom).await;
+        let ReviewOutcome::Unavailable(r1) = o1 else { panic!("false 命令必须 Unavailable: {o1:?}") };
+        assert_eq!(r1, "会话异常终态");
+
+        // ② 异常终态、stderr 有料（实弹形态）→ 最后一条 stderr 行
+        let o2 = run_phase_doc_review(
+            &sessions,
+            "sh",
+            &["-c".into(), "echo unrecognized_model >&2; exit 1".into()],
+            "demo",
+            &dir,
+            &task,
+            1,
+            &custom,
+        )
+        .await;
+        let ReviewOutcome::Unavailable(r2) = o2 else { panic!("stderr 场景必须 Unavailable: {o2:?}") };
+        assert!(r2.contains("unrecognized_model"), "失败原因必须取最后一条 stderr 行: {r2}");
+
+        // ③ 成功但结论行缺失（true 无输出）→ 缺失文案
+        let o3 = run_phase_doc_review(&sessions, "true", &[], "demo", &dir, &task, 1, &custom).await;
+        let ReviewOutcome::Unavailable(r3) = o3 else { panic!("无结论行必须 Unavailable: {o3:?}") };
+        assert!(r3.contains("[EASYVIBE-REVIEW]"), "结论行缺失须明示: {r3}");
+
+        // ④ run_subagent_review 不可用同路径（diff 关审查的降级原料）
+        let o4 = run_subagent_review(&sessions, "false", &[], "demo", &dir, &task, &custom, ("", "")).await;
+        let ReviewOutcome::Unavailable(r4) = o4 else { panic!("子agent审查 false 必须 Unavailable: {o4:?}") };
+        assert_eq!(r4, "会话异常终态");
     }

@@ -159,24 +159,43 @@ export function PhaseDocReview({
         ) : (
           <>
             {/* 子 agent 阶段初审横幅：与 diff 关"子agent初审"同款语义——
-                fail 只是预筛警报，最终裁决仍是下方的人工通过/打回 */}
+                fail 只是预筛警报，最终裁决仍是下方的人工通过/打回；
+                error = 初审不可用（会话失败/超时/结论非法），中性灰提示人工把关，
+                不带"按初审意见打回"（2026-10-06 实弹：不可用必须可见，不得静默缺失） */}
         {review && (
           <div
             className={`mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 ${
-              review.verdict === 'pass' ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60' : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/60'
+              review.verdict === 'error'
+                ? 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60'
+                : review.verdict === 'pass'
+                  ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60'
+                  : 'border-amber-200 dark:border-amber-900/60 bg-amber-50/60'
             }`}
           >
-            <ShieldAlert size={11} className={review.verdict === 'pass' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-amber-600'} />
+            <ShieldAlert size={11} className={`mt-0.5 ${review.verdict === 'pass' ? 'text-emerald-600' : review.verdict === 'error' ? 'text-slate-500 dark:text-slate-400' : 'text-amber-600'}`} />
             <div className="min-w-0 flex-1">
-              <p className={`text-micro font-bold ${review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                {t('task.phasePreReview')}{review.verdict === 'pass' ? t('task.phasePass') : t('task.phaseFail')}
-                {review.verdict !== 'pass' && <span className="ml-1 font-normal">{t('task.phaseFailHint')}</span>}
-              </p>
-              <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{review.summary}</p>
+              {review.verdict === 'error' ? (
+                <>
+                  <p className="text-micro font-bold text-slate-600 dark:text-slate-300">{t('task.phaseReviewError')}</p>
+                  <p className="mt-0.5 text-micro leading-4 text-slate-500 dark:text-slate-400">
+                    {review.summary}
+                    <span className="ml-1 font-semibold">{t('task.phaseReviewErrorHint')}</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className={`text-micro font-bold ${review.verdict === 'pass' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {t('task.phasePreReview')}{review.verdict === 'pass' ? t('task.phasePass') : t('task.phaseFail')}
+                    {review.verdict !== 'pass' && <span className="ml-1 font-normal">{t('task.phaseFailHint')}</span>}
+                  </p>
+                  <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{review.summary}</p>
+                </>
+              )}
             </div>
             {/* 2026-10-05 用户裁定：初审已给出意见——打回不许再让用户手填理由。
-                一键按初审意见打回（意见随打回注入，agent 带着重跑本阶段）。 */}
-            {!readonly && review.verdict !== 'pass' && onDecide && (
+                一键按初审意见打回（意见随打回注入，agent 带着重跑本阶段）。
+                仅 fail 提供：error（不可用）没有可执行的初审意见。 */}
+            {!readonly && review.verdict === 'fail' && onDecide && (
               <button
                 onClick={() => onDecide('rejected', review.summary)}
                 disabled={!!deciding}
@@ -278,8 +297,9 @@ export function PhaseDocReview({
             </button>
             <button
               onClick={() => {
-                // 2026-10-05 用户裁定：初审已给意见——打回理由预填初审摘要（可改），不强迫用户手填
-                if (review && review.verdict !== 'pass') setNote(review.summary)
+                // 2026-10-05 用户裁定：初审已给意见——打回理由预填初审摘要（可改），不强迫用户手填；
+                // 2026-10-06：仅 fail 预填——error（不可用）的 summary 是失败原因，不是可执行意见
+                if (review && review.verdict === 'fail') setNote(review.summary)
                 setRejecting(true)
               }}
               disabled={!!deciding}

@@ -132,6 +132,12 @@ impl SessionManager {
             use tokio::io::AsyncBufReadExt as _;
             let out_id = session_id_task.clone();
             let out_repo = repo.clone();
+            // stderr 取证份额（2026-10-06 实弹：claude CLI 拒模型只写 stderr——
+            // unrecognized_model 此前在终态后无从读取）。stderr 以 [err] 前缀并入同一
+            // 捕获缓冲（与过程直播格式一致）；消费方均按行找协议标记（RESULT/REVIEW），
+            // 前缀行不干扰解析；agent 连通性测试的 sample 可能含 [err] 行，信息更完整。
+            // 注意：必须在 out_task spawn 前 clone——其 async move 会拿走 stdout_buf 本体。
+            let err_capture_buf = stdout_buf.clone();
             let out_task = tokio::spawn(async move {
                 let mut lines = 0u64;
                 if let Some(mut s) = stdout {
@@ -206,6 +212,9 @@ impl SessionManager {
                                     stream: OutputStream::Stderr,
                                     line: format!("[err] {peek}"),
                                 });
+                                // 终态取证：stderr 同步进捕获缓冲（[err] 前缀），
+                                // take_output 消费方（审查失败原因等）可读
+                                append_capture(&err_capture_buf, &format!("[err] {}", line.trim_end()));
                                 line.clear();
                             }
                             Err(_) => break,

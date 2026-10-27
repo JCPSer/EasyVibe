@@ -125,18 +125,27 @@ export function DiffStage({
             className={`mb-2 flex items-start gap-2 rounded-lg border px-3 py-2 ${
               sel.result.review.verdict === 'pass'
                 ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/40'
-                : 'border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/40'
+                : sel.result.review.verdict === 'error'
+                  ? 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60'
+                  : 'border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/40'
             }`}
           >
-            <ShieldAlert size={11} className={`mt-0.5 shrink-0 ${sel.result.review.verdict === 'pass' ? 'text-emerald-600' : 'text-red-600'}`} />
+            <ShieldAlert size={11} className={`mt-0.5 shrink-0 ${sel.result.review.verdict === 'pass' ? 'text-emerald-600' : sel.result.review.verdict === 'error' ? 'text-slate-500 dark:text-slate-400' : 'text-red-600'}`} />
             <div className="min-w-0">
-              <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : 'text-red-700'}`}>
-                {t('task.subReview')}{sel.result.review.verdict === 'pass' ? t('task.phasePass') : t('task.phaseFail')}
+              <p className={`text-micro font-bold ${sel.result.review.verdict === 'pass' ? 'text-emerald-700' : sel.result.review.verdict === 'error' ? 'text-slate-600 dark:text-slate-300' : 'text-red-700'}`}>
+                {sel.result.review.verdict === 'error'
+                  ? t('task.subReviewError')
+                  : `${t('task.subReview')}${sel.result.review.verdict === 'pass' ? t('task.phasePass') : t('task.phaseFail')}`}
                 {typeof sel.result.review.at === 'number' && (
                   <span className="ml-1 font-normal text-slate-400">{absTime(String(sel.result.review.at))}</span>
                 )}
               </p>
-              <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">{sel.result.review.summary}</p>
+              <p className="mt-0.5 text-micro leading-4 text-slate-600 dark:text-slate-300">
+                {sel.result.review.summary}
+                {sel.result.review.verdict === 'error' && (
+                  <span className="ml-1 font-semibold text-slate-500 dark:text-slate-400">{t('task.phaseReviewErrorHint')}</span>
+                )}
+              </p>
             </div>
           </div>
         )}
