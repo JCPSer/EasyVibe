@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { HeartPulse, Loader2, Play, TrendingDown, TrendingUp, Wrench, Trash2, X } from 'lucide-react'
+import { HeartPulse, Loader2, Play, Wrench, Trash2, X } from 'lucide-react'
 import type { CodeMap } from '@/types/map'
 import { healthColor } from '@/shared/logic/layout'
 import { absTime, toMs } from '@/shared/logic/diffStat'
@@ -12,12 +12,13 @@ import { useLang } from '@/runtime/i18n'
 import { prunePatrolRuns, healthDashboard } from '@/api/repos'
 import { patrol } from '@/api/canvas'
 import {
-  fmtDay, initialWindow, isPresetActive, panWindow, presetWindow, zoomWindow,
+  fmtDay, initialWindow, isPresetActive, panWindow, presetWindow, yDomainOf, zoomWindow,
   type TrendWindow,
 } from './healthTrendZoom'
+import { Delta, Ring } from './healthWidgets'
 
 // M4-3 健康看板整页（按 ui-mockups/健康看板原型.png 施工）：
-// KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 近 10 次巡检趋势图（架构级 vs 模块平均）
+// KPI×4（架构健康/模块平均/逆向依赖/覆盖率）+ 巡检趋势图（架构级 vs 模块平均，动态 Y 轴）
 // + 最差模块排行 + 巡检记录表。数据面：GET /repos/{id}/health-dashboard（M4-3 新增聚合接口）
 // + 主地图（逆向依赖/覆盖率无历史，取当前地图口径并在卡片上注明）。
 
@@ -42,45 +43,6 @@ interface LatestModule {
 interface Dashboard {
   runs: DashboardRun[]
   latestModules: LatestModule[]
-}
-
-/** 迷你圆环（KPI 与排行共用）：score 0-100；NaN 入参会污染全部 SVG 坐标（ui-test P2 控制台报错来源） */
-function Ring({ score, size = 44 }: { score: number; size?: number }) {
-  const safe = Number.isFinite(score) ? score : 0
-  const r = (size - 6) / 2
-  const c = 2 * Math.PI * r
-  const pct = Math.max(0, Math.min(100, safe)) / 100
-  const color = healthColor(safe)
-  return (
-    <svg width={size} height={size} className="-rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={4} />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth={4}
-        strokeLinecap="round"
-        strokeDasharray={`${c * pct} ${c}`}
-        className="transition-all duration-500"
-      />
-    </svg>
-  )
-}
-
-function Delta({ now, prev }: { now: number; prev: number | null }) {
-  const { t } = useLang()
-  if (prev === null) return <p className="mt-0.5 text-micro text-slate-300 dark:text-slate-600">{t('pages.health.deltaNone')}</p>
-  const d = now - prev
-  if (d === 0) return <p className="mt-0.5 flex items-center gap-0.5 text-micro text-slate-400 dark:text-slate-500">{t('pages.health.deltaSame')}</p>
-  const up = d > 0
-  return (
-    <p className={`mt-0.5 flex items-center gap-0.5 text-micro ${up ? 'text-emerald-500' : 'text-red-500'}`}>
-      {up ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-      {t('pages.health.delta', { delta: `${up ? '+' : ''}${d}` })}
-    </p>
-  )
 }
 
 export function HealthPage({
@@ -507,7 +469,15 @@ function TrendChart({
   }
 
   const x = (i: number) => PAD.l + (view.length === 1 ? iw / 2 : (i / (view.length - 1)) * iw)
-  const y = (s: number) => PAD.t + (1 - Math.max(0, Math.min(100, Number.isFinite(s) ? s : 0)) / 100) * ih
+  // 动态 Y 轴：视窗内分数自适应（0–100 固定刻度会把 70–90 的波动压平、下方大片空白）
+  const yDom = useMemo(
+    () =>
+      yDomainOf(
+        view.flatMap((r) => [r.archScore, r.moduleCount > 0 ? r.moduleAvg : null]),
+      ),
+    [view],
+  )
+  const y = (s: number) => PAD.t + (1 - (Math.max(yDom.min, Math.min(yDom.max, Number.isFinite(s) ? s : yDom.min)) - yDom.min) / (yDom.max - yDom.min)) * ih
   const line = (key: 'archScore' | 'moduleAvg') =>
     // 缺数据的点跳过（M/L 命令不带坐标），折线断开优于 NaN 坐标报错
     view
@@ -532,9 +502,9 @@ function TrendChart({
         onDoubleClick={() => setWin(initialWindow(total))}
       >
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-          {[0, 25, 50, 75, 100].map((g) => (
+          {yDom.ticks.map((g) => (
             <g key={g}>
-              <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke={g === 0 ? '#e2e8f0' : '#f1f5f9'} strokeWidth={1} />
+              <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke={g === yDom.min ? '#e2e8f0' : '#f1f5f9'} strokeWidth={1} />
               <text x={PAD.l - 5} y={y(g) + 3} textAnchor="end" fontSize={8} fill="#cbd5e1" className="tnum">
                 {g}
               </text>

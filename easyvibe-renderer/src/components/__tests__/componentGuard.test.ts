@@ -43,6 +43,7 @@ const lsRecursive = (dir: string): string[] => {
 // 9 个路由可达整页（`routes.tsx` 由 repoLayout 的冻结键集合单独守）。
 const PAGES_FILES = [
   'ChangesPage.tsx', 'DepsPage.tsx', 'DriftPage.tsx', 'GitPage.tsx', 'HealthPage.tsx',
+  'healthWidgets.tsx',
   'ModulesPage.tsx', 'PlaceholderPage.tsx', 'RunsPage.tsx', 'RunsStreamView.tsx', 'UsagePage.tsx',
 ]
 // 本次迁入 canvas/ 的 7 件（含 4 个 ReactFlow 节点 + 3 个画布面板）。

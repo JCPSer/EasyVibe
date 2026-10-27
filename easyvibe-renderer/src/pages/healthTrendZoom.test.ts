@@ -1,7 +1,7 @@
 // 视窗逻辑单测：缩放锚点不动点、平移钳制不越界、档位切换。
 import { describe, expect, it } from 'vitest'
 import {
-  clampWindow, initialWindow, isPresetActive, MIN_POINTS, panWindow, presetWindow, zoomWindow,
+  clampWindow, initialWindow, isPresetActive, MIN_POINTS, panWindow, presetWindow, yDomainOf, zoomWindow,
 } from './healthTrendZoom'
 
 describe('healthTrendZoom · 初始视窗', () => {
@@ -87,5 +87,38 @@ describe('healthTrendZoom · 档位', () => {
     expect(isPresetActive({ start: 80, count: 20 }, 100, 20)).toBe(true)
     expect(isPresetActive({ start: 70, count: 30 }, 100, 20)).toBe(false)
     expect(isPresetActive({ start: 0, count: 100 }, 100, 'all')).toBe(true)
+  })
+})
+
+describe('healthTrendZoom · 动态 Y 轴', () => {
+  it('无数据回落 0–100 固定五格', () => {
+    expect(yDomainOf([])).toEqual({ min: 0, max: 100, ticks: [0, 25, 50, 75, 100] })
+    expect(yDomainOf([null, undefined, NaN])).toEqual({ min: 0, max: 100, ticks: [0, 25, 50, 75, 100] })
+  })
+  it('集中分区间的自适应：70–90 → 域收紧且含数据端点余量', () => {
+    const d = yDomainOf([74, 78, 89, 82, null])
+    expect(d.min).toBeLessThanOrEqual(74 - 2)
+    expect(d.max).toBeGreaterThanOrEqual(89 + 2)
+    expect(d.max - d.min).toBeLessThan(40) // 不再是 0–100 大片空白
+    expect(d.ticks[0]).toBeGreaterThanOrEqual(d.min)
+    expect(d.ticks[d.ticks.length - 1]).toBeLessThanOrEqual(d.max)
+    expect(d.ticks.length).toBeGreaterThanOrEqual(3)
+  })
+  it('域钳制在 0–100 内', () => {
+    const d = yDomainOf([1, 3, 5])
+    expect(d.min).toBeGreaterThanOrEqual(0)
+    expect(d.max).toBeLessThanOrEqual(100)
+    const hi = yDomainOf([95, 98, 100])
+    expect(hi.max).toBeLessThanOrEqual(100)
+  })
+  it('水平数据（同分）至少保 10 分量程', () => {
+    const d = yDomainOf([80, 80, 80])
+    expect(d.max - d.min).toBeGreaterThanOrEqual(10)
+  })
+  it('刻度步长好看（整除域端点附近）', () => {
+    const d = yDomainOf([70, 90])
+    const steps = d.ticks.slice(1).map((v, i) => v - d.ticks[i])
+    expect(new Set(steps).size).toBe(1) // 等距
+    expect([1, 2, 5, 10, 20, 25, 50]).toContain(steps[0])
   })
 })

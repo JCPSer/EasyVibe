@@ -67,3 +67,33 @@ export const fmtDay = (iso: string): string => {
   const d = new Date(t)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
+
+export interface YDomain {
+  min: number
+  max: number
+  ticks: number[]
+}
+
+/** 动态 Y 轴：按视窗内数据的 min/max 自适应（分数集中 70–90 时 0–100 固定刻度会把趋势压平）。
+ *  边距取量程的 15%（至少 ±4 分），钳制在 [0, 100]；无数据回落 0–100。
+ *  刻度取「好看步长」（1/2/5/10/20/25/50）生成 4–6 格。 */
+export function yDomainOf(values: (number | null | undefined)[]): YDomain {
+  const vs = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  if (!vs.length) return { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] }
+  const lo = Math.min(...vs)
+  const hi = Math.max(...vs)
+  const pad = Math.max(4, Math.ceil((hi - lo) * 0.15))
+  let min = Math.max(0, Math.floor(lo - pad))
+  let max = Math.min(100, Math.ceil(hi + pad))
+  if (max - min < 10) {
+    // 数据几乎水平（单点/同分）：保证至少 10 分量程，趋势线不顶满
+    const mid = Math.round((min + max) / 2)
+    min = Math.max(0, mid - 5)
+    max = Math.min(100, min + 10)
+  }
+  const span = max - min
+  const step = [1, 2, 5, 10, 20, 25, 50].find((s) => Math.ceil(span / s) <= 5) ?? 50
+  const ticks: number[] = []
+  for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v)
+  return { min, max, ticks }
+}
