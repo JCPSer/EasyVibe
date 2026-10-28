@@ -1,11 +1,13 @@
 // 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
 // compareDirHint：上一阶段产物目录（只读对照）；readonly：回看模式（隐藏裁决，露出重开入口）。
 // 拆自 TaskWorkflowPage.tsx（2026-10-05 防膨胀）。
-import { useEffect, useState } from 'react'
-import { CheckCircle2, FileText, Loader2, ShieldAlert } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { CheckCircle2, FileText, Loader2, RotateCw, ShieldAlert } from 'lucide-react'
 import { useLang } from '@/runtime/i18n'
+import { toast } from '@/runtime/toast'
 import { MarkdownMessage } from '@/shared/primitives/MarkdownMessage'
 import { devDoc, devDocs } from '@/api/task'
+import { phaseReviewTask } from './taskAdmin'
 
 /** 阶段产物评审卡：拉该阶段产物文档全文 + 通过/打回（需求矩阵/方案设计的评审载体）。
  *  compareDirHint：上一阶段产物目录（方案评审时回看需求矩阵）——只读对照，不带裁决按钮
@@ -15,6 +17,7 @@ export function PhaseDocReview({
   taskId,
   dirHint,
   title,
+  phase,
   deciding,
   review,
   compareDirHint,
@@ -29,6 +32,8 @@ export function PhaseDocReview({
   /** 产物目录特征串：1_requirements_matrix / 2_requirements_solutions */
   dirHint: string
   title: string
+  /** 阶段号（1=需求矩阵 / 2=方案设计）——error 横幅「重启审查」调 /phase-review 的入参 */
+  phase: 1 | 2
   deciding: string | null
   /** 子 agent 阶段初审结论（2026-10-03：到人工关前的预筛，fail 不自动打回——人终审） */
   review?: { verdict: string; summary: string } | null
@@ -54,6 +59,26 @@ export function PhaseDocReview({
   const [compareDoc, setCompareDoc] = useState<{ path: string; content: string } | null>(null)
   const [compareMissing, setCompareMissing] = useState(false)
   const [tab, setTab] = useState<'main' | 'compare'>('main')
+  // 重启初审（2026-10-06 实弹：error 横幅一键重启，替代被迫人工把关）——
+  // 202 异步，新结论经 TaskStatus 事件驱动父级 reload 到达（phaseReviews 无 at 时间戳，
+  // 以点击时快照对比内容变化判定本轮已出结论，同 DiffStage 的 at 判定同款思路）
+  const [restarting, setRestarting] = useState(false)
+  const restartSnap = useRef<string | null>(null)
+  useEffect(() => {
+    if (!restarting) return
+    const now = review ? `${review.verdict}|${review.summary}` : null
+    if (now !== restartSnap.current) setRestarting(false)
+  }, [review, restarting])
+  const doRestart = () => {
+    if (!backendRepo || restarting) return
+    restartSnap.current = review ? `${review.verdict}|${review.summary}` : null
+    setRestarting(true)
+    phaseReviewTask(backendRepo, taskId, phase)
+      .catch((e) => {
+        setRestarting(false)
+        toast(e instanceof Error ? e.message : t('task.restartReviewFail'), 'error')
+      })
+  }
 
   useEffect(() => {
     let dead = false
@@ -194,7 +219,20 @@ export function PhaseDocReview({
             </div>
             {/* 2026-10-05 用户裁定：初审已给出意见——打回不许再让用户手填理由。
                 一键按初审意见打回（意见随打回注入，agent 带着重跑本阶段）。
-                仅 fail 提供：error（不可用）没有可执行的初审意见。 */}
+                仅 fail 提供：error（不可用）没有可执行的初审意见。
+                2026-10-06：error 提供「重启审查」——初审不可用（模型槽抖动等）时一键重跑，
+                不强迫用户直接人工把关。 */}
+            {!readonly && review.verdict === 'error' && (
+              <button
+                onClick={doRestart}
+                disabled={restarting || !!deciding}
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1 text-micro font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                title={t('task.restartReviewTip')}
+              >
+                {restarting ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
+                {restarting ? t('task.restartingReview') : t('task.restartReview')}
+              </button>
+            )}
             {!readonly && review.verdict === 'fail' && onDecide && (
               <button
                 onClick={() => onDecide('rejected', review.summary)}

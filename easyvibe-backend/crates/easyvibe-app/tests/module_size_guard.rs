@@ -264,6 +264,7 @@ const FROZEN_ROUTES: &[&str] = &[
     "/repos/{id}/tasks/{tid}/decide",
     "/repos/{id}/tasks/{tid}/diff",
     "/repos/{id}/tasks/{tid}/kill",
+    "/repos/{id}/tasks/{tid}/phase-review",
     "/repos/{id}/tasks/{tid}/remediate",
     "/repos/{id}/tasks/{tid}/retry",
     "/repos/{id}/tasks/{tid}/review",
@@ -354,6 +355,7 @@ const FROZEN_DOMAIN_ROUTES: &[(&str, &[&str])] = &[
             "/repos/{id}/tasks/{tid}/remediate",
             "/repos/{id}/tasks/{tid}/rewind",
             "/repos/{id}/tasks/{tid}/review",
+            "/repos/{id}/tasks/{tid}/phase-review",
             "/repos/{id}/tasks/{tid}/approvals",
             "/repos/{id}/tasks/{tid}/diff",
             "/repos/{id}/tasks/{tid}/kill",
@@ -422,7 +424,7 @@ fn domain_route_table_is_frozen() {
     }
 }
 
-/// 断言组 B：域表并集 == 全局冻结清单 64 条（单一事实源在域表，本表只交叉校验）。
+/// 断言组 B：域表并集 == 全局冻结清单 65 条（单一事实源在域表，本表只交叉校验）。
 #[test]
 fn domain_routes_union_matches_global_frozen_list() {
     let mut union: Vec<String> = FROZEN_DOMAIN_ROUTES
@@ -438,7 +440,7 @@ fn domain_routes_union_matches_global_frozen_list() {
         union, frozen,
         "域表并集与全局 FROZEN_ROUTES 漂移——两处清单必须恒等（防双轨维护）"
     );
-    assert_eq!(union.len(), 65, "route 总数应为 65（含 /ws）");
+    assert_eq!(union.len(), 66, "route 总数应为 66（含 /ws）");
 }
 
 /// 断言组 C（防假绿·关键）：每个域模块自注册非空（≥1）。

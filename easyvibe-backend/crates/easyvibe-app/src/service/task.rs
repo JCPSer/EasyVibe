@@ -251,6 +251,14 @@ pub(crate) async fn review_task(st: &AppState, id: &str, tid: &str) -> Result<Ta
     Ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })
 }
 
+/// 重启阶段初审（2026-10-06：初审不可用灰横幅的一键重启入口；phase 1=需求矩阵/analysis，
+/// 2=方案设计/solution）。异步执行；结论经 result.phaseReviews + 留痕 + 事件送达。
+pub(crate) async fn phase_review_task(st: &AppState, id: &str, tid: &str, phase: u8) -> Result<TaskActionResult, ApiError> {
+    st.map_service.find_repo(id).await.ok_or_else(|| ApiError::NotFound(format!("仓库 {id} 未注册")))?;
+    let task = st.executor.phase_review_now(tid, phase).await?;
+    Ok(TaskActionResult { status: task.status.clone(), gate: task.gate.clone() })
+}
+
 /// 审批决策（approved/rejected 按当前关卡推进或终止；发射 task.statusChanged）。
 pub(crate) async fn decide_task(
     st: &AppState,

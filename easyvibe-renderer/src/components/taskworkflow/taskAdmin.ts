@@ -49,6 +49,21 @@ export function reviewTask(repo: string, taskId: string): Promise<void> {
   return call(taskAction(repo, taskId, 'review'))
 }
 
+/**
+ * 重启阶段初审（2026-10-06：评审卡 error 横幅的一键重启入口）：仅对应评审关可发起——
+ * phase 1（需求矩阵）↔ analysis 关，phase 2（方案设计）↔ solution 关。202 异步——
+ * 结论经 result.phaseReviews + 留痕 + 事件送达，不迁移任务状态。
+ */
+export function phaseReviewTask(repo: string, taskId: string, phase: 1 | 2): Promise<void> {
+  return call(
+    taskAction(repo, taskId, 'phase-review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ phase }),
+    }),
+  )
+}
+
 export function deleteTask(repo: string, taskId: string): Promise<void> {
   return call(deleteTaskRequest(repo, taskId))
 }

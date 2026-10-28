@@ -38,6 +38,7 @@ export function StageLookback({
         taskId={task.id}
         dirHint={isAnalysis ? '1_requirements_matrix' : '2_requirements_solutions'}
         title={isAnalysis ? t('task.lookbackAnalysisTitle') : t('task.lookbackSolutionTitle')}
+        phase={isAnalysis ? 1 : 2}
         deciding={null}
         review={isAnalysis ? (task.result?.phaseReviews?.analysis ?? null) : (task.result?.phaseReviews?.solution ?? null)}
         {...(!isAnalysis ? { compareDirHint: '1_requirements_matrix', compareTitle: t('task.compareMatrixTitle') } : {})}

@@ -389,3 +389,102 @@ use tower::ServiceExt;
         assert_eq!(t.status, "awaiting_approval", "应跑完实施回到审批流，而非停回 plan 关");
         assert_eq!(t.gate.as_deref(), Some("diff"));
     }
+
+    #[tokio::test]
+    async fn task_phase_review_restart_at_analysis_gate() {
+        // 2026-10-06 实弹：阶段 1 初审会话 4 秒异常终态 → 评审卡灰横幅"初审暂不可用"。
+        // 一键重启入口：POST /phase-review {phase}——校验关匹配（1↔analysis / 2↔solution），
+        // 202 异步重跑；结论落 result.phaseReviews（error 占位带原因）+ flagged 留痕，不迁移状态。
+        use easyvibe_db::{ApprovalRepository as _, TaskRepository as _};
+        let (state, repo) = chat_state("task-phase-review").await;
+        let app = build_router(state.clone());
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "title": "重启初审", "description": "error 横幅一键重启", "trust": "manual" }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let tid = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["data"]["id"].as_str().unwrap().to_string();
+        let decide = |gate: &str| {
+            let app = app.clone();
+            let repo = repo.clone();
+            let tid = tid.clone();
+            let gate = gate.to_string();
+            async move {
+                app.oneshot(
+                    axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/decide"))
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(serde_json::json!({ "decision": "approved", "note": "过", "gate": gate }).to_string()))
+                        .unwrap(),
+                ).await.unwrap()
+            }
+        };
+        // plan 关直接调 /phase-review → 409（关不匹配）
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/phase-review"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "phase": 1 }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "非 analysis 关不得重启阶段 1 初审");
+        // 非法 phase → 400
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/phase-review"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "phase": 3 }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST, "phase 仅支持 1/2");
+
+        // 推进到 analysis 关（阶段 1 自动初审随执行链走完，error 占位已落 phaseReviews）
+        assert_eq!(decide("plan").await.status(), axum::http::StatusCode::OK);
+        async fn wait_gate(state: &AppState, tid: &str, gate: &str) -> easyvibe_db::TaskRow {
+            let mut t = state.task_repo.get(tid).await.unwrap().unwrap();
+            for _ in 0..40 {
+                if t.status == "awaiting_approval" && t.gate.as_deref() == Some(gate) { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                t = state.task_repo.get(tid).await.unwrap().unwrap();
+            }
+            t
+        }
+        let t = wait_gate(&state, &tid, "analysis").await;
+        assert_eq!(t.gate.as_deref(), Some("analysis"), "前置：任务在 analysis 关");
+        let rv: serde_json::Value = serde_json::from_str(t.result.as_deref().unwrap_or("{}")).unwrap();
+        assert_eq!(rv["phaseReviews"]["analysis"]["verdict"].as_str().unwrap(), "error", "自动初审不可用占位先行落库（stub 会话无结论）");
+
+        // 关错配（analysis 关重启 phase 2）→ 409
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/phase-review"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "phase": 2 }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT, "analysis 关不得重启阶段 2 初审");
+
+        // analysis 关重启 phase 1 → 202；spawn 完成（stub 会话无结论 → 仍不可用）：
+        // flagged 留痕「重启初审：…」+ phaseReviews 新结论，任务状态不变
+        let resp = app.clone().oneshot(
+            axum::http::Request::post(format!("/api/repos/{repo}/tasks/{tid}/phase-review"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::json!({ "phase": 1 }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED, "analysis 关重启初审应 202");
+        let mut ok = false;
+        for _ in 0..40 {
+            let aps = state.approval_repo.list_by_task(&tid).await.unwrap();
+            if aps.iter().any(|a| a.gate == "analysis" && a.decision == "flagged" && a.note.as_deref().unwrap_or("").contains("重启初审")) {
+                ok = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        assert!(ok, "重启初审结束必须留痕（重启初审：…），flagged 决策");
+        let t = state.task_repo.get(&tid).await.unwrap().unwrap();
+        assert_eq!(t.status, "awaiting_approval", "重启初审不迁移状态");
+        assert_eq!(t.gate.as_deref(), Some("analysis"));
+        let rv: serde_json::Value = serde_json::from_str(t.result.as_deref().unwrap_or("{}")).unwrap();
+        assert_eq!(rv["phaseReviews"]["analysis"]["verdict"].as_str().unwrap(), "error", "stub 会话重启后仍是不可用占位");
+        assert!(rv["phaseReviews"]["analysis"]["summary"].as_str().unwrap_or("").contains("EASYVIBE-REVIEW"), "不可用原因须可见");
+    }

@@ -23,6 +23,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/repos/{id}/tasks/{tid}/remediate", post(post_task_remediate))
         .route("/repos/{id}/tasks/{tid}/rewind", post(post_task_rewind))
         .route("/repos/{id}/tasks/{tid}/review", post(post_task_review))
+        .route("/repos/{id}/tasks/{tid}/phase-review", post(post_task_phase_review))
         .route("/repos/{id}/tasks/{tid}/approvals", get(list_task_approvals))
         .route("/repos/{id}/tasks/{tid}/diff", get(get_task_diff))
         .route("/repos/{id}/tasks/{tid}/kill", post(post_task_kill))
@@ -70,6 +71,24 @@ pub(crate) async fn post_task_rewind(
 /// result.review + 留痕 + 事件送达（见 TaskExecutor::review_now 的语义注释）
 pub(crate) async fn post_task_review(State(st): State<AppState>, Path((id, tid)): Path<(String, String)>) -> Result<Response, AppError> {
     let out = service::task::review_task(&st, &id, &tid).await?;
+    Ok((axum::http::StatusCode::ACCEPTED, Json(ApiResponse::ok(out))).into_response())
+}
+
+/// 重启阶段初审（需求矩阵/方案评审卡 error 横幅的一键重启）：body `{"phase": 1|2}`——
+/// 仅对应评审关可发起（1↔analysis，2↔solution）；异步执行，结论经
+/// result.phaseReviews + 留痕 + 事件送达（见 TaskExecutor::phase_review_now 的语义注释）
+pub(crate) async fn post_task_phase_review(
+    State(st): State<AppState>,
+    Path((id, tid)): Path<(String, String)>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let phase = body["phase"]
+        .as_u64()
+        .ok_or_else(|| ApiError::BadRequest("缺少 phase 字段（1=需求矩阵 / 2=方案设计）".into()))?;
+    if !matches!(phase, 1 | 2) {
+        return Err(ApiError::BadRequest(format!("phase 仅支持 1/2，收到 {phase}")).into());
+    }
+    let out = service::task::phase_review_task(&st, &id, &tid, phase as u8).await?;
     Ok((axum::http::StatusCode::ACCEPTED, Json(ApiResponse::ok(out))).into_response())
 }
 

@@ -335,6 +335,7 @@ export function TaskWorkflowPage({
                     taskId={sel.id}
                     dirHint="1_requirements_matrix"
                     title={t('task.phaseReviewTitleAnalysis')}
+                    phase={1}
                     deciding={deciding}
                     review={sel.result?.phaseReviews?.analysis ?? null}
                     onDecide={(d, note) => decide(d, note)}
@@ -349,6 +350,7 @@ export function TaskWorkflowPage({
                     taskId={sel.id}
                     dirHint="2_requirements_solutions"
                     title={t('task.phaseReviewTitleSolution')}
+                    phase={2}
                     deciding={deciding}
                     review={sel.result?.phaseReviews?.solution ?? null}
                     compareDirHint="1_requirements_matrix"

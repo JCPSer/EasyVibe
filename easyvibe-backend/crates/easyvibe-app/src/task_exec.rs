@@ -460,7 +460,15 @@ impl TaskExecutor {
                     format!("人工复审：{} — {}", if v.verdict == "pass" { "通过" } else { "未通过" }, v.summary)
                 }
                 ReviewOutcome::Unavailable(reason) => {
-                    // 不可用（失败/超时/结论非法）：不阻断，留痕写明具体原因，可重试或人工审 Diff
+                    // 不可用（失败/超时/结论非法）：不阻断，留痕写明具体原因，可重试或人工审 Diff。
+                    // error 结论必须落 result.review（与自动审查路径同行为）——
+                    // 否则前端 error 横幅拿不到原因（2026-10-06 实弹修正，人工路径此前只留痕）。
+                    merge_review_verdict(
+                        this.tasks.as_ref(),
+                        &tid,
+                        &ReviewVerdict { verdict: "error".into(), summary: reason.clone() },
+                    )
+                    .await;
                     format!("人工复审：审查会话不可用——{reason}（不阻断，可重试或人工审 Diff）")
                 }
             };
@@ -468,6 +476,58 @@ impl TaskExecutor {
             // 同状态广播——前端据 task 事件 reload，result.review 新结论（at 时间戳）随之到达
             this.publish_status(&task.repo, &tid, "awaiting_approval", Some("diff")).await;
             info!("[task-exec] 任务 {} 人工复审结束：{}", tid, note);
+        });
+        self.tasks.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
+    }
+
+    /// 重启阶段初审（2026-10-06 实弹：阶段 1/2 初审会话 4 秒异常终态 → 评审卡灰横幅
+    /// "初审暂不可用"，此前唯一出路是被迫人工把关）：在 analysis/solution 评审关对
+    /// 该阶段产物重跑一轮子 agent 初审（与阶段完成后的自动初审同一机制）。
+    /// 异步执行（初审是分钟级）——HTTP 立即返回，结论经 result.phaseReviews + 留痕 + 事件送达。
+    ///
+    /// 防重入假设：重跑期间任务状态恒为 awaiting_approval（初审不改状态，只有 decide 迁移），
+    /// 重复点击会重复 spawn——但入口是用户手点的评审卡按钮，与 review_now 同款纪律，
+    /// 不引入额外锁；幂等性由「同关重跑结论互相覆盖（merge_phase_review 按 key 覆盖）」保证。
+    /// spawn 主体（跑初审/归并/留痕/广播）在 review.rs::phase_review_rerun——本文件近 900 行
+    /// 上限，状态机只留校验与 spawn 调度（R7 防回胀）。
+    pub async fn phase_review_now(self: &Arc<Self>, task_id: &str, phase: u8) -> Result<TaskRecord, ApiError> {
+        if !matches!(phase, 1 | 2) {
+            return Err(ApiError::BadRequest(format!("初审重跑仅支持阶段 1（需求矩阵）/2（方案设计），收到 {phase}")));
+        }
+        let gate = if phase == 1 { "analysis" } else { "solution" };
+        let task = self.tasks.get(task_id).await?.ok_or_else(|| ApiError::NotFound(format!("任务 {task_id} 不存在")))?;
+        if task.status != "awaiting_approval" || task.gate.as_deref() != Some(gate) {
+            return Err(ApiError::Conflict(format!(
+                "仅「{}」评审关可重启本阶段初审（当前 {} / {:?}）——初审结论不影响关卡状态",
+                if phase == 1 { "需求矩阵" } else { "方案设计" },
+                task.status,
+                task.gate
+            )));
+        }
+        let repo = self
+            .map_service
+            .find_repo(&task.repo)
+            .await
+            .ok_or_else(|| ApiError::NotFound(format!("仓库 {} 未注册", task.repo)))?;
+        // review 槽整体替换（可换便宜模型/收紧权限）——与自动初审同款解析链
+        let resolved = self.agent_slots.resolve(Some("review")).await;
+        info!("[task-exec] 任务 {} 重启阶段 {} 初审（会话即将启动）", task_id, phase);
+        let this = self.clone();
+        let tid = task_id.to_string();
+        tokio::spawn(async move {
+            phase_review_rerun(
+                &this.session_manager,
+                this.tasks.as_ref(),
+                this.approvals.as_ref(),
+                &this.events,
+                &this.harness,
+                &resolved,
+                &repo,
+                &task,
+                phase,
+                &tid,
+            )
+            .await;
         });
         self.tasks.get(task_id).await?.ok_or_else(|| ApiError::Internal("任务丢失".into()))
     }

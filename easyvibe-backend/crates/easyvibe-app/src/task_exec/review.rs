@@ -243,3 +243,61 @@ pub(crate) async fn merge_phase_review(
         let _ = task_repo.set_result(task_id, &s).await;
     }
 }
+
+/// 重启阶段初审的 spawn 主体（状态机 phase_review_now 委托；显式入参——
+/// 本文件是评审门职责切片，不反向引用状态机）。跑 run_phase_doc_review → 结论归并
+/// result.phaseReviews（不可用落 error 占位，评审卡灰横幅可见，不阻断）→ flagged 留痕 →
+/// 同状态广播（前端据 task 事件 reload 拿新 phaseReviews，与 review_now 同款通道）。
+pub(crate) async fn phase_review_rerun(
+    session_manager: &SessionManager,
+    tasks: &dyn TaskStore,
+    approvals: &dyn ApprovalStore,
+    events: &Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
+    harness: &tokio::sync::RwLock<Harness>,
+    resolved: &easyvibe_ai_agent::agent_conf::ResolvedAgent,
+    repo: &easyvibe_map::Repo,
+    task: &TaskRecord,
+    phase: u8,
+    tid: &str,
+) {
+    let gate = if phase == 1 { "analysis" } else { "solution" };
+    let custom = harness.read().await.custom.clone();
+    let outcome = run_phase_doc_review(
+        session_manager,
+        &resolved.command,
+        &resolved.args,
+        &repo.id,
+        &repo.root,
+        task,
+        phase,
+        &custom,
+    )
+    .await;
+    let note = match &outcome {
+        ReviewOutcome::Verdict(v) => {
+            merge_phase_review(tasks, tid, gate, v).await;
+            format!("重启初审：{} — {}", if v.verdict == "pass" { "通过" } else { "未通过" }, v.summary)
+        }
+        ReviewOutcome::Unavailable(reason) => {
+            merge_phase_review(tasks, tid, gate, &ReviewVerdict { verdict: "error".into(), summary: reason.clone() }).await;
+            format!("重启初审：初审不可用——{reason}（不阻断，可再重启或人工把关）")
+        }
+    };
+    let _ = approvals
+        .record(&ApprovalRecord {
+            task_id: tid.into(),
+            gate: gate.into(),
+            decision: "flagged".into(),
+            note: Some(note.clone()),
+        })
+        .await;
+    if let Some(tx) = events {
+        easyvibe_event_bus::publish(tx, easyvibe_event_bus::BusEvent::TaskStatus {
+            repo: task.repo.clone(),
+            task_id: tid.into(),
+            status: "awaiting_approval".into(),
+            gate: Some(gate.into()),
+        });
+    }
+    info!("[task-exec] 任务 {} 重启初审结束：{}", tid, note);
+}
