@@ -30,6 +30,7 @@ pub struct TaskRow {
     pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
     pub origin_task_id: Option<String>,    // R3 D2：返工来源（复制为新任务的原始任务）
     pub successor_task_id: Option<String>, // R3 D2：原任务视角的反链（返工率聚合的命脉）
+    pub last_session_id: Option<String>,   // 重试续跑：上一次执行的会话 id（retry 抢救写入，spawn 读输出尾部）
 }
 
 pub trait TaskRepository: Send + Sync {
@@ -52,6 +53,9 @@ pub trait TaskRepository: Send + Sync {
     fn set_gate(&self, id: &str, gate: Option<&str>) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// 变更归因：记录任务启动时的 git HEAD（工作区脏时归因不混历史改动）
     fn set_base_head(&self, id: &str, head: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
+    /// 重试续跑：retry() 在 reset_for_retry 之前抢救 session_id 落本列
+    /// （reset_for_retry 会把 session_id 置 NULL；本列不动，spawn 按它读上次输出尾部）。
+    fn set_last_session(&self, id: &str, session_id: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// M4-1：任务终态采集产物（[EASYVIBE-RESULT] 解析 + diff stat + 归档路径）
     fn set_result(&self, id: &str, result_json: &str) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
     /// M3-5（§11 🟡4）：后端重启会杀掉 spawn 的 agent（kill_on_drop）——
@@ -104,11 +108,12 @@ struct TaskRowSql {
     pub conversation_id: Option<String>,   // M4-2：任务←→会话关联
     pub origin_task_id: Option<String>,    // R3 D2
     pub successor_task_id: Option<String>, // R3 D2
+    pub last_session_id: Option<String>,   // 重试续跑
 }
 
 impl From<TaskRowSql> for TaskRow {
     fn from(r: TaskRowSql) -> Self {
-        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at, conversation_id: r.conversation_id, origin_task_id: r.origin_task_id, successor_task_id: r.successor_task_id,}
+        Self { id: r.id, repo: r.repo, title: r.title, description: r.description, modules: r.modules, acceptance: r.acceptance, source: r.source, context: r.context, status: r.status, trust: r.trust, error: r.error, session_id: r.session_id, gate: r.gate, prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens, result: r.result, base_head: r.base_head, created_at: r.created_at, updated_at: r.updated_at, conversation_id: r.conversation_id, origin_task_id: r.origin_task_id, successor_task_id: r.successor_task_id, last_session_id: r.last_session_id,}
     }
 }
 
@@ -201,6 +206,13 @@ impl TaskRepository for SqliteTaskRepository {
         Ok(())
     }
 
+    async fn set_last_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
+        sqlx::query("UPDATE tasks SET last_session_id = ? WHERE id = ?")
+            .bind(session_id).bind(id)
+            .execute(&self.pool).await.map_err(db_err)?;
+        Ok(())
+    }
+
     async fn set_result(&self, id: &str, result_json: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE tasks SET result = ? WHERE id = ?")
             .bind(result_json).bind(id)
@@ -282,7 +294,7 @@ mod tests {
             trust: "manual".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
             created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
-            origin_task_id: None, successor_task_id: None,
+            origin_task_id: None, successor_task_id: None, last_session_id: None,
         };
         repo.create(&t).await.unwrap();
         repo.update_status("task-1", "running", None).await.unwrap();
@@ -306,7 +318,7 @@ mod tests {
             status: status.into(), trust: "manual".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
             created_at: "1791016035807".into(), updated_at: "1791016035807".into(), conversation_id: None,
-            origin_task_id: None, successor_task_id: None,
+            origin_task_id: None, successor_task_id: None, last_session_id: None,
         };
         repo.create(&mk("task-ms", "pending")).await.unwrap();
         repo.update_status("task-ms", "running", None).await.unwrap();
@@ -332,6 +344,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_rescue_last_session_id_roundtrip() {
+        // 重试续跑：set_last_session 独立列落库——reset_for_retry 清 session_id 后仍可读回
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SqliteTaskRepository::new(db.pool().clone());
+        let t = TaskRow {
+            id: "task-rescue".into(), repo: "demo".into(), title: "t".into(), description: "d".into(),
+            modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
+            status: "interrupted".into(), trust: "manual".into(), error: None,
+            session_id: Some("sess-old".into()), gate: None,
+            prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
+            created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
+            origin_task_id: None, successor_task_id: None, last_session_id: None,
+        };
+        repo.create(&t).await.unwrap();
+        repo.set_last_session("task-rescue", "sess-old").await.unwrap();
+        repo.reset_for_retry("task-rescue").await.unwrap();
+        let row = repo.get("task-rescue").await.unwrap().unwrap();
+        assert_eq!(row.session_id, None, "reset_for_retry 清 session_id 不变");
+        assert_eq!(row.last_session_id.as_deref(), Some("sess-old"), "last_session_id 独立于 session_id，抢救语义成立");
+    }
+
+    #[tokio::test]
     async fn running_tasks_interrupted_on_restart() {
         let db = Database::connect_memory().await.unwrap();
         let repo = SqliteTaskRepository::new(db.pool().clone());
@@ -340,7 +374,7 @@ mod tests {
             modules: "[]".into(), acceptance: "a".into(), source: "manual".into(), context: "{}".into(),
             status: status.into(), trust: "auto".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None, created_at: "1".into(), updated_at: "1".into(),
-            conversation_id: None, origin_task_id: None, successor_task_id: None,
+            conversation_id: None, origin_task_id: None, successor_task_id: None, last_session_id: None,
         };
         repo.create(&mk("task-run", "running")).await.unwrap();
         repo.create(&mk("task-wait", "awaiting_approval")).await.unwrap();

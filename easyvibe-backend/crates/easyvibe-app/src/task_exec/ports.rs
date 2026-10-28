@@ -37,6 +37,8 @@ pub struct TaskRecord {
     pub conversation_id: Option<String>,
     pub origin_task_id: Option<String>,
     pub successor_task_id: Option<String>,
+    /// 重试续跑：上一次执行的会话 id（retry 抢救写入；spawn 按它读上次输出尾部注入接续块）
+    pub last_session_id: Option<String>,
 }
 
 /// 审批留痕记录（本地 DTO）：id 与 decided_at 由组合根适配器补齐（调用方只关心语义留痕）。
@@ -68,6 +70,8 @@ pub trait TaskStore: Send + Sync + 'static {
     async fn reset_for_remediate(&self, id: &str) -> Result<u64, ApiError>;
     async fn try_rewind(&self, id: &str, target_gate: &str) -> Result<u64, ApiError>;
     async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError>;
+    /// 重试续跑：抢救上次会话 id（reset_for_retry 会把 session_id 置 NULL，本列保留供 spawn 读尾部）
+    async fn set_last_session(&self, id: &str, session_id: &str) -> Result<(), ApiError>;
     async fn set_base_head(&self, id: &str, head: &str) -> Result<(), ApiError>;
     async fn set_result(&self, id: &str, result_json: &str) -> Result<(), ApiError>;
 }
@@ -83,6 +87,15 @@ pub trait ApprovalStore: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait SessionAttribution: Send + Sync + 'static {
     async fn set_module_id(&self, session_id: &str, module_id: &str) -> Result<(), ApiError>;
+}
+
+/// 会话输出读取端口（重试续跑）：读上次会话输出尾部，非破坏性——
+/// 不取内存捕获缓冲（take_output 消费式，且跨重启即失），走输出行持久层。
+#[async_trait::async_trait]
+pub trait SessionOutputTail: Send + Sync + 'static {
+    /// 会话输出尾部（stdout+stderr 按 seq 序的最后 max_lines 行，换行拼接）。
+    /// 无输出返回空串（调用方按原样重试，幂等回退）。
+    async fn tail(&self, session_id: &str, max_lines: i64) -> Result<String, ApiError>;
 }
 
 /// 槽位 agent 解析端口（settings 优先解析链在组合根侧适配；返回既有 ResolvedAgent，零新面）。
@@ -297,6 +310,11 @@ impl TaskStore for InMemoryTaskStore {
 
     async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
         self.update_plain(id, |r| r.session_id = Some(session_id.to_string()));
+        Ok(())
+    }
+
+    async fn set_last_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
+        self.update_plain(id, |r| r.last_session_id = Some(session_id.to_string()));
         Ok(())
     }
 

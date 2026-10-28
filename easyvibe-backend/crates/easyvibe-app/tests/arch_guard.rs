@@ -134,6 +134,7 @@ const TASK_ENGINE_TEST_EXEMPT: &[&str] = &[
     "src/task_exec/tests_gates.rs",
     "src/task_exec/tests_harness.rs",
     "src/task_exec/tests_prompt.rs",
+    "src/task_exec/tests_resume.rs",
 ];
 
 /// 豁免集 `easyvibe_db` 出现次数预算（棘轮：只降不升）。
@@ -424,7 +425,8 @@ const ASSEMBLY_REVERSE: &str = "crate::assembly";
 const DB_DIRECT_LITERAL: &str = "easyvibe_db::";
 
 /// 焦点面 `easyvibe_db::` 出现**总处数**（守恒律：丢行 / 重复搬 / 新写直连即红）。
-const DB_DIRECT_TOTAL: usize = 91;
+/// 重试续跑：session_output.rs 新适配（+2）+ task_engine.rs set_last_session 透传（+1）→ 91 → 94。
+const DB_DIRECT_TOTAL: usize = 94;
 
 /// 焦点面**单文件最大**直连数（双边全等：登记值必须 == 实测最大值，不是 `<=`）。
 /// c-arch-16 R7：`task_engine.rs` 按 4 端口域拆分后，单文件最大 22 → **15**（`conversation.rs` 15
@@ -433,7 +435,8 @@ const DB_DIRECT_FOCUS_MAX: usize = 15;
 
 /// 焦点面**有直连的落点文件数**（双边全等）。
 /// c-arch-16 R7：db_ports 拆 4（10 → 13 文件）。登记 13（13 为本次登记值，只允许在拆分方向变化）。
-const DB_DIRECT_FOCUS_FILES_MAX: usize = 13;
+/// 重试续跑端口适配：新增 session_output.rs（+1 落点文件）→ 14。
+const DB_DIRECT_FOCUS_FILES_MAX: usize = 14;
 
 /// c-arch-10 R4：service/** 去注释后零 `easyvibe_db`、零具体仓储类型名。
 #[test]
@@ -573,6 +576,8 @@ const DB_PORTS_DOMAIN_OWNERSHIP: &[(&str, &[&str])] = &[
     ("task_engine_approval.rs", &["ApprovalRepository", "ApprovalRow", "SqliteApprovalRepository"]),
     ("session_attribution.rs", &["AgentSessionRepo"]),
     ("agent_slot.rs", &["SqliteSettingsRepository"]),
+    // 重试续跑（B 案上下文接续）：读上次会话输出尾部（非破坏性）。
+    ("session_output.rs", &["SessionOutputRepo"]),
 ];
 
 /// 抓取源码中 `easyvibe_db::<符号>` 的符号名（去重升序）。

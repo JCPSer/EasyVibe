@@ -26,6 +26,7 @@ use super::*;
             updated_at: "1".into(),
             origin_task_id: None,
             successor_task_id: None,
+            last_session_id: None,
         }
     }
 

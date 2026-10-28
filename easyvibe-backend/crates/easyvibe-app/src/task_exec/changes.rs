@@ -163,6 +163,20 @@ pub(crate) async fn base_head_from_task(task_repo: &dyn TaskStore, task_id: &str
     task_repo.get(task_id).await.ok().flatten().and_then(|t| t.base_head)
 }
 
+/// 重试续跑（B 案上下文接续）接续块：任务带 last_session_id（retry 抢救的上次会话）时，
+/// 从输出行持久层非破坏性读尾部（不用 take_output——消费式领取且跨重启即失）；
+/// 未注入端口/空输出/读失败 = 空串（prompt 原样，幂等回退）。
+pub async fn resume_tail_block(outputs: Option<&dyn SessionOutputTail>, task: &TaskRecord) -> String {
+    let (Some(last_sid), Some(outputs)) = (task.last_session_id.as_deref(), outputs) else { return String::new() };
+    match outputs.tail(last_sid, RESUME_TAIL_LINES as i64).await {
+        Ok(tail) => resume_block(&tail),
+        Err(e) => {
+            warn!("[task-exec] 任务 {} 续跑接续块读取失败（按原样重试）: {e}", task.id);
+            String::new()
+        }
+    }
+}
+
 /// M4-1 终态采集：stdout 的 RESULT 行 + git 变更摘要 → `.easyvibe/development_docs/` 归档
 /// （§9 #2：git 可见、随 PR 评审）→ tasks.result JSON（diff 关审批的展示原料）。
 /// 两者皆无（agent 无输出且非 git 仓库）返回 None。

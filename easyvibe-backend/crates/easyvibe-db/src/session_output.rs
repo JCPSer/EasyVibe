@@ -72,6 +72,20 @@ impl SessionOutputRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
+    /// 重试续跑原料：会话输出尾部（stdout+stderr 按 seq 序的最后 limit 行，还原升序）。
+    /// 非破坏性只读——与 take_output（消费式领取内存缓冲）不同，跨重启可用。
+    pub async fn fetch_tail(&self, session_id: &str, limit: i64) -> Result<Vec<SessionOutputRow>, ApiError> {
+        let rows = sqlx::query_as::<_, SessionOutputRowSql>(
+            "SELECT session_id, seq, ts, stream, line FROM session_outputs WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+        )
+        .bind(session_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(rows.into_iter().rev().map(Into::into).collect())
+    }
+
     /// 容量策略：每会话只留最近 keep 行（终态 finalize 时调用）
     pub async fn prune_session(&self, session_id: &str, keep: i64) -> Result<u64, ApiError> {
         let res = sqlx::query(
@@ -113,5 +127,22 @@ mod tests {
         let deleted = repo.prune_session("s1", 2).await.unwrap();
         assert_eq!(deleted, 3);
         assert_eq!(repo.fetch_after("s1", 0, 100).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn session_outputs_fetch_tail_is_non_destructive() {
+        // 重试续跑原料：尾部按 seq 升序还原；只读不删（同一会话可反复取）
+        let db = Database::connect_memory().await.unwrap();
+        let repo = SessionOutputRepo::new(db.pool().clone());
+        let mk = |seq: i64| SessionOutputRow {
+            session_id: "s1".into(), seq, ts: "2026-10-28T08:00:00Z".into(),
+            stream: "stdout".into(), line: format!("line-{seq}"),
+        };
+        repo.append_batch(&(1..=5).map(mk).collect::<Vec<_>>()).await.unwrap();
+        let tail = repo.fetch_tail("s1", 2).await.unwrap();
+        assert_eq!(tail.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![4, 5], "尾部升序还原");
+        assert_eq!(tail[0].line, "line-4");
+        assert_eq!(repo.fetch_after("s1", 0, 100).await.unwrap().len(), 5, "取尾部不得删行");
+        assert!(repo.fetch_tail("ghost", 10).await.unwrap().is_empty(), "无输出会话 = 空（幂等回退）");
     }
 }

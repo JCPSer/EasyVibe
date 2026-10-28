@@ -617,6 +617,7 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::CompositionRoot, "db_ports/task_engine.rs", "c-arch-16 R7：按端口域拆分…（TaskStore → TaskRepository/TaskRow/SqliteTaskRepository，单域）"),
     (SrcClass::CompositionRoot, "db_ports/task_engine_approval.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（ApprovalStore → ApprovalRepository/ApprovalRow/SqliteApprovalRepository；纯搬家零语义改动）"),
     (SrcClass::CompositionRoot, "db_ports/session_attribution.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（SessionAttribution → AgentSessionRepo；纯搬家零语义改动）"),
+    (SrcClass::CompositionRoot, "db_ports/session_output.rs", "重试续跑（B 案上下文接续）：SessionOutputTail → SessionOutputRepo（上次会话输出尾部非破坏性读取）"),
     (SrcClass::CompositionRoot, "db_ports/agent_slot.rs", "c-arch-16 R7：task_engine.rs 拆分的单端口域文件（AgentSlotResolver → SqliteSettingsRepository；另引 easyvibe_ai_agent::agent_conf，非 easyvibe_db 面）"),
     (SrcClass::CompositionRoot, "db_ports/task.rs", "c-arch-13：按端口域拆分…（TaskPort）"),
     (SrcClass::CompositionRoot, "db_ports/settings.rs", "c-arch-13：按端口域拆分…（SettingsPort）"),
@@ -651,6 +652,7 @@ const APP_SRC_OWNERSHIP: &[(SrcClass, &str, &str)] = &[
     (SrcClass::TaskEngineSlice, "task_exec/tests_gates.rs", "切片内按域拆分的集成级夹具"),
     (SrcClass::TaskEngineSlice, "task_exec/tests_harness.rs", "切片内按域拆分的集成级夹具"),
     (SrcClass::TaskEngineSlice, "task_exec/tests_prompt.rs", "切片内按域拆分的集成级夹具"),
+    (SrcClass::TaskEngineSlice, "task_exec/tests_resume.rs", "切片内按域拆分的集成级夹具（重试续跑）"),
     // —— 测试夹具 ——
     (SrcClass::TestFixture, "test_support.rs", "命题未提及：跨文件共享测试夹具，仅 test target 编译"),
     (SrcClass::TestFixture, "tests_a.rs", "命题未提及：按域拆分的集成级夹具"),
@@ -677,10 +679,11 @@ const ASSEMBLY_FROZEN_FILES: &[&str] = &[
 /// c-arch-13：组合根适配器族文件集（显式冻结；磁盘 `src/db_ports/*.rs` 必须与之全等）。
 /// c-arch-16 R7：`task_engine.rs` 按端口域拆 4 ⇒ 10 → 13（`task_engine.rs` 保留，新增
 /// `task_engine_approval.rs` / `session_attribution.rs` / `agent_slot.rs`）。
+/// 重试续跑：新增 `session_output.rs`（SessionOutputTail 适配）⇒ 13 → 14。
 const DB_PORTS_FROZEN_FILES: &[&str] = &[
     "mod.rs", "dto.rs", "task_engine.rs", "task_engine_approval.rs", "session_attribution.rs",
-    "agent_slot.rs", "task.rs", "settings.rs", "approval.rs", "conversation.rs", "health.rs",
-    "event.rs", "repo.rs",
+    "agent_slot.rs", "session_output.rs", "task.rs", "settings.rs", "approval.rs", "conversation.rs",
+    "health.rs", "event.rs", "repo.rs",
 ];
 
 /// 顶层文件集（由归属表派生：非 task-engine 切片、非装配格项——后两者按目录单独登记）。

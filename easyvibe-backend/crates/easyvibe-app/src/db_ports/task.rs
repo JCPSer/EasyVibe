@@ -43,7 +43,7 @@ impl TaskPort for easyvibe_db::SqliteTaskRepository {
             completion_tokens: t.completion_tokens, result: t.result.clone(), base_head: t.base_head.clone(),
             created_at: t.created_at.clone(), updated_at: t.updated_at.clone(),
             conversation_id: t.conversation_id.clone(), origin_task_id: t.origin_task_id.clone(),
-            successor_task_id: t.successor_task_id.clone(),
+            successor_task_id: t.successor_task_id.clone(), last_session_id: None,
         };
         easyvibe_db::TaskRepository::create(self, &row).await
     }

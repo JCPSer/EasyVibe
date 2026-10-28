@@ -78,7 +78,7 @@ use tower::ServiceExt;
             status: "done".into(), trust: "manual".into(), error: None, session_id: None, gate: None,
             prompt_tokens: None, completion_tokens: None, result: None, base_head: None,
             created_at: "1".into(), updated_at: "1".into(), conversation_id: None,
-            origin_task_id: None, successor_task_id: None,
+            origin_task_id: None, successor_task_id: None, last_session_id: None,
         }).await.unwrap();
         let conv = state.conversation_repo.get_or_create(&repo).await.unwrap();
         state.conversation_repo.append_message(&conv.id, "user", "hi", 0).await.unwrap();

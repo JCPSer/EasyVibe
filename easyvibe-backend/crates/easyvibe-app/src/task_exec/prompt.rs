@@ -37,6 +37,42 @@ pub(crate) fn custom_block(c: &Option<String>) -> String {
     }
 }
 
+// ---------------------------------------------------------------- 重试续跑（B 案上下文接续）
+//
+// 任务会话因网络等原因中断后就地重试：新起一个 agent 会话，prompt = 原 prompt + 追加
+// 上次会话输出尾部接续块（CLI 无关通用——拿不到 claude session id，无 --resume 能力）。
+// 纯注入素材，固定中文，不做 i18n。
+
+/// 接续块行数/字符上限：150 行或 8k 字符取更短者——尾部只是接续线索，不搬全量历史
+/// （原会话输出可能数万行/1MB 级捕获缓冲，全量注入会挤占 agent 上下文预算）。
+pub(crate) const RESUME_TAIL_LINES: usize = 150;
+pub(crate) const RESUME_TAIL_CHARS: usize = 8 * 1024;
+
+/// 输出尾部裁剪：先取最后 max_lines 行，再按尾部 max_chars 字符截断（保尾丢头——
+/// 最近的进展才是续跑线索）；输出为空返回空串。
+pub(crate) fn tail_of_output(output: &str, max_lines: usize, max_chars: usize) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    let tail_lines = if lines.len() > max_lines { &lines[lines.len() - max_lines..] } else { &lines[..] };
+    let joined = tail_lines.join("\n");
+    let n_chars = joined.chars().count();
+    if n_chars > max_chars {
+        joined.chars().skip(n_chars - max_chars).collect()
+    } else {
+        joined
+    }
+}
+
+/// 续跑接续块：尾部非空 → 固定指令头 + 尾部追加；空输出 → 空串（幂等回退：原样重试，
+/// prompt 与无接续块时逐字节一致）。
+pub(crate) fn resume_block(output_tail: &str) -> String {
+    let tail = tail_of_output(output_tail, RESUME_TAIL_LINES, RESUME_TAIL_CHARS);
+    let tail = tail.trim();
+    if tail.is_empty() {
+        return String::new();
+    }
+    format!("\n\n【上次执行进展（会话因中断停止，请从中断点继续，不要重做已完成工作）】\n{tail}\n")
+}
+
 /// 类型槽选取：新类型槽有内容用新槽，否则回落旧版四阶段共用槽 development（用户裁定 18:10 的兼容语义）
 fn stage_slot<'a>(slot: &'a Option<String>, legacy: &'a Option<String>) -> &'a Option<String> {
     match slot.as_deref().map(str::trim) {

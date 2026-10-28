@@ -190,6 +190,7 @@ async fn build_state(i: BuildInputs) -> AppState {
             Arc::new((*i.agent_args).clone()),
         )),
         Some(i.event_bus.clone()),
+        i.session_output_repo.clone(),
     );
     // M3-5（§11 🟡4）：重启会杀掉 spawn 的 agent（kill_on_drop）——running 任务先标记
     // interrupted（awaiting_approval 等用户决策的任务不受影响）；pending 任务照常重新入队

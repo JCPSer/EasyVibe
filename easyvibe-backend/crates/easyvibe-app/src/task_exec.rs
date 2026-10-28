@@ -47,6 +47,8 @@ pub struct TaskExecutor {
     pub baselines: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>>,
     /// R2 裂缝#3：越界事件出口——auto/supervised 任务无审批关，越界必须主动送达（WS→通知）
     pub events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
+    /// 重试续跑（B 案上下文接续）：读上次会话输出尾部的端口（None = 不注入接续块，原样重试）
+    pub session_outputs: Option<Arc<dyn SessionOutputTail>>,
 }
 
 impl TaskExecutor {
@@ -60,10 +62,10 @@ impl TaskExecutor {
         agent_slots: Arc<dyn AgentSlotResolver>,
         events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
     ) -> Arc<Self> {
-        Self::assemble(tasks, approvals, None, session_manager, map_service, harness, max_parallel, agent_slots, events)
+        Self::assemble(tasks, approvals, None, session_manager, map_service, harness, max_parallel, agent_slots, events, None)
     }
 
-    /// 生产路径：注入会话归属端口（L1 归因写库）
+    /// 生产路径：注入会话归属端口（L1 归因写库）与会话输出读取端口（重试续跑原料）
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_sessions(
         tasks: Arc<dyn TaskStore>,
@@ -75,8 +77,9 @@ impl TaskExecutor {
         max_parallel: usize,
         agent_slots: Arc<dyn AgentSlotResolver>,
         events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
+        session_outputs: Arc<dyn SessionOutputTail>,
     ) -> Arc<Self> {
-        Self::assemble(tasks, approvals, Some(session_attribution), session_manager, map_service, harness, max_parallel, agent_slots, events)
+        Self::assemble(tasks, approvals, Some(session_attribution), session_manager, map_service, harness, max_parallel, agent_slots, events, Some(session_outputs))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -90,6 +93,7 @@ impl TaskExecutor {
         max_parallel: usize,
         agent_slots: Arc<dyn AgentSlotResolver>,
         events: Option<tokio::sync::broadcast::Sender<easyvibe_event_bus::BusEvent>>,
+        session_outputs: Option<Arc<dyn SessionOutputTail>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             tasks,
@@ -101,8 +105,7 @@ impl TaskExecutor {
             agent_slots,
             // Y2 清债：并发上限可配（env/启动配置传入），默认 4 不再焊死
             permits: Arc::new(Semaphore::new(max_parallel.max(1))),
-            baselines: Default::default(),
-            events,
+            baselines: Default::default(), events, session_outputs,
         })
     }
 
@@ -291,6 +294,8 @@ impl TaskExecutor {
         // reset_for_retry 会把 gate 置 NULL，execute() 就够不着阶段感知分支，
         // manual 任务会被打回 plan 关从头评审（进度第二次清零）。
         let preserved_gate = task.gate.clone().filter(|g| g.starts_with("p:"));
+        // 重试续跑（B 案上下文接续）：reset_for_retry 会清 session_id——先抢救进 last_session_id
+        if let Some(sid) = task.session_id.as_deref() { let _ = self.tasks.set_last_session(task_id, sid).await; }
         let n = self.tasks.reset_for_retry(task_id).await?;
         if n == 0 {
             return Err(ApiError::Conflict("该任务刚被并发操作或状态已变化，请刷新后重试".into()));
@@ -614,7 +619,7 @@ impl TaskExecutor {
         // custom：自定义层补充（注入点 #1/#2——阶段 prompt 注 global+development，实施注 global）
         let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
         let custom = self.harness.read().await.custom.clone();
-        let prompt = match phase {
+        let mut prompt = match phase {
             1 => assemble_phase1_prompt(&task, &user, &custom),
             2 => assemble_phase2_prompt(&task, &user, &custom),
             _ => {
@@ -622,6 +627,8 @@ impl TaskExecutor {
                 assemble_task_prompt(&h, &task)
             }
         };
+        // 重试续跑：last_session_id 存在时注入上次会话输出尾部接续块（细节见 resume_tail_block）
+        prompt.push_str(&resume_tail_block(self.session_outputs.as_deref(), &task).await);
         // M1 配置体系：spawn 现读 settings 优先解析链（env 为 fallback）——
         // 配置改动对下一次 spawn 生效，不缓存快照（与 resolve_llm 同一纪律）
         let resolved = self.agent_slots.resolve(Some("task")).await;
@@ -885,10 +892,9 @@ impl TaskExecutor {
     }
 }
 
-#[cfg(test)] mod test_util;
-#[cfg(test)] mod tests_changes;
+#[cfg(test)] mod test_util; #[cfg(test)] mod tests_changes;
 #[cfg(test)] mod tests_contract;
 #[cfg(test)] mod tests_flow;
 #[cfg(test)] mod tests_gates;
 #[cfg(test)] mod tests_harness;
-#[cfg(test)] mod tests_prompt;
+#[cfg(test)] mod tests_prompt; #[cfg(test)] mod tests_resume; // 重试续跑：retry 抢救 + 接续块纯函数

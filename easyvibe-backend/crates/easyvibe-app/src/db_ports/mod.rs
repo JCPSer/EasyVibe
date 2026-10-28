@@ -16,6 +16,7 @@ mod event;
 mod health;
 mod repo;
 mod session_attribution;
+mod session_output;
 mod settings;
 mod task;
 mod task_engine;
@@ -34,6 +35,8 @@ pub(crate) use task::*;
 // 其余域同形、维持 `crate::db_ports::<Port|DTO>` 路径全等语义；无可导出项故显式放行该 lint。
 #[allow(unused_imports)]
 pub(crate) use session_attribution::*;
+#[allow(unused_imports)]
+pub(crate) use session_output::*;
 #[allow(unused_imports)]
 pub(crate) use task_engine::*;
 #[allow(unused_imports)]

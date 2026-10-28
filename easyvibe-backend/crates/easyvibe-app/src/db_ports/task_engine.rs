@@ -31,6 +31,7 @@ fn into_record(r: easyvibe_db::TaskRow) -> TaskRecord {
         conversation_id: r.conversation_id,
         origin_task_id: r.origin_task_id,
         successor_task_id: r.successor_task_id,
+        last_session_id: r.last_session_id,
     }
 }
 
@@ -81,6 +82,10 @@ impl TaskStore for easyvibe_db::SqliteTaskRepository {
 
     async fn set_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
         easyvibe_db::TaskRepository::set_session(self, id, session_id).await
+    }
+
+    async fn set_last_session(&self, id: &str, session_id: &str) -> Result<(), ApiError> {
+        easyvibe_db::TaskRepository::set_last_session(self, id, session_id).await
     }
 
     async fn set_base_head(&self, id: &str, head: &str) -> Result<(), ApiError> {

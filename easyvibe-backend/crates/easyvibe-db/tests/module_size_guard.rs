@@ -39,7 +39,7 @@ const DOMAIN_FILES: [&str; 8] = [
 ];
 
 /// 16 个迁移文件名（逐字冻结；不含 .sql 后缀，便于排序比较）。
-const FROZEN_MIGRATIONS: [&str; 16] = [
+const FROZEN_MIGRATIONS: [&str; 17] = [
     "0001_health_history",
     "0002_settings",
     "0003_tasks",
@@ -56,6 +56,7 @@ const FROZEN_MIGRATIONS: [&str; 16] = [
     "0014_agent_session_module",
     "0015_session_outputs",
     "0016_patrol_concerns_diff",
+    "0017_task_last_session_id",
 ];
 
 #[test]
@@ -119,7 +120,7 @@ fn test_count_is_frozen() {
         .iter()
         .map(|f| read(&format!("{f}.rs")).matches("#[tokio::test]").count())
         .sum();
-    assert_eq!(total, 11, "单元测试数漂移（迁移时可能丢测试，尤其两个 P0 安全网）: {total}");
+    assert_eq!(total, 13, "单元测试数漂移（迁移时可能丢测试，尤其两个 P0 安全网）: {total}");
 }
 
 #[test]
